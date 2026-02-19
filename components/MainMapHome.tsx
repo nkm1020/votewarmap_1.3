@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
+import { SearchIcon } from 'lucide-react';
 import type { RegionVoteMap } from '@/components/KoreaAdminMap';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -162,7 +163,7 @@ export default function MainMapHome() {
   const [selectedOption, setSelectedOption] = useState<'seoul' | 'busan'>(POPULAR_OPTION_A);
   const [voteMessage, setVoteMessage] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
-  const [isVoteCardCollapsed, setIsVoteCardCollapsed] = useState(false);
+  const [isVoteCardCollapsed, setIsVoteCardCollapsed] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isSchoolSearching, setIsSchoolSearching] = useState(false);
   const [schoolResults, setSchoolResults] = useState<SchoolSearchItem[]>([]);
@@ -184,7 +185,9 @@ export default function MainMapHome() {
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
   const [isTopicsLoading, setIsTopicsLoading] = useState(false);
   const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [bottomDockHeight, setBottomDockHeight] = useState(124);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const bottomDockRef = useRef<HTMLDivElement | null>(null);
 
   const { isAuthenticated, isLoading, profile, user, signOut } = useAuth();
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
@@ -358,6 +361,25 @@ export default function MainMapHome() {
       setIsProfileMenuOpen(false);
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    const node = bottomDockRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const updateHeight = () => {
+      const next = Math.max(124, Math.ceil(node.getBoundingClientRect().height));
+      if (next > 0) {
+        setBottomDockHeight(next);
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => updateHeight());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!showProfileModal) {
@@ -598,19 +620,14 @@ export default function MainMapHome() {
 
   return (
     <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
-      <div
-        className="absolute inset-x-0 -bottom-28 top-[18rem] transform-gpu transition-transform will-change-transform"
-        style={{
-          transform: `translateY(${isVoteCardCollapsed ? '-9rem' : '0rem'})`,
-          transitionDuration: `${prefersReducedMotion ? 120 : 520}ms`,
-          transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      >
+      <div className="absolute inset-0">
         <KoreaAdminMap
           statsByCode={mergedMapStats}
           height="100%"
           initialCenter={MAIN_INITIAL_CENTER}
           initialZoom={MAIN_INITIAL_ZOOM}
+          bottomDockHeightPx={bottomDockHeight}
+          toggleClearancePx={18}
           theme="dark"
           showTooltip={false}
           showNavigationControl={false}
@@ -630,43 +647,43 @@ export default function MainMapHome() {
         />
       </div>
 
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(0,0,0,0.9),_rgba(0,0,0,0.36)_40%,_rgba(0,0,0,0.86))]" />
-      <div className="pointer-events-none absolute inset-x-0 top-[13rem] h-[7rem] bg-[linear-gradient(to_bottom,_rgba(0,0,0,0.98),_rgba(0,0,0,0))]" />
-      <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.55),_rgba(4,10,18,0.18)_38%,_rgba(4,10,18,0.74))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
-      <div className="pointer-events-none relative z-10 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(6.1rem+env(safe-area-inset-bottom))] pt-[calc(0.5rem+env(safe-area-inset-top))]">
-        <header className="pointer-events-auto rounded-[24px] border border-white/14 bg-[rgba(26,26,30,0.58)] px-4 pb-4 pt-3 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ff9f0a]">Vote War Map</p>
-              <p className="mt-1 text-[14px] font-semibold text-white/92">대한민국 실시간 투표 지도</p>
+      <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(9.2rem+env(safe-area-inset-bottom))] pt-[calc(0.5rem+env(safe-area-inset-top))]">
+        <header className="pointer-events-auto">
+          <div className="flex items-center gap-2 rounded-[20px] border border-white/20 bg-[rgba(12,18,28,0.72)] px-3 py-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/18 bg-white/10">
+              <SearchIcon className="h-4 w-4 text-white/75" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14px] font-semibold text-white/88">대한민국 실시간 투표 지도</p>
+              <p className="truncate text-[12px] text-white/58">{POPULAR_VOTE_FALLBACK.title}</p>
             </div>
             {isLoading ? (
-              <span className="inline-flex h-10 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/75">
-                확인중
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-semibold text-white/75">
+                ...
               </span>
             ) : isAuthenticated ? (
               <div ref={profileMenuRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setIsProfileMenuOpen((prev) => !prev)}
-                  className="inline-flex h-10 items-center gap-2 rounded-full border border-white/20 bg-white/10 px-2.5 text-[12px] text-white/90 transition hover:bg-white/15"
+                  aria-label="내 계정 메뉴"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white/90 transition hover:bg-white/15"
                 >
                   {profile?.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={profile.avatar_url}
                       alt="프로필"
-                      className="h-7 w-7 rounded-full border border-white/30 object-cover"
+                      className="h-8 w-8 rounded-full border border-white/30 object-cover"
                     />
                   ) : (
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-white/10 text-[10px] font-bold">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/30 bg-white/10 text-[11px] font-bold">
                       {(profile?.full_name ?? user?.email ?? 'U').slice(0, 1).toUpperCase()}
                     </span>
                   )}
-                  <span className="max-w-[110px] truncate pr-0.5 font-semibold">
-                    {profile?.full_name ?? user?.email ?? '사용자'}
-                  </span>
                 </button>
 
                 {isProfileMenuOpen ? (
@@ -687,7 +704,7 @@ export default function MainMapHome() {
             ) : (
               <Link
                 href="/auth"
-                className="inline-flex h-10 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
+                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
               >
                 로그인
               </Link>
@@ -698,10 +715,10 @@ export default function MainMapHome() {
         <motion.section
           layout
           transition={cardLayoutTransition}
-          className={`pointer-events-auto mt-3 overflow-hidden border bg-[rgba(26,26,30,0.62)] shadow-[0_8px_26px_rgba(0,0,0,0.35)] backdrop-blur-2xl ${
+          className={`pointer-events-auto mt-3 shrink-0 overflow-hidden border bg-[rgba(12,18,28,0.78)] shadow-[0_14px_32px_rgba(0,0,0,0.34)] backdrop-blur-2xl ${
             isVoteCardCollapsed
-              ? 'rounded-[22px] border-white/12 p-3'
-              : 'rounded-[28px] border-white/14 p-4'
+              ? 'rounded-[20px] border-white/14 p-3'
+              : 'rounded-[26px] border-white/18 p-4'
           }`}
         >
           <motion.div
@@ -722,13 +739,13 @@ export default function MainMapHome() {
                 </p>
                 <p className="truncate text-[14px] font-semibold text-white/92">{POPULAR_VOTE_FALLBACK.title}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsVoteCardCollapsed(false)}
-                className="inline-flex h-9 items-center rounded-xl border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white hover:bg-white/15"
-              >
-                펼치기
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setIsVoteCardCollapsed(false)}
+                  className="inline-flex h-11 items-center rounded-xl border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white hover:bg-white/15"
+                >
+                  펼치기
+                </button>
             </div>
             <div className="mt-2.5">
               <div className="relative h-2.5 overflow-hidden rounded-full bg-white/14">
@@ -770,7 +787,7 @@ export default function MainMapHome() {
                 <button
                   type="button"
                   onClick={() => setIsVoteCardCollapsed(true)}
-                  className="inline-flex h-8 items-center rounded-lg border border-white/20 bg-white/10 px-2.5 text-[11px] font-semibold text-white/80 hover:bg-white/15"
+                  className="inline-flex h-11 items-center rounded-lg border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white/80 hover:bg-white/15"
                 >
                   최소화
                 </button>
@@ -821,7 +838,7 @@ export default function MainMapHome() {
               <button
                 type="button"
                 onClick={() => setSelectedOption(POPULAR_OPTION_A)}
-                className={`inline-flex h-10 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
+                className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
                   selectedOption === POPULAR_OPTION_A
                     ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffbf88]'
                     : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
@@ -832,7 +849,7 @@ export default function MainMapHome() {
               <button
                 type="button"
                 onClick={() => setSelectedOption(POPULAR_OPTION_B)}
-                className={`inline-flex h-10 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
+                className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
                   selectedOption === POPULAR_OPTION_B
                     ? 'border-[#7fb0ff88] bg-[#2f74ff30] text-[#b8d2ff]'
                     : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
@@ -860,7 +877,7 @@ export default function MainMapHome() {
         </motion.section>
 
         {selectedRegion ? (
-          <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+          <section className="pointer-events-auto mt-3 shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
             <div className="flex items-center justify-between">
               <h4 className="truncate text-[15px] font-semibold text-white">
                 {selectedRegion.name || selectedRegion.code}
@@ -900,21 +917,21 @@ export default function MainMapHome() {
           </section>
         ) : null}
 
-        <div className="mt-auto h-8" />
+        <div className="h-3" />
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20">
-        <div className="pointer-events-auto mx-auto w-full max-w-[430px] px-4 pb-3">
+      <div ref={bottomDockRef} className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
+        <div className="pointer-events-auto mx-auto w-full max-w-[430px] px-4 pb-2">
           <button
             type="button"
             onClick={handleOpenTopicSheet}
-            className="inline-flex h-16 w-full items-center justify-center rounded-full bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_28px_rgba(255,107,0,0.5)] transition active:scale-[0.995] hover:bg-[#ff7c1f]"
+            className="inline-flex h-12 w-full items-center justify-center rounded-[18px] border border-[#ff9f0a77] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(255,107,0,0.42)] transition active:scale-[0.995] hover:bg-[#ff7c1f]"
           >
             다른 주제 투표하기
           </button>
         </div>
 
-        <nav className="pointer-events-auto rounded-t-[28px] border-t border-white/12 bg-[rgba(22,22,26,0.72)] pb-[calc(0.7rem+env(safe-area-inset-bottom))] pt-2.5 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
           <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
             {[
               { id: 'home' as const, label: '홈' },
@@ -926,7 +943,7 @@ export default function MainMapHome() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex h-11 items-center justify-center rounded-2xl text-[16px] font-semibold transition ${
+                className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${
                   activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
                 }`}
               >
@@ -939,7 +956,7 @@ export default function MainMapHome() {
 
       {isTopicSheetOpen ? (
         <div
-          className="fixed inset-0 z-30 flex items-end justify-center bg-black/55 p-4 sm:items-end"
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 p-4 sm:items-end"
           onClick={() => setIsTopicSheetOpen(false)}
         >
           <div
@@ -1002,7 +1019,7 @@ export default function MainMapHome() {
       ) : null}
 
       {showProfileModal ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 p-4 sm:items-center">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
           <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-[20px] font-semibold text-white">최초 투표 정보 입력</h4>

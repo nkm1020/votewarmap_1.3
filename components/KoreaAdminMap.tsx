@@ -44,6 +44,8 @@ export interface KoreaAdminMapProps {
   initialCenter?: [number, number];
   initialZoom?: number;
   zoomThreshold?: number;
+  bottomDockHeightPx?: number;
+  toggleClearancePx?: number;
   colors?: Partial<MapColors>;
   theme?: MapTheme;
   showTooltip?: boolean;
@@ -61,10 +63,10 @@ const DEFAULT_COLORS: MapColors = {
 };
 
 const DARK_THEME_COLORS: MapColors = {
-  a: 'rgba(255, 121, 39, 0.74)',
-  b: 'rgba(72, 145, 255, 0.72)',
-  tie: 'rgba(255, 188, 52, 0.72)',
-  neutral: 'rgba(72, 60, 52, 0.5)',
+  a: 'rgba(255, 128, 52, 0.76)',
+  b: 'rgba(77, 156, 255, 0.76)',
+  tie: 'rgba(255, 203, 99, 0.72)',
+  neutral: 'rgba(26, 43, 60, 0.22)',
 };
 
 const THEME_STYLES = {
@@ -77,11 +79,11 @@ const THEME_STYLES = {
     tooltipSubClass: 'text-slate-300',
   },
   dark: {
-    background: '#17120f',
-    majorBorder: 'rgba(255,255,255,0.24)',
-    minorBorder: 'rgba(255,255,255,0.16)',
-    wrapperClass: 'border-white/10 bg-black/15',
-    tooltipClass: 'border border-white/10 bg-[rgba(24,20,16,0.88)] text-white backdrop-blur-md',
+    background: '#5e8399',
+    majorBorder: 'rgba(201,221,251,0.55)',
+    minorBorder: 'rgba(187,210,244,0.4)',
+    wrapperClass: 'border-white/18 bg-[#5e8399]/35',
+    tooltipClass: 'border border-white/16 bg-[rgba(10,16,24,0.85)] text-white backdrop-blur-md',
     tooltipSubClass: 'text-white/70',
   },
 } as const;
@@ -163,6 +165,8 @@ export default function KoreaAdminMap({
   initialCenter,
   initialZoom,
   zoomThreshold = 8,
+  bottomDockHeightPx = 132,
+  toggleClearancePx = 14,
   colors,
   theme = 'light',
   showTooltip = true,
@@ -173,6 +177,7 @@ export default function KoreaAdminMap({
 }: KoreaAdminMapProps) {
   const defaultCenter: [number, number] = initialCenter ?? [127.8, 36.2];
   const defaultZoom = initialZoom ?? 6.3;
+  const toggleBottomOffsetPx = Math.max(120, bottomDockHeightPx + toggleClearancePx);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const sigunguLoadedRef = useRef(false);
@@ -207,19 +212,53 @@ export default function KoreaAdminMap({
       return;
     }
 
+    const mapStyle: maplibregl.StyleSpecification =
+      theme === 'dark'
+        ? {
+            version: 8,
+            sources: {
+              'carto-dark': {
+                type: 'raster',
+                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'],
+                tileSize: 256,
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+              },
+            },
+            layers: [
+              {
+                id: 'bg',
+                type: 'background',
+                paint: { 'background-color': THEME_STYLES[theme].background },
+              },
+              {
+                id: 'carto-dark',
+                type: 'raster',
+                source: 'carto-dark',
+                paint: {
+                  'raster-opacity': 0.9,
+                  'raster-contrast': 0.08,
+                  'raster-saturation': -0.15,
+                  'raster-brightness-min': 0.06,
+                  'raster-brightness-max': 0.88,
+                },
+              },
+            ],
+          }
+        : {
+            version: 8,
+            sources: {},
+            layers: [
+              {
+                id: 'bg',
+                type: 'background',
+                paint: { 'background-color': THEME_STYLES[theme].background },
+              },
+            ],
+          };
+
     const map = new maplibregl.Map({
       container: mapNodeRef.current,
-      style: {
-        version: 8,
-        sources: {},
-        layers: [
-          {
-            id: 'bg',
-            type: 'background',
-            paint: { 'background-color': THEME_STYLES[theme].background },
-          },
-        ],
-      },
+      style: mapStyle,
       center: initialCenter ?? [127.8, 36.2],
       zoom: initialZoom ?? 6.3,
       minZoom: 5.5,
@@ -243,8 +282,8 @@ export default function KoreaAdminMap({
     };
 
     const themeStyle = THEME_STYLES[theme];
-    const majorOpacity = theme === 'dark' ? 0.8 : 0.74;
-    const minorOpacity = theme === 'dark' ? 0.76 : 0.7;
+    const majorOpacity = theme === 'dark' ? 0.68 : 0.74;
+    const minorOpacity = theme === 'dark' ? 0.62 : 0.7;
 
     const setLayerVisibility = (layerId: string, visible: boolean) => {
       if (!map.getLayer(layerId)) {
@@ -506,7 +545,7 @@ export default function KoreaAdminMap({
         source: 'sido',
         paint: {
           'line-color': themeStyle.majorBorder,
-          'line-width': 1.1,
+          'line-width': theme === 'dark' ? 1.2 : 1.1,
           'line-opacity': 1,
           'line-opacity-transition': {
             duration: LEVEL_TRANSITION_MS,
@@ -537,7 +576,7 @@ export default function KoreaAdminMap({
         layout: { visibility: 'none' },
         paint: {
           'line-color': themeStyle.minorBorder,
-          'line-width': 0.8,
+          'line-width': theme === 'dark' ? 0.95 : 0.8,
           'line-opacity': 0,
           'line-opacity-transition': {
             duration: LEVEL_TRANSITION_MS,
@@ -640,15 +679,16 @@ export default function KoreaAdminMap({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border ${THEME_STYLES[theme].wrapperClass} ${className ?? ''}`}
+      className={`relative z-0 overflow-hidden rounded-2xl border ${THEME_STYLES[theme].wrapperClass} ${className ?? ''}`}
     >
-      <div ref={mapNodeRef} style={{ width: '100%', height }} />
+      <div ref={mapNodeRef} className="relative z-0" style={{ width: '100%', height }} />
       {showRegionLevelToggle ? (
         <motion.div
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.28 }}
-          className="pointer-events-auto absolute right-3 top-1/2 z-20 inline-flex -translate-y-1/2 items-center overflow-hidden rounded-md border border-white/18 bg-[rgba(14,14,18,0.68)] p-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.32)] backdrop-blur-md"
+          className="pointer-events-auto absolute left-3 z-10 inline-flex items-center overflow-hidden rounded-2xl border border-white/24 bg-[rgba(10,16,24,0.7)] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md"
+          style={{ bottom: `calc(env(safe-area-inset-bottom) + ${toggleBottomOffsetPx}px)` }}
           role="radiogroup"
           aria-label="행정구역 레벨 토글"
         >
@@ -662,7 +702,7 @@ export default function KoreaAdminMap({
                 aria-checked={active}
                 aria-label={`${option.label} 보기`}
                 onClick={() => handleSelectLevel(option.value)}
-                className={`relative inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold transition ${
+                className={`relative inline-flex h-11 min-w-[58px] items-center justify-center gap-1 rounded-xl px-2.5 text-[12px] font-semibold transition ${
                   active ? 'text-white' : 'text-white/62 hover:text-white/88'
                 }`}
               >
@@ -670,10 +710,10 @@ export default function KoreaAdminMap({
                   <motion.span
                     layoutId="region-level-option"
                     transition={{ type: 'spring', bounce: 0.16, duration: 0.52 }}
-                    className="absolute inset-0 rounded-md border border-white/28 bg-white/10"
+                    className="absolute inset-0 rounded-xl border border-white/30 bg-white/14"
                   />
                 ) : null}
-                <option.icon className="relative z-10 h-3.5 w-3.5" />
+                <option.icon className="relative z-10 h-4 w-4" />
                 <span className="relative z-10">{option.label}</span>
               </button>
             );

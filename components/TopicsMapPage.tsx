@@ -121,7 +121,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   } | null>(null);
   const [voteMessage, setVoteMessage] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
-  const [isVoteCardCollapsed, setIsVoteCardCollapsed] = useState(false);
+  const [isVoteCardCollapsed, setIsVoteCardCollapsed] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [voteAfterProfile, setVoteAfterProfile] = useState(false);
   const [isSchoolSearching, setIsSchoolSearching] = useState(false);
@@ -132,8 +132,10 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
   const [guestToken, setGuestToken] = useState<string | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
+  const [bottomDockHeight, setBottomDockHeight] = useState(152);
   const statsRequestRef = useRef(0);
   const topicStatsCacheRef = useRef<Record<string, { mapStats: RegionVoteMap; summary: VoteSummary }>>({});
+  const bottomDockRef = useRef<HTMLDivElement | null>(null);
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
   const { isAuthenticated, isLoading, profile, signOut } = useAuth();
@@ -411,6 +413,25 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   }, [profile?.birth_year, profile?.gender]);
 
   useEffect(() => {
+    const node = bottomDockRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const updateHeight = () => {
+      const next = Math.max(152, Math.ceil(node.getBoundingClientRect().height));
+      if (next > 0) {
+        setBottomDockHeight(next);
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => updateHeight());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated || !activeTopicId) {
       setGuestHasVoted(false);
       return;
@@ -593,20 +614,15 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
 
   return (
     <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
-      <div
-        className="absolute inset-x-0 -bottom-28 top-[18rem] transform-gpu transition-transform will-change-transform"
-        style={{
-          transform: `translateY(${isVoteCardCollapsed ? '-9rem' : '0rem'})`,
-          transitionDuration: `${prefersReducedMotion ? 120 : 520}ms`,
-          transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      >
+      <div className="absolute inset-0">
         <KoreaAdminMap
           key={`${activeTopicId ?? 'topics-map-empty'}-${mapStatsSignature}`}
           statsByCode={mapStats}
           height="100%"
           initialCenter={TOPICS_MAP_INITIAL_CENTER}
           initialZoom={6}
+          bottomDockHeightPx={bottomDockHeight}
+          toggleClearancePx={22}
           theme="dark"
           showNavigationControl={false}
           showTooltip={false}
@@ -626,11 +642,10 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
         />
       </div>
 
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(0,0,0,0.9),_rgba(0,0,0,0.36)_40%,_rgba(0,0,0,0.86))]" />
-      <div className="pointer-events-none absolute inset-x-0 top-[13rem] h-[7rem] bg-[linear-gradient(to_bottom,_rgba(0,0,0,0.98),_rgba(0,0,0,0))]" />
-      <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.55),_rgba(4,10,18,0.18)_38%,_rgba(4,10,18,0.74))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
-      <div className="pointer-events-none relative z-10 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(6.3rem+env(safe-area-inset-bottom))] pt-[calc(0.7rem+env(safe-area-inset-top))]">
+      <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(8.2rem+env(safe-area-inset-bottom))] pt-[calc(0.7rem+env(safe-area-inset-top))]">
         <header className="pointer-events-auto rounded-[24px] border border-white/14 bg-[rgba(26,26,30,0.58)] px-4 pb-4 pt-3 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -638,21 +653,21 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
               <p className="mt-1 text-[14px] font-semibold text-white/92">선택 주제 투표 지도</p>
             </div>
             {isLoading ? (
-              <span className="inline-flex h-10 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/75">
+              <span className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/75">
                 확인중
               </span>
             ) : isAuthenticated ? (
               <button
                 type="button"
                 onClick={() => void signOut()}
-                className="inline-flex h-10 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/85 hover:bg-white/15"
+                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/85 hover:bg-white/15"
               >
                 로그아웃
               </button>
             ) : (
               <Link
                 href="/auth"
-                className="inline-flex h-10 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
+                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
               >
                 로그인
               </Link>
@@ -706,10 +721,12 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
               {topicsError ? <p className="mt-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
             </section>
 
+            <div className="flex-1" />
+
             <motion.section
               layout
               transition={cardLayoutTransition}
-              className={`pointer-events-auto mt-3 overflow-hidden border bg-[rgba(26,26,30,0.62)] shadow-[0_8px_26px_rgba(0,0,0,0.35)] backdrop-blur-2xl ${
+              className={`pointer-events-auto mt-3 shrink-0 overflow-hidden border bg-[rgba(26,26,30,0.62)] shadow-[0_8px_26px_rgba(0,0,0,0.35)] backdrop-blur-2xl ${
                 isVoteCardCollapsed
                   ? 'rounded-[22px] border-white/12 p-3'
                   : 'rounded-[28px] border-white/14 p-4'
@@ -734,7 +751,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
                   <button
                     type="button"
                     onClick={() => setIsVoteCardCollapsed(false)}
-                    className="inline-flex h-9 items-center rounded-xl border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white hover:bg-white/15"
+                    className="inline-flex h-11 items-center rounded-xl border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white hover:bg-white/15"
                   >
                     펼치기
                   </button>
@@ -769,7 +786,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
                   <button
                     type="button"
                     onClick={() => setIsVoteCardCollapsed(true)}
-                    className="inline-flex h-8 items-center rounded-lg border border-white/20 bg-white/10 px-2.5 text-[11px] font-semibold text-white/80 hover:bg-white/15"
+                    className="inline-flex h-11 items-center rounded-lg border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white/80 hover:bg-white/15"
                   >
                     최소화
                   </button>
@@ -814,7 +831,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
                     type="button"
                     onClick={() => optionA && setSelectedOptionKey(optionA.key)}
                     disabled={!optionA}
-                    className={`inline-flex h-10 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
+                    className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
                       selectedOptionKey === optionA?.key
                         ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffbf88]'
                         : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
@@ -826,7 +843,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
                     type="button"
                     onClick={() => optionB && setSelectedOptionKey(optionB.key)}
                     disabled={!optionB}
-                    className={`inline-flex h-10 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
+                    className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
                       selectedOptionKey === optionB?.key
                         ? 'border-[#7fb0ff88] bg-[#2f74ff30] text-[#b8d2ff]'
                         : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
@@ -854,7 +871,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
             </motion.section>
 
             {selectedRegion ? (
-              <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+              <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
                 <div className="flex items-center justify-between">
                   <h4 className="truncate text-[15px] font-semibold text-white">
                     {selectedRegion.name || selectedRegion.code}
@@ -894,16 +911,16 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
               </section>
             ) : null}
 
-            <div className="mt-auto h-8" />
+            <div className="h-3" />
           </>
         )}
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20">
+      <div ref={bottomDockRef} className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
         <div className="pointer-events-auto mx-auto w-full max-w-[430px] px-4 pb-[calc(0.8rem+env(safe-area-inset-bottom))]">
           <Link
             href="/"
-            className="inline-flex h-16 w-full items-center justify-center rounded-full border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_28px_rgba(255,107,0,0.5)] transition active:scale-[0.995] hover:bg-[#ff7c1f]"
+            className="inline-flex h-16 w-full items-center justify-center rounded-full border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_28px_rgba(255,107,0,0.5)] transition active:scale-[0.995] hover:bg-[#ff7c1f] [@media(max-height:700px)]:h-14"
           >
             주제 다시 고르기
           </Link>
