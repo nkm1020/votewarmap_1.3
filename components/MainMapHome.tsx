@@ -181,9 +181,9 @@ export default function MainMapHome() {
     level: 'sido' | 'sigungu';
   } | null>(null);
   const [isTopicSheetOpen, setIsTopicSheetOpen] = useState(false);
-  const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
+  const [availableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
-  const [isTopicsLoading, setIsTopicsLoading] = useState(false);
+  const [isTopicsLoading] = useState(false);
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [bottomDockHeight, setBottomDockHeight] = useState(124);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
@@ -568,36 +568,6 @@ export default function MainMapHome() {
     }
   }, [savePendingProfile, submitVote, voteAfterProfile]);
 
-  const loadAvailableTopics = useCallback(async () => {
-    if (isTopicsLoading) {
-      return;
-    }
-
-    setIsTopicsLoading(true);
-    setTopicsError(null);
-    try {
-      const response = await fetch('/api/votes/topics?status=LIVE', { cache: 'no-store' });
-      const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
-      if (!response.ok) {
-        setTopicsError(json.error ?? '주제 목록을 불러오지 못했습니다.');
-        return;
-      }
-
-      setAvailableTopics(json.topics ?? []);
-    } catch {
-      setTopicsError('주제 목록을 불러오지 못했습니다.');
-    } finally {
-      setIsTopicsLoading(false);
-    }
-  }, [isTopicsLoading]);
-
-  const handleOpenTopicSheet = useCallback(() => {
-    setIsTopicSheetOpen(true);
-    if (availableTopics.length === 0) {
-      void loadAvailableTopics();
-    }
-  }, [availableTopics.length, loadAvailableTopics]);
-
   const handleTopicTagsChange = useCallback((topics: VoteTopic[]) => {
     if (topics.length > TOPIC_SELECTION_LIMIT) {
       setTopicsError(`주제는 최대 ${TOPIC_SELECTION_LIMIT}개까지 선택할 수 있습니다.`);
@@ -744,7 +714,7 @@ export default function MainMapHome() {
                   onClick={() => setIsVoteCardCollapsed(false)}
                   className="inline-flex h-11 items-center rounded-xl border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white hover:bg-white/15"
                 >
-                  펼치기
+                  투표하기
                 </button>
             </div>
             <div className="mt-2.5">
@@ -921,16 +891,6 @@ export default function MainMapHome() {
       </div>
 
       <div ref={bottomDockRef} className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <div className="pointer-events-auto mx-auto w-full max-w-[430px] px-4 pb-2">
-          <button
-            type="button"
-            onClick={handleOpenTopicSheet}
-            className="inline-flex h-12 w-full items-center justify-center rounded-[18px] border border-[#ff9f0a77] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(255,107,0,0.42)] transition active:scale-[0.995] hover:bg-[#ff7c1f]"
-          >
-            다른 주제 투표하기
-          </button>
-        </div>
-
         <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
           <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
             {[
@@ -950,6 +910,24 @@ export default function MainMapHome() {
                 {tab.label}
               </button>
             ))}
+          </div>
+          <div className="mx-auto mt-2 max-w-[430px] px-3">
+            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
+                  광고
+                </span>
+                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
+                  스폰서 배너 영역입니다.
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
+                >
+                  자세히
+                </button>
+              </div>
+            </section>
           </div>
         </nav>
       </div>
