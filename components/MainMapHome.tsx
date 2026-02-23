@@ -1,12 +1,10 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent, type WheelEvent } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ActivityIcon, ChevronDownIcon, ChevronUpIcon, CircleCheckIcon, MapPinIcon } from 'lucide-react';
 import type { MapPointMarker, RegionVoteMap } from '@/components/KoreaAdminMap';
+import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
@@ -17,6 +15,7 @@ import {
 } from '@/lib/vote/client-storage';
 import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
+import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
 import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
 import { TagSelector } from '@/components/ui/tag-selector';
 
@@ -196,7 +195,6 @@ function normalizeBinaryGender(value: Gender | null | undefined): Gender {
 
 export default function MainMapHome() {
   const router = useRouter();
-  const prefersReducedMotion = useReducedMotion();
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('home');
   const [mapStats, setMapStats] = useState<RegionVoteMap>({});
   const [topSchoolMarkers, setTopSchoolMarkers] = useState<MapPointMarker[]>([]);
@@ -225,7 +223,6 @@ export default function MainMapHome() {
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
   const [voteAfterProfile, setVoteAfterProfile] = useState(false);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<{
     code: string;
     name: string;
@@ -239,7 +236,6 @@ export default function MainMapHome() {
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [bottomAdHeight, setBottomAdHeight] = useState(0);
   const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
-  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
   const bottomMenuRef = useRef<HTMLDivElement | null>(null);
   const topicSheetTouchStartYRef = useRef<number | null>(null);
@@ -266,17 +262,6 @@ export default function MainMapHome() {
   const featuredOptionBLabel = featuredOptionB?.label ?? '선택지 B';
 
   const mergedMapStats = useMemo(() => mapStats, [mapStats]);
-  const cardEase: [number, number, number, number] = [0.2, 0.65, 0.3, 0.9];
-  const cardTransition = {
-    duration: prefersReducedMotion ? 0.12 : 0.32,
-    ease: cardEase,
-  };
-  const cardLayoutTransition = {
-    layout: {
-      duration: prefersReducedMotion ? 0.12 : 0.35,
-      ease: cardEase,
-    },
-  };
   const selectedRegionStat = useMemo(() => {
     if (!selectedRegion) {
       return null;
@@ -624,27 +609,6 @@ export default function MainMapHome() {
   }, [featuredTopic?.id, loadRegionStats]);
 
   useEffect(() => {
-    if (!isProfileMenuOpen) {
-      return;
-    }
-
-    const onPointerDown = (event: MouseEvent) => {
-      if (!profileMenuRef.current?.contains(event.target as Node)) {
-        setIsProfileMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [isProfileMenuOpen]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setIsProfileMenuOpen(false);
-    }
-  }, [isAuthenticated]);
-
-  useEffect(() => {
     const adNode = bottomDockRef.current;
     const menuNode = bottomMenuRef.current;
     if (!adNode && !menuNode) {
@@ -829,7 +793,8 @@ export default function MainMapHome() {
         }
 
         setVoteMessage('투표가 반영되었습니다.');
-        await loadRegionStats(topicId);
+        router.push(`/results/${topicId}`);
+        return;
       } catch {
         setVoteMessage('투표 처리 중 오류가 발생했습니다.');
       } finally {
@@ -842,10 +807,10 @@ export default function MainMapHome() {
       featuredTopic?.id,
       guestSessionId,
       isAuthenticated,
-      loadRegionStats,
       mapStats,
       profile?.sido_code,
       profile?.sigungu_code,
+      router,
       selectedOption,
       summary.countA,
       summary.countB,
@@ -1078,245 +1043,58 @@ export default function MainMapHome() {
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
       <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(9.2rem+env(safe-area-inset-bottom))] pt-[calc(0.5rem+env(safe-area-inset-top))]">
-        <motion.section
-          layout
-          transition={cardLayoutTransition}
-          className="pointer-events-auto relative w-full shrink-0 overflow-hidden rounded-[30px] border border-white/14 bg-gradient-to-br from-[rgba(10,18,30,0.9)] via-[rgba(8,14,24,0.95)] to-[rgba(6,10,18,0.96)] shadow-[0_26px_52px_rgba(0,0,0,0.45)] backdrop-blur-2xl backdrop-saturate-150"
-        >
-          <header className="flex items-center gap-3 border-b border-white/5 bg-white/5 px-5 py-4">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 shadow-inner">
-              <MapPinIcon className="h-5 w-5 text-[#ff9f0a]" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white/90">대한민국 실시간 논쟁 투표</p>
-              <p className="truncate text-xs font-medium text-white/50">세기의 난제 의견 수렴</p>
-            </div>
-            {isLoading ? (
-              <span className="inline-flex h-9 items-center rounded-full border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80">
-                ...
-              </span>
-            ) : isAuthenticated ? (
-              <div ref={profileMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsProfileMenuOpen((prev) => !prev)}
-                  aria-label="내 계정 메뉴"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/92 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1522]"
-                >
-                  {profile?.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={profile.avatar_url}
-                      alt="프로필"
-                      className="h-7 w-7 rounded-full border border-white/20 object-cover"
-                    />
-                  ) : (
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold">
-                      {(profile?.full_name ?? user?.email ?? 'U').slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                </button>
-
-                {isProfileMenuOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-36 rounded-xl border border-white/15 bg-[rgba(20,20,24,0.94)] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.38)] backdrop-blur-xl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsProfileMenuOpen(false);
-                        void signOut();
-                      }}
-                      className="inline-flex h-9 w-full items-center justify-center rounded-lg text-[13px] font-semibold text-white/85 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7fb0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#141418]"
-                    >
-                      로그아웃
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <Link
-                href="/auth"
-                className="inline-flex h-9 items-center rounded-full border border-white/10 bg-white/5 px-4 text-xs font-semibold text-white/90 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
-              >
-                로그인
-              </Link>
-            )}
-          </header>
-
-          <div className="p-5">
-            <motion.div layout className="mb-6 flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ff9f0a4d] bg-[#ff9f0a1a] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#ffad33]">
-                    <ActivityIcon className="h-3 w-3" />
-                    LIVE
-                  </span>
-                  <span className="text-[11px] font-medium text-white/50">진행중인 투표</span>
-                </div>
-                <h2 className="text-xl font-bold leading-tight text-white/95">
-                  {featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsVoteCardCollapsed((prev) => !prev)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
-              >
-                {isVoteCardCollapsed ? (
-                  <>
-                    참여하기
-                    <ChevronDownIcon className="h-3.5 w-3.5" />
-                  </>
-                ) : (
-                  <>
-                    접기
-                    <ChevronUpIcon className="h-3.5 w-3.5" />
-                  </>
-                )}
-              </button>
-            </motion.div>
-
-            <motion.div layout className="mb-2">
-              <div className="mb-2 flex items-center justify-between text-sm font-semibold">
-                <span className="flex items-center gap-1.5 text-[#ff8b2f]">
-                  {featuredOptionALabel}
-                  <span className="text-white/90">{summary.hasData ? `${summary.aPercent}%` : '-'}</span>
-                </span>
-                <span className="flex items-center gap-1.5 text-[#6ea6ff]">
-                  <span className="text-white/90">{summary.hasData ? `${summary.bPercent}%` : '-'}</span>
-                  {featuredOptionBLabel}
-                </span>
-              </div>
-              <div className="relative h-3 overflow-hidden rounded-full bg-slate-800 shadow-inner">
-                {summary.hasData ? (
-                  <>
-                    <motion.div
-                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#ff6b00] to-[#ff9f0a]"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${summary.aPercent}%` }}
-                      transition={{ duration: 0.55, ease: 'easeOut' }}
-                    />
-                    <motion.div
-                      className="absolute inset-y-0 right-0 bg-gradient-to-l from-[#2f74ff] to-[#6ea6ff]"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${summary.bPercent}%` }}
-                      transition={{ duration: 0.55, ease: 'easeOut' }}
-                    />
-                  </>
-                ) : (
-                  <div className="absolute inset-0 bg-white/8" />
-                )}
-              </div>
-              <div className="mt-2 text-center">
-                <span className="text-[11px] font-medium text-white/40">
-                  {isStatsLoading
-                    ? '집계 중...'
-                    : `총 ${summary.totalVotes.toLocaleString()}명 참여${
-                        featuredMetrics ? ` · 실시간 ${featuredMetrics.realtimeVotes.toLocaleString()}표` : ''
-                      }`}
-                </span>
-              </div>
-            </motion.div>
-
-            <AnimatePresence initial={false}>
-              {!isVoteCardCollapsed ? (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={cardTransition}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-6 border-t border-white/10 pt-6">
-                    <div className="mb-5 grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (featuredOptionAKey) {
-                            setSelectedOption(featuredOptionAKey);
-                          }
-                        }}
-                        aria-pressed={selectedOption === featuredOptionAKey}
-                        disabled={!featuredOptionAKey}
-                        className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
-                          selectedOption === featuredOptionAKey
-                            ? 'border-[#ff6b00] bg-[#ff6b001a] shadow-[0_0_20px_rgba(255,107,0,0.18)]'
-                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
-                        } disabled:cursor-not-allowed disabled:opacity-60`}
-                      >
-                        {selectedOption === featuredOptionAKey ? (
-                          <span className="absolute right-2 top-2">
-                            <CircleCheckIcon className="h-4 w-4 text-[#ff9f0a]" />
-                          </span>
-                        ) : null}
-                        <span
-                          className={`text-lg font-bold ${
-                            selectedOption === featuredOptionAKey ? 'text-[#ffad33]' : 'text-white/85'
-                          }`}
-                        >
-                          {featuredOptionALabel}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (featuredOptionBKey) {
-                            setSelectedOption(featuredOptionBKey);
-                          }
-                        }}
-                        aria-pressed={selectedOption === featuredOptionBKey}
-                        disabled={!featuredOptionBKey}
-                        className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
-                          selectedOption === featuredOptionBKey
-                            ? 'border-[#2f74ff] bg-[#2f74ff1a] shadow-[0_0_20px_rgba(47,116,255,0.18)]'
-                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
-                        } disabled:cursor-not-allowed disabled:opacity-60`}
-                      >
-                        {selectedOption === featuredOptionBKey ? (
-                          <span className="absolute right-2 top-2">
-                            <CircleCheckIcon className="h-4 w-4 text-[#6ea6ff]" />
-                          </span>
-                        ) : null}
-                        <span
-                          className={`text-lg font-bold ${
-                            selectedOption === featuredOptionBKey ? 'text-[#6ea6ff]' : 'text-white/85'
-                          }`}
-                        >
-                          {featuredOptionBLabel}
-                        </span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => void handleVote()}
-                      disabled={
-                        !selectedOption ||
-                        !featuredTopic ||
-                        !featuredOptionAKey ||
-                        !featuredOptionBKey ||
-                        isFeaturedLoading ||
-                        isSubmittingVote ||
-                        (!isAuthenticated && guestHasVoted) ||
-                        (!isAuthenticated && !guestSessionId)
-                      }
-                      className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(140deg,#ff6b00_0%,#ff8a1f_100%)] text-base font-bold text-white shadow-[0_0_20px_rgba(255,107,0,0.35)] transition-all duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] disabled:cursor-not-allowed disabled:opacity-65"
-                    >
-                      {isSubmittingVote
-                        ? '처리 중...'
-                        : !selectedOption
-                          ? '선택 후 투표하기'
-                          : !isAuthenticated && guestHasVoted
-                            ? '이미 투표 완료'
-                            : '투표 제출하기'}
-                    </button>
-
-                    {voteMessage ? <p className="mt-3 text-center text-xs text-white/85">{voteMessage}</p> : null}
-                  </div>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </div>
-        </motion.section>
+        <LiveVoteCard
+          className="shrink-0"
+          topicId={featuredTopic?.id ?? null}
+          title={featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
+          isExpanded={!isVoteCardCollapsed}
+          onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
+          selectedOptionKey={selectedOption}
+          onSelectOption={setSelectedOption}
+          onSubmitVote={() => void handleVote()}
+          submitDisabled={
+            !selectedOption ||
+            !featuredTopic ||
+            !featuredOptionAKey ||
+            !featuredOptionBKey ||
+            isFeaturedLoading ||
+            isSubmittingVote ||
+            (!isAuthenticated && guestHasVoted) ||
+            (!isAuthenticated && !guestSessionId)
+          }
+          submitLabel={
+            isSubmittingVote
+              ? '처리 중...'
+              : !selectedOption
+                ? '선택 후 투표하기'
+                : !isAuthenticated && guestHasVoted
+                  ? '이미 투표 완료'
+                  : '투표 제출하기'
+          }
+          message={voteMessage}
+          isStatsLoading={isStatsLoading}
+          totalVotes={summary.totalVotes}
+          realtimeVotes={featuredMetrics?.realtimeVotes ?? null}
+          leftOption={{
+            key: featuredOptionAKey,
+            label: featuredOptionALabel,
+            percentage: summary.hasData ? summary.aPercent : null,
+            subtext: getOptionSubtext(featuredTopic?.id, featuredOptionAKey),
+          }}
+          rightOption={{
+            key: featuredOptionBKey,
+            label: featuredOptionBLabel,
+            percentage: summary.hasData ? summary.bPercent : null,
+            subtext: getOptionSubtext(featuredTopic?.id, featuredOptionBKey),
+          }}
+          auth={{
+            isLoading,
+            isAuthenticated,
+            avatarUrl: profile?.avatar_url ?? null,
+            displayInitial: (profile?.full_name ?? profile?.email ?? user?.email ?? 'U').slice(0, 1),
+            onSignOut: signOut,
+          }}
+        />
 
         {selectedRegion ? (
           <section className="pointer-events-auto mt-3 shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">

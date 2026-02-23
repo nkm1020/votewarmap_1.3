@@ -130,6 +130,7 @@ function getDefaultColors(theme: MapTheme): MapColors {
 
 function buildFillExpression(statsByCode: RegionVoteMap, colors: MapColors): ExpressionSpecification {
   const entries: string[] = [];
+  const featureCode: ExpressionSpecification = ['to-string', ['coalesce', ['get', 'code'], ['id']]];
 
   Object.entries(statsByCode).forEach(([code, stat]) => {
     const winner = resolveWinner(stat);
@@ -137,7 +138,11 @@ function buildFillExpression(statsByCode: RegionVoteMap, colors: MapColors): Exp
     entries.push(code, fill);
   });
 
-  const featureCode: ExpressionSpecification = ['to-string', ['coalesce', ['get', 'code'], ['id']]];
+  if (entries.length === 0) {
+    // `match` requires at least one label/output pair, so keep a harmless fallback pair.
+    return ['match', featureCode, '__no_stats__', colors.neutral, colors.neutral] as ExpressionSpecification;
+  }
+
   return ['match', featureCode, ...entries, colors.neutral] as ExpressionSpecification;
 }
 

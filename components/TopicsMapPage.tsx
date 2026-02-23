@@ -1,9 +1,10 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
@@ -13,6 +14,7 @@ import {
   writePendingProfile,
 } from '@/lib/vote/client-storage';
 import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
+import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
 import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
 import type { RegionVoteMap } from './KoreaAdminMap';
 import { TagSelector } from '@/components/ui/tag-selector';
@@ -98,7 +100,7 @@ function normalizeBinaryGender(value: Gender | null | undefined): Gender {
 }
 
 export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
-  const prefersReducedMotion = useReducedMotion();
+  const router = useRouter();
   const [topics, setTopics] = useState<VoteTopic[]>([]);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string>('');
@@ -140,17 +142,6 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const { isAuthenticated, isLoading, profile, signOut } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
-  const cardEase: [number, number, number, number] = [0.2, 0.65, 0.3, 0.9];
-  const cardTransition = {
-    duration: prefersReducedMotion ? 0.12 : 0.3,
-    ease: cardEase,
-  };
-  const cardLayoutTransition = {
-    layout: {
-      duration: prefersReducedMotion ? 0.12 : 0.34,
-      ease: cardEase,
-    },
-  };
 
   const activeTopic = useMemo(
     () => topics.find((topic) => topic.id === activeTopicId) ?? null,
@@ -562,7 +553,8 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
         }
 
         setVoteMessage('투표가 반영되었습니다.');
-        await loadRegionStats(activeTopicId);
+        router.push(`/results/${activeTopicId}`);
+        return;
       } catch {
         setVoteMessage('투표 처리 중 오류가 발생했습니다.');
       } finally {
@@ -573,11 +565,11 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
       activeTopicId,
       guestSessionId,
       isAuthenticated,
-      loadRegionStats,
       optionA,
       optionB,
       profile?.sido_code,
       profile?.sigungu_code,
+      router,
       selectedOptionKey,
     ],
   );
@@ -648,38 +640,6 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
       <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(8.2rem+env(safe-area-inset-bottom))] pt-[calc(0.7rem+env(safe-area-inset-top))]">
-        <header className="pointer-events-auto rounded-[24px] border border-white/14 bg-[rgba(26,26,30,0.58)] px-4 pb-4 pt-3 shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ff9f0a]">Topics Map</p>
-              <p className="mt-1 text-[14px] font-semibold text-white/92">선택 주제 투표 지도</p>
-            </div>
-            {isLoading ? (
-              <span className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/75">
-                확인중
-              </span>
-            ) : isAuthenticated ? (
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white/85 hover:bg-white/15"
-              >
-                로그아웃
-              </button>
-            ) : (
-              <Link
-                href="/auth"
-                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
-              >
-                로그인
-              </Link>
-            )}
-          </div>
-          <p className="mt-2 text-[12px] text-white/62">
-            {activeTopic ? `현재 주제: ${activeTopic.title}` : '주제를 불러오는 중입니다.'}
-          </p>
-        </header>
-
         {isTopicsLoading ? (
           <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
             주제 목록 불러오는 중...
@@ -725,157 +685,51 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
 
             <div className="flex-1" />
 
-            <motion.section
-              layout
-              transition={cardLayoutTransition}
-              className={`pointer-events-auto mt-3 shrink-0 overflow-hidden border bg-[rgba(26,26,30,0.62)] shadow-[0_8px_26px_rgba(0,0,0,0.35)] backdrop-blur-2xl ${
-                isVoteCardCollapsed
-                  ? 'rounded-[22px] border-white/12 p-3'
-                  : 'rounded-[28px] border-white/14 p-4'
-              }`}
-            >
-              <motion.div
-                initial={false}
-                animate={{
-                  opacity: isVoteCardCollapsed ? 1 : 0,
-                  height: isVoteCardCollapsed ? 'auto' : 0,
-                  y: isVoteCardCollapsed ? 0 : prefersReducedMotion ? 0 : -6,
-                }}
-                transition={cardTransition}
-                className="overflow-hidden"
-                style={{ pointerEvents: isVoteCardCollapsed ? 'auto' : 'none' }}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#ff9f0a]">주제 지도</p>
-                    <p className="truncate text-[14px] font-semibold text-white/92">{activeTopic?.title ?? '주제 없음'}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsVoteCardCollapsed(false)}
-                    className="inline-flex h-11 items-center rounded-xl border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white hover:bg-white/15"
-                  >
-                    펼치기
-                  </button>
-                </div>
-                <div className="mt-2.5">
-                  <div className="relative h-2.5 overflow-hidden rounded-full bg-white/14">
-                    {summary.hasData ? (
-                      <>
-                        <div className="absolute inset-y-0 left-0 rounded-r-full bg-[#ff6b00]" style={{ width: `${summary.aPercent}%` }} />
-                        <div className="absolute inset-y-0 right-0 rounded-l-full bg-[#2f74ff]" style={{ width: `${summary.bPercent}%` }} />
-                      </>
-                    ) : (
-                      <div className="absolute inset-0 bg-white/8" />
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-
-              <motion.div
-                initial={false}
-                animate={{
-                  opacity: isVoteCardCollapsed ? 0 : 1,
-                  height: isVoteCardCollapsed ? 0 : 'auto',
-                  y: isVoteCardCollapsed ? (prefersReducedMotion ? 0 : 6) : 0,
-                }}
-                transition={cardTransition}
-                className="overflow-hidden"
-                style={{ pointerEvents: isVoteCardCollapsed ? 'none' : 'auto' }}
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-white">주제별 즉시 투표</h2>
-                  <button
-                    type="button"
-                    onClick={() => setIsVoteCardCollapsed(true)}
-                    className="inline-flex h-11 items-center rounded-lg border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white/80 hover:bg-white/15"
-                  >
-                    최소화
-                  </button>
-                </div>
-
-                <h3 className="text-[20px] font-semibold leading-tight text-white">{activeTopic?.title ?? '주제 없음'}</h3>
-                <p className="mt-1.5 text-[15px] text-white/62">
-                  {isStatsLoading ? '집계 불러오는 중...' : `총 ${summary.totalVotes.toLocaleString()}표 참여`}
-                </p>
-
-                <div className="mt-4 space-y-3 text-[15px]">
-                  <div className="flex items-center justify-between text-white/88">
-                    <span className="font-semibold">{optionA?.label ?? '선택지 A'}</span>
-                    <span className="font-semibold">{optionB?.label ?? '선택지 B'}</span>
-                  </div>
-
-                  <div className="relative h-5 overflow-hidden rounded-full bg-white/14">
-                    {summary.hasData ? (
-                      <>
-                        <div
-                          className="absolute inset-y-0 left-0 rounded-r-full bg-[#ff6b00] shadow-[0_0_18px_rgba(255,107,0,0.45)]"
-                          style={{ width: `${summary.aPercent}%` }}
-                        />
-                        <div
-                          className="absolute inset-y-0 right-0 rounded-l-full bg-[#2f74ff] shadow-[0_0_18px_rgba(47,116,255,0.4)]"
-                          style={{ width: `${summary.bPercent}%` }}
-                        />
-                      </>
-                    ) : (
-                      <div className="absolute inset-0 bg-white/8" />
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-[14px]">
-                    <span className="font-semibold text-[#ffb784]">{summary.hasData ? `${summary.aPercent}%` : '-'}</span>
-                    <span className="font-semibold text-[#9cbcff]">{summary.hasData ? `${summary.bPercent}%` : '-'}</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => optionA && setSelectedOptionKey(optionA.key)}
-                    disabled={!optionA}
-                    className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
-                      selectedOptionKey === optionA?.key
-                        ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffbf88]'
-                        : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
-                    }`}
-                  >
-                    {optionA?.label ?? '선택지 A'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => optionB && setSelectedOptionKey(optionB.key)}
-                    disabled={!optionB}
-                    className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
-                      selectedOptionKey === optionB?.key
-                        ? 'border-[#7fb0ff88] bg-[#2f74ff30] text-[#b8d2ff]'
-                        : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
-                    }`}
-                  >
-                    {optionB?.label ?? '선택지 B'}
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void handleVote()}
-                  disabled={
-                    isSubmittingVote ||
-                    !selectedOptionKey ||
-                    (!isAuthenticated && guestHasVoted) ||
-                    (!isAuthenticated && !guestSessionId)
-                  }
-                  className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-[22px] border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.45)] transition active:scale-[0.99] hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:opacity-65"
-                >
-                  {isSubmittingVote
-                    ? '처리 중...'
-                    : !isAuthenticated && guestHasVoted
-                      ? '이미 투표 완료'
-                      : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`}
-                </button>
-
-                {voteMessage ? <p className="mt-3 text-center text-xs text-white/75">{voteMessage}</p> : null}
-              </motion.div>
-            </motion.section>
+            <LiveVoteCard
+              className="mt-3 shrink-0"
+              topicId={activeTopic?.id ?? null}
+              title={activeTopic?.title ?? '주제 없음'}
+              isExpanded={!isVoteCardCollapsed}
+              onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
+              selectedOptionKey={selectedOptionKey || null}
+              onSelectOption={setSelectedOptionKey}
+              onSubmitVote={() => void handleVote()}
+              submitDisabled={
+                isSubmittingVote ||
+                !selectedOptionKey ||
+                (!isAuthenticated && guestHasVoted) ||
+                (!isAuthenticated && !guestSessionId)
+              }
+              submitLabel={
+                isSubmittingVote
+                  ? '처리 중...'
+                  : !isAuthenticated && guestHasVoted
+                    ? '이미 투표 완료'
+                    : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+              }
+              message={voteMessage}
+              isStatsLoading={isStatsLoading}
+              totalVotes={summary.totalVotes}
+              leftOption={{
+                key: optionA?.key ?? null,
+                label: optionA?.label ?? '선택지 A',
+                percentage: summary.hasData ? summary.aPercent : null,
+                subtext: getOptionSubtext(activeTopic?.id, optionA?.key ?? null),
+              }}
+              rightOption={{
+                key: optionB?.key ?? null,
+                label: optionB?.label ?? '선택지 B',
+                percentage: summary.hasData ? summary.bPercent : null,
+                subtext: getOptionSubtext(activeTopic?.id, optionB?.key ?? null),
+              }}
+              auth={{
+                isLoading,
+                isAuthenticated,
+                avatarUrl: profile?.avatar_url ?? null,
+                displayInitial: (profile?.full_name ?? profile?.email ?? 'U').slice(0, 1),
+                onSignOut: signOut,
+              }}
+            />
 
             {selectedRegion ? (
               <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
