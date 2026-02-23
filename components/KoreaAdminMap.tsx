@@ -68,6 +68,7 @@ export interface KoreaAdminMapProps {
   showRegionLevelToggle?: boolean;
   onRegionClick?: (region: { code: string; name: string; level: RegionLevel }) => void;
   onMapZoomDirectionChange?: (payload: { zoom: number; direction: 'in' | 'out' }) => void;
+  onMapPointerDown?: () => void;
 }
 
 const DEFAULT_COLORS: MapColors = {
@@ -223,6 +224,7 @@ export default function KoreaAdminMap({
   showRegionLevelToggle = false,
   onRegionClick,
   onMapZoomDirectionChange,
+  onMapPointerDown,
 }: KoreaAdminMapProps) {
   const prefersReducedMotion = useReducedMotion();
   const defaultCenter: [number, number] = initialCenter ?? [127.8, 36.2];
@@ -242,6 +244,7 @@ export default function KoreaAdminMap({
   const colorsRef = useRef<MapColors>({ ...getDefaultColors(theme), ...colors });
   const onRegionClickRef = useRef(onRegionClick);
   const onMapZoomDirectionChangeRef = useRef(onMapZoomDirectionChange);
+  const onMapPointerDownRef = useRef(onMapPointerDown);
   const switchTimeoutRef = useRef<number | null>(null);
   const requestLevelSwitchRef = useRef<((level?: RegionLevel) => void) | null>(null);
   const requestMarkerEffectSyncRef = useRef<(() => void) | null>(null);
@@ -257,6 +260,10 @@ export default function KoreaAdminMap({
   useEffect(() => {
     onMapZoomDirectionChangeRef.current = onMapZoomDirectionChange;
   }, [onMapZoomDirectionChange]);
+
+  useEffect(() => {
+    onMapPointerDownRef.current = onMapPointerDown;
+  }, [onMapPointerDown]);
 
   useEffect(() => {
     selectedLevelRef.current = selectedLevel;
@@ -339,6 +346,13 @@ export default function KoreaAdminMap({
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     }
     mapRef.current = map;
+
+    map.on('mousedown', () => {
+      onMapPointerDownRef.current?.();
+    });
+    map.on('touchstart', () => {
+      onMapPointerDownRef.current?.();
+    });
 
     const clearHover = () => {
       const prev = hoverRef.current;

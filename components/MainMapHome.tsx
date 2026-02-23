@@ -3,9 +3,9 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
-import { SearchIcon } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { ActivityIcon, ChevronDownIcon, ChevronUpIcon, CircleCheckIcon, MapPinIcon } from 'lucide-react';
 import type { MapPointMarker, RegionVoteMap } from '@/components/KoreaAdminMap';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -16,23 +16,11 @@ import {
   writePendingProfile,
 } from '@/lib/vote/client-storage';
 import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
-import {
-  LOCAL_STORAGE_KEYS,
-  POPULAR_OPTION_A,
-  POPULAR_OPTION_B,
-  POPULAR_TOPIC_ID,
-} from '@/lib/vote/constants';
+import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
 import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
 import { TagSelector } from '@/components/ui/tag-selector';
 
 const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
-
-const POPULAR_VOTE_FALLBACK = {
-  status: 'LIVE',
-  title: '서울 vs 부산 교통 개편안',
-  teamA: '서울',
-  teamB: '부산',
-};
 
 const MAIN_INITIAL_CENTER: [number, number] = [127.75, 36.18];
 const MAIN_INITIAL_ZOOM = 6.0;
@@ -43,10 +31,71 @@ const MAIN_MAP_COLORS = {
   neutral: 'rgba(42, 34, 30, 0.18)',
 } as const;
 const TOPIC_SELECTION_LIMIT = 10;
+const TOPIC_SHEET_PEEK_HEIGHT = 38;
+const TOPIC_SHEET_SWIPE_THRESHOLD_PX = 42;
 const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
   { value: 'male', label: '남성' },
   { value: 'female', label: '여성' },
 ];
+
+type TopicSheetDetent = 'closed' | 'full';
+type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
+type TopicTab = 'all' | TopicCategory;
+type FeaturedTopicMetrics = {
+  totalVotes: number;
+  realtimeVotes: number;
+  score: number;
+  lastVoteAt: string | null;
+};
+
+type CachedRegionStatePayload = {
+  topicId: string;
+  statsByCode: RegionVoteMap;
+  summary: { totalVotes: number; countA: number; countB: number };
+};
+
+const TOPIC_TAB_META: Array<{ id: TopicTab; label: string }> = [
+  { id: 'all', label: '전체' },
+  { id: 'food', label: '음식&취향' },
+  { id: 'relationship', label: '연애&인간관계' },
+  { id: 'work', label: '직장&일상' },
+  { id: 'imagination', label: '황당한 상상' },
+];
+
+const KO_TOPIC_COLLATOR = new Intl.Collator('ko', {
+  sensitivity: 'base',
+  numeric: true,
+});
+
+const MANUAL_TOPIC_CATEGORY_BY_ID: Record<string, TopicCategory> = {
+  'balance-love-2026': 'relationship',
+  'balance-work-2026': 'work',
+};
+
+function categorizeTopic(topic: VoteTopic): TopicCategory {
+  const manual = MANUAL_TOPIC_CATEGORY_BY_ID[topic.id];
+  if (manual) {
+    return manual;
+  }
+
+  if (topic.id.startsWith('food-')) {
+    return 'food';
+  }
+
+  if (topic.id.startsWith('rel-')) {
+    return 'relationship';
+  }
+
+  if (topic.id.startsWith('work-')) {
+    return 'work';
+  }
+
+  if (topic.id.startsWith('imagination-')) {
+    return 'imagination';
+  }
+
+  return 'imagination';
+}
 
 function normalizeSummary(summary: {
   totalVotes: number;
@@ -79,7 +128,9 @@ function normalizeSummary(summary: {
 function bumpRegionStat(
   prev: RegionVoteMap,
   regionCode: string | null | undefined,
-  optionKey: 'seoul' | 'busan',
+  optionKey: string,
+  optionAKey: string,
+  optionBKey: string,
 ): RegionVoteMap {
   if (!regionCode) {
     return prev;
@@ -87,8 +138,8 @@ function bumpRegionStat(
 
   const next = { ...prev };
   const current = next[regionCode] ?? { total: 0, countA: 0, countB: 0, winner: 'TIE' as const };
-  const countA = (current.countA ?? 0) + (optionKey === POPULAR_OPTION_A ? 1 : 0);
-  const countB = (current.countB ?? 0) + (optionKey === POPULAR_OPTION_B ? 1 : 0);
+  const countA = (current.countA ?? 0) + (optionKey === optionAKey ? 1 : 0);
+  const countB = (current.countB ?? 0) + (optionKey === optionBKey ? 1 : 0);
   const total = (current.total ?? 0) + 1;
   const winner = countA > countB ? 'A' : countB > countA ? 'B' : 'TIE';
 
@@ -96,10 +147,11 @@ function bumpRegionStat(
   return next;
 }
 
-function readCachedRegionState(): {
-  statsByCode: RegionVoteMap;
-  summary: { totalVotes: number; countA: number; countB: number };
-} | null {
+function readCachedRegionState(topicId: string | null): CachedRegionStatePayload | null {
+  if (!topicId) {
+    return null;
+  }
+
   if (typeof window === 'undefined') {
     return null;
   }
@@ -110,15 +162,13 @@ function readCachedRegionState(): {
       return null;
     }
 
-    const parsed = JSON.parse(raw) as {
-      statsByCode?: RegionVoteMap;
-      summary?: { totalVotes: number; countA: number; countB: number };
-    };
-    if (!parsed.statsByCode || !parsed.summary) {
+    const parsed = JSON.parse(raw) as Partial<CachedRegionStatePayload>;
+    if (!parsed.statsByCode || !parsed.summary || parsed.topicId !== topicId) {
       return null;
     }
 
     return {
+      topicId: parsed.topicId,
       statsByCode: parsed.statsByCode,
       summary: parsed.summary,
     };
@@ -127,10 +177,7 @@ function readCachedRegionState(): {
   }
 }
 
-function writeCachedRegionState(payload: {
-  statsByCode: RegionVoteMap;
-  summary: { totalVotes: number; countA: number; countB: number };
-}): void {
+function writeCachedRegionState(payload: CachedRegionStatePayload): void {
   if (typeof window === 'undefined') {
     return;
   }
@@ -161,7 +208,10 @@ export default function MainMapHome() {
     bPercent: 0,
     hasData: false,
   });
-  const [selectedOption, setSelectedOption] = useState<'seoul' | 'busan'>(POPULAR_OPTION_A);
+  const [featuredTopic, setFeaturedTopic] = useState<VoteTopic | null>(null);
+  const [featuredMetrics, setFeaturedMetrics] = useState<FeaturedTopicMetrics | null>(null);
+  const [isFeaturedLoading, setIsFeaturedLoading] = useState(true);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [voteMessage, setVoteMessage] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
   const [isVoteCardCollapsed, setIsVoteCardCollapsed] = useState(true);
@@ -180,18 +230,33 @@ export default function MainMapHome() {
     name: string;
     level: 'sido' | 'sigungu';
   } | null>(null);
-  const [isTopicSheetOpen, setIsTopicSheetOpen] = useState(false);
-  const [availableTopics] = useState<VoteTopic[]>([]);
+  const [topicSheetDetent, setTopicSheetDetent] = useState<TopicSheetDetent>('closed');
+  const [activeTopicTab, setActiveTopicTab] = useState<TopicTab>('all');
+  const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
-  const [isTopicsLoading] = useState(false);
+  const [isTopicsLoading, setIsTopicsLoading] = useState(false);
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [bottomDockHeight, setBottomDockHeight] = useState(124);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
+  const topicSheetTouchStartYRef = useRef<number | null>(null);
+  const topicSheetTouchCurrentYRef = useRef<number | null>(null);
 
   const { isAuthenticated, isLoading, profile, user, signOut } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
+  const featuredOptionA = useMemo(
+    () => featuredTopic?.options.find((option) => option.position === 1) ?? null,
+    [featuredTopic],
+  );
+  const featuredOptionB = useMemo(
+    () => featuredTopic?.options.find((option) => option.position === 2) ?? null,
+    [featuredTopic],
+  );
+  const featuredOptionAKey = featuredOptionA?.key ?? null;
+  const featuredOptionBKey = featuredOptionB?.key ?? null;
+  const featuredOptionALabel = featuredOptionA?.label ?? '선택지 A';
+  const featuredOptionBLabel = featuredOptionB?.label ?? '선택지 B';
 
   const mergedMapStats = useMemo(() => mapStats, [mapStats]);
   const cardEase: [number, number, number, number] = [0.2, 0.65, 0.3, 0.9];
@@ -228,19 +293,180 @@ export default function MainMapHome() {
     return match ? [match] : [];
   }, [gender]);
   const selectedSchoolTag = useMemo(() => (selectedSchool ? [selectedSchool] : []), [selectedSchool]);
-  const selectedTopicTags = useMemo(
-    () => availableTopics.filter((topic) => selectedTopicIds.includes(topic.id)),
-    [availableTopics, selectedTopicIds],
+  const sortedTopics = useMemo(
+    () => [...availableTopics].sort((a, b) => KO_TOPIC_COLLATOR.compare(a.title, b.title)),
+    [availableTopics],
   );
+  const topicsByCategory = useMemo(() => {
+    const grouped: Record<TopicCategory, VoteTopic[]> = {
+      food: [],
+      relationship: [],
+      work: [],
+      imagination: [],
+    };
 
-  const loadRegionStats = useCallback(async () => {
+    sortedTopics.forEach((topic) => {
+      grouped[categorizeTopic(topic)].push(topic);
+    });
+
+    return grouped;
+  }, [sortedTopics]);
+  const filteredTopics = useMemo(() => {
+    if (activeTopicTab === 'all') {
+      return sortedTopics;
+    }
+    return topicsByCategory[activeTopicTab];
+  }, [activeTopicTab, sortedTopics, topicsByCategory]);
+  const selectedTopicTags = useMemo(() => {
+    if (selectedTopicIds.length === 0) {
+      return [];
+    }
+
+    const byId = new Map(sortedTopics.map((topic) => [topic.id, topic]));
+    return selectedTopicIds
+      .map((id) => byId.get(id))
+      .filter((topic): topic is VoteTopic => Boolean(topic));
+  }, [selectedTopicIds, sortedTopics]);
+  const isTopicSheetOpen = topicSheetDetent !== 'closed';
+  const topicSheetTransform = useMemo(() => {
+    if (topicSheetDetent === 'full') {
+      return 'translateY(0)';
+    }
+    return `translateY(calc(100% - (${bottomDockHeight}px + ${TOPIC_SHEET_PEEK_HEIGHT}px)))`;
+  }, [bottomDockHeight, topicSheetDetent]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setIsTopicsLoading(true);
+      setTopicsError(null);
+      try {
+        const response = await fetch('/api/votes/topics?status=LIVE', { cache: 'no-store' });
+        const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
+        if (!response.ok) {
+          if (!cancelled) {
+            setTopicsError(json.error ?? '주제 목록을 불러오지 못했습니다.');
+            setAvailableTopics([]);
+            setSelectedTopicIds([]);
+          }
+          return;
+        }
+
+        const nextTopics = json.topics ?? [];
+        if (cancelled) {
+          return;
+        }
+
+        setAvailableTopics(nextTopics);
+        setSelectedTopicIds((prev) => {
+          const validIds = prev.filter((id) => nextTopics.some((topic) => topic.id === id));
+          if (validIds.length > 0) {
+            return validIds.slice(0, TOPIC_SELECTION_LIMIT);
+          }
+
+          const defaults: string[] = [];
+          nextTopics.forEach((topic) => {
+            if (defaults.length >= Math.min(3, TOPIC_SELECTION_LIMIT)) {
+              return;
+            }
+            if (!defaults.includes(topic.id)) {
+              defaults.push(topic.id);
+            }
+          });
+
+          return defaults;
+        });
+      } catch {
+        if (!cancelled) {
+          setTopicsError('주제 목록을 불러오지 못했습니다.');
+          setAvailableTopics([]);
+          setSelectedTopicIds([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsTopicsLoading(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setIsFeaturedLoading(true);
+      try {
+        const response = await fetch('/api/votes/featured?status=LIVE', { cache: 'no-store' });
+        const json = (await response.json()) as {
+          topic?: VoteTopic | null;
+          metrics?: FeaturedTopicMetrics;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setVoteMessage(json.error ?? '대표 주제를 불러오지 못했습니다.');
+            setFeaturedTopic(null);
+            setFeaturedMetrics(null);
+            setSelectedOption(null);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          const nextTopic = json.topic ?? null;
+          setFeaturedTopic(nextTopic);
+          setFeaturedMetrics(json.metrics ?? null);
+          setSelectedOption((prev) =>
+            prev && nextTopic?.options.some((option) => option.key === prev) ? prev : null,
+          );
+          if (!nextTopic) {
+            setVoteMessage('현재 진행 중인 주제가 없습니다.');
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setFeaturedTopic(null);
+          setFeaturedMetrics(null);
+          setSelectedOption(null);
+          setVoteMessage('대표 주제를 불러오지 못했습니다.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsFeaturedLoading(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadRegionStats = useCallback(async (topicId: string) => {
     setIsStatsLoading(true);
     try {
       const nonce = Date.now();
       const [sidoRes, sigunguRes, topSchoolsRes] = await Promise.allSettled([
-        fetch(`/api/votes/region-stats?topicId=${POPULAR_TOPIC_ID}&level=sido&ts=${nonce}`, { cache: 'no-store' }),
-        fetch(`/api/votes/region-stats?topicId=${POPULAR_TOPIC_ID}&level=sigungu&ts=${nonce}`, { cache: 'no-store' }),
-        fetch(`/api/votes/top-schools-by-region?scope=all&ts=${nonce}`, { cache: 'no-store' }),
+        fetch(`/api/votes/region-stats?topicId=${encodeURIComponent(topicId)}&level=sido&ts=${nonce}`, {
+          cache: 'no-store',
+        }),
+        fetch(`/api/votes/region-stats?topicId=${encodeURIComponent(topicId)}&level=sigungu&ts=${nonce}`, {
+          cache: 'no-store',
+        }),
+        fetch(
+          `/api/votes/top-schools-by-region?scope=topic&topicId=${encodeURIComponent(topicId)}&ts=${nonce}`,
+          { cache: 'no-store' },
+        ),
       ]);
 
       let sidoJson:
@@ -277,6 +503,7 @@ export default function MainMapHome() {
       if (sidoJson?.summary) {
         setSummary(normalizeSummary(sidoJson.summary));
         writeCachedRegionState({
+          topicId,
           statsByCode: nextMapStats,
           summary: sidoJson.summary,
         });
@@ -297,16 +524,21 @@ export default function MainMapHome() {
   }, []);
 
   useEffect(() => {
+    const topicId = featuredTopic?.id;
+    if (!topicId) {
+      return;
+    }
+
     const handleFocus = () => {
-      void loadRegionStats();
+      void loadRegionStats(topicId);
     };
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        void loadRegionStats();
+        void loadRegionStats(topicId);
       }
     };
     const handlePageShow = () => {
-      void loadRegionStats();
+      void loadRegionStats(topicId);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -317,16 +549,38 @@ export default function MainMapHome() {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [loadRegionStats]);
+  }, [featuredTopic?.id, loadRegionStats]);
 
   useEffect(() => {
-    const cachedRegionState = readCachedRegionState();
+    const topicId = featuredTopic?.id ?? null;
+    const emptySummary = normalizeSummary({
+      totalVotes: 0,
+      countA: 0,
+      countB: 0,
+    });
+
+    if (!topicId) {
+      setMapStats({});
+      setTopSchoolMarkers([]);
+      setSummary(emptySummary);
+      setIsStatsLoading(false);
+      return;
+    }
+
+    const cachedRegionState = readCachedRegionState(topicId);
     if (cachedRegionState) {
       setMapStats(cachedRegionState.statsByCode);
       setSummary(normalizeSummary(cachedRegionState.summary));
       setIsStatsLoading(false);
+      return;
     }
 
+    setMapStats({});
+    setTopSchoolMarkers([]);
+    setSummary(emptySummary);
+  }, [featuredTopic?.id]);
+
+  useEffect(() => {
     const storedProfile = readPendingProfile();
     if (storedProfile) {
       setBirthYear(storedProfile.birthYear);
@@ -337,15 +591,26 @@ export default function MainMapHome() {
       setBirthYear(profile.birth_year);
       setGender(normalizeBinaryGender(profile.gender));
     }
-
-    if (readPendingVotes().includes(POPULAR_TOPIC_ID)) {
-      setGuestHasVoted(true);
-    }
   }, [profile?.birth_year, profile?.gender]);
 
   useEffect(() => {
-    void loadRegionStats();
-  }, [loadRegionStats]);
+    const topicId = featuredTopic?.id;
+    if (!topicId) {
+      setGuestHasVoted(false);
+      return;
+    }
+
+    setGuestHasVoted(readPendingVotes().includes(topicId));
+  }, [featuredTopic?.id]);
+
+  useEffect(() => {
+    const topicId = featuredTopic?.id;
+    if (!topicId) {
+      return;
+    }
+
+    void loadRegionStats(topicId);
+  }, [featuredTopic?.id, loadRegionStats]);
 
   useEffect(() => {
     if (!isProfileMenuOpen) {
@@ -434,6 +699,22 @@ export default function MainMapHome() {
     async (profilePayload: VoteProfileInput | null) => {
       setIsSubmittingVote(true);
       setVoteMessage(null);
+      const topicId = featuredTopic?.id ?? null;
+      const optionKey = selectedOption;
+      const optionAKey = featuredOptionAKey;
+      const optionBKey = featuredOptionBKey;
+
+      if (!topicId || !optionAKey || !optionBKey) {
+        setVoteMessage('현재 투표 가능한 주제가 없습니다.');
+        setIsSubmittingVote(false);
+        return;
+      }
+
+      if (!optionKey) {
+        setVoteMessage('먼저 선택지를 선택해 주세요.');
+        setIsSubmittingVote(false);
+        return;
+      }
 
       try {
         if (!isAuthenticated && !guestSessionId) {
@@ -457,8 +738,8 @@ export default function MainMapHome() {
             ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           },
           body: JSON.stringify({
-            topicId: POPULAR_TOPIC_ID,
-            optionKey: selectedOption,
+            topicId,
+            optionKey,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(profilePayload ? { profile: profilePayload } : {}),
           }),
@@ -478,7 +759,7 @@ export default function MainMapHome() {
         }
 
         if (!isAuthenticated) {
-          addPendingVoteTopic(POPULAR_TOPIC_ID);
+          addPendingVoteTopic(topicId);
           setGuestHasVoted(true);
         }
 
@@ -488,19 +769,20 @@ export default function MainMapHome() {
         if (optimisticSidoCode || optimisticSigunguCode) {
           let optimisticMap = mapStats;
           if (optimisticSidoCode) {
-            optimisticMap = bumpRegionStat(optimisticMap, optimisticSidoCode, selectedOption);
+            optimisticMap = bumpRegionStat(optimisticMap, optimisticSidoCode, optionKey, optionAKey, optionBKey);
           }
           if (optimisticSigunguCode) {
-            optimisticMap = bumpRegionStat(optimisticMap, optimisticSigunguCode, selectedOption);
+            optimisticMap = bumpRegionStat(optimisticMap, optimisticSigunguCode, optionKey, optionAKey, optionBKey);
           }
 
           const optimisticSummary = {
             totalVotes: summary.totalVotes + 1,
-            countA: summary.countA + (selectedOption === POPULAR_OPTION_A ? 1 : 0),
-            countB: summary.countB + (selectedOption === POPULAR_OPTION_B ? 1 : 0),
+            countA: summary.countA + (optionKey === optionAKey ? 1 : 0),
+            countB: summary.countB + (optionKey === optionBKey ? 1 : 0),
           };
 
           writeCachedRegionState({
+            topicId,
             statsByCode: optimisticMap,
             summary: optimisticSummary,
           });
@@ -508,10 +790,10 @@ export default function MainMapHome() {
           setMapStats((prev) => {
             let next = prev;
             if (optimisticSidoCode) {
-              next = bumpRegionStat(next, optimisticSidoCode, selectedOption);
+              next = bumpRegionStat(next, optimisticSidoCode, optionKey, optionAKey, optionBKey);
             }
             if (optimisticSigunguCode) {
-              next = bumpRegionStat(next, optimisticSigunguCode, selectedOption);
+              next = bumpRegionStat(next, optimisticSigunguCode, optionKey, optionAKey, optionBKey);
             }
             return next;
           });
@@ -519,14 +801,14 @@ export default function MainMapHome() {
           setSummary((prev) =>
             normalizeSummary({
               totalVotes: prev.totalVotes + 1,
-              countA: prev.countA + (selectedOption === POPULAR_OPTION_A ? 1 : 0),
-              countB: prev.countB + (selectedOption === POPULAR_OPTION_B ? 1 : 0),
+              countA: prev.countA + (optionKey === optionAKey ? 1 : 0),
+              countB: prev.countB + (optionKey === optionBKey ? 1 : 0),
             }),
           );
         }
 
         setVoteMessage('투표가 반영되었습니다.');
-        await loadRegionStats();
+        await loadRegionStats(topicId);
       } catch {
         setVoteMessage('투표 처리 중 오류가 발생했습니다.');
       } finally {
@@ -534,6 +816,9 @@ export default function MainMapHome() {
       }
     },
     [
+      featuredOptionAKey,
+      featuredOptionBKey,
+      featuredTopic?.id,
       guestSessionId,
       isAuthenticated,
       loadRegionStats,
@@ -548,6 +833,18 @@ export default function MainMapHome() {
   );
 
   const handleVote = useCallback(async () => {
+    if (!featuredTopic || !featuredOptionAKey || !featuredOptionBKey) {
+      setVoteMessage('현재 투표 가능한 주제가 없습니다.');
+      setIsVoteCardCollapsed(false);
+      return;
+    }
+
+    if (!selectedOption) {
+      setVoteMessage('먼저 선택지를 선택해 주세요.');
+      setIsVoteCardCollapsed(false);
+      return;
+    }
+
     const payload = savePendingProfile();
     if (payload) {
       await submitVote(payload);
@@ -561,7 +858,16 @@ export default function MainMapHome() {
 
     setVoteAfterProfile(true);
     setShowProfileModal(true);
-  }, [hasServerProfile, isAuthenticated, savePendingProfile, submitVote]);
+  }, [
+    featuredOptionAKey,
+    featuredOptionBKey,
+    featuredTopic,
+    hasServerProfile,
+    isAuthenticated,
+    savePendingProfile,
+    selectedOption,
+    submitVote,
+  ]);
 
   const handleSaveProfileOnly = useCallback(async () => {
     const payload = savePendingProfile();
@@ -579,25 +885,85 @@ export default function MainMapHome() {
     }
   }, [savePendingProfile, submitVote, voteAfterProfile]);
 
-  const handleTopicTagsChange = useCallback((topics: VoteTopic[]) => {
-    if (topics.length > TOPIC_SELECTION_LIMIT) {
-      setTopicsError(`주제는 최대 ${TOPIC_SELECTION_LIMIT}개까지 선택할 수 있습니다.`);
-      return;
-    }
+  const handleTopicToggle = useCallback(
+    (topic: VoteTopic) => {
+      const alreadySelected = selectedTopicIds.includes(topic.id);
+      if (alreadySelected) {
+        setSelectedTopicIds((prev) => prev.filter((id) => id !== topic.id));
+        setTopicsError(null);
+        return;
+      }
 
+      if (selectedTopicIds.length >= TOPIC_SELECTION_LIMIT) {
+        setTopicsError(`주제는 최대 ${TOPIC_SELECTION_LIMIT}개까지 선택할 수 있습니다.`);
+        return;
+      }
+
+      setSelectedTopicIds((prev) => (prev.includes(topic.id) ? prev : [...prev, topic.id]));
+      setTopicsError(null);
+    },
+    [selectedTopicIds],
+  );
+
+  const handleRemoveSelectedTopic = useCallback((topicId: string) => {
+    setSelectedTopicIds((prev) => prev.filter((id) => id !== topicId));
     setTopicsError(null);
-    setSelectedTopicIds(topics.map((topic) => topic.id));
   }, []);
 
   const handleTopicSelectionComplete = useCallback(() => {
     if (selectedTopicIds.length === 0) {
+      setTopicsError('주제를 1개 이상 선택해 주세요.');
       return;
     }
 
+    setTopicsError(null);
     const params = new URLSearchParams({ topics: selectedTopicIds.join(',') });
-    setIsTopicSheetOpen(false);
+    setTopicSheetDetent('closed');
     router.push(`/topics-map?${params.toString()}`);
   }, [router, selectedTopicIds]);
+
+  const handleTopicSheetTouchStart = useCallback((event: TouchEvent<HTMLButtonElement>) => {
+    const y = event.touches[0]?.clientY;
+    if (typeof y !== 'number') {
+      return;
+    }
+
+    topicSheetTouchStartYRef.current = y;
+    topicSheetTouchCurrentYRef.current = y;
+  }, []);
+
+  const handleTopicSheetTouchMove = useCallback((event: TouchEvent<HTMLButtonElement>) => {
+    const y = event.touches[0]?.clientY;
+    if (typeof y !== 'number') {
+      return;
+    }
+    topicSheetTouchCurrentYRef.current = y;
+  }, []);
+
+  const handleTopicSheetTouchEnd = useCallback(() => {
+    const startY = topicSheetTouchStartYRef.current;
+    const currentY = topicSheetTouchCurrentYRef.current;
+    topicSheetTouchStartYRef.current = null;
+    topicSheetTouchCurrentYRef.current = null;
+
+    if (startY === null || currentY === null) {
+      return;
+    }
+
+    const deltaY = currentY - startY;
+    if (deltaY <= -TOPIC_SHEET_SWIPE_THRESHOLD_PX) {
+      setTopicSheetDetent('full');
+      return;
+    }
+
+    if (deltaY >= TOPIC_SHEET_SWIPE_THRESHOLD_PX) {
+      setTopicSheetDetent('closed');
+    }
+  }, []);
+
+  const handleTopicSheetHandleClick = useCallback(() => {
+    setTopicSheetDetent((prev) => (prev === 'closed' ? 'full' : 'closed'));
+  }, []);
 
   return (
     <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
@@ -621,6 +987,9 @@ export default function MainMapHome() {
               setIsVoteCardCollapsed(true);
             }
           }}
+          onMapPointerDown={() => {
+            setTopicSheetDetent('closed');
+          }}
           onRegionClick={(region) =>
             setSelectedRegion((prev) =>
               prev && prev.code === region.code && prev.level === region.level ? null : region,
@@ -634,17 +1003,21 @@ export default function MainMapHome() {
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
       <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(9.2rem+env(safe-area-inset-bottom))] pt-[calc(0.5rem+env(safe-area-inset-top))]">
-        <header className="pointer-events-auto">
-          <div className="flex items-center gap-2 rounded-[20px] border border-white/20 bg-[rgba(12,18,28,0.72)] px-3 py-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/18 bg-white/10">
-              <SearchIcon className="h-4 w-4 text-white/75" />
+        <motion.section
+          layout
+          transition={cardLayoutTransition}
+          className="pointer-events-auto relative w-full shrink-0 overflow-hidden rounded-[30px] border border-white/14 bg-gradient-to-br from-[rgba(10,18,30,0.9)] via-[rgba(8,14,24,0.95)] to-[rgba(6,10,18,0.96)] shadow-[0_26px_52px_rgba(0,0,0,0.45)] backdrop-blur-2xl backdrop-saturate-150"
+        >
+          <header className="flex items-center gap-3 border-b border-white/5 bg-white/5 px-5 py-4">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 shadow-inner">
+              <MapPinIcon className="h-5 w-5 text-[#ff9f0a]" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-white/88">대한민국 실시간 투표 지도</p>
-              <p className="truncate text-[12px] text-white/58">{POPULAR_VOTE_FALLBACK.title}</p>
+              <p className="truncate text-sm font-semibold text-white/90">대한민국 실시간 논쟁 투표</p>
+              <p className="truncate text-xs font-medium text-white/50">세기의 난제 의견 수렴</p>
             </div>
             {isLoading ? (
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-semibold text-white/75">
+              <span className="inline-flex h-9 items-center rounded-full border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80">
                 ...
               </span>
             ) : isAuthenticated ? (
@@ -653,17 +1026,17 @@ export default function MainMapHome() {
                   type="button"
                   onClick={() => setIsProfileMenuOpen((prev) => !prev)}
                   aria-label="내 계정 메뉴"
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white/90 transition hover:bg-white/15"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/92 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1522]"
                 >
                   {profile?.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={profile.avatar_url}
                       alt="프로필"
-                      className="h-8 w-8 rounded-full border border-white/30 object-cover"
+                      className="h-7 w-7 rounded-full border border-white/20 object-cover"
                     />
                   ) : (
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/30 bg-white/10 text-[11px] font-bold">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold">
                       {(profile?.full_name ?? user?.email ?? 'U').slice(0, 1).toUpperCase()}
                     </span>
                   )}
@@ -677,7 +1050,7 @@ export default function MainMapHome() {
                         setIsProfileMenuOpen(false);
                         void signOut();
                       }}
-                      className="inline-flex h-9 w-full items-center justify-center rounded-lg text-[13px] font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
+                      className="inline-flex h-9 w-full items-center justify-center rounded-lg text-[13px] font-semibold text-white/85 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7fb0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#141418]"
                     >
                       로그아웃
                     </button>
@@ -687,180 +1060,187 @@ export default function MainMapHome() {
             ) : (
               <Link
                 href="/auth"
-                className="inline-flex h-11 items-center rounded-full border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white transition hover:bg-white/20"
+                className="inline-flex h-9 items-center rounded-full border border-white/10 bg-white/5 px-4 text-xs font-semibold text-white/90 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
               >
                 로그인
               </Link>
             )}
-          </div>
-        </header>
+          </header>
 
-        <motion.section
-          layout
-          transition={cardLayoutTransition}
-          className={`pointer-events-auto mt-3 shrink-0 overflow-hidden border bg-[rgba(12,18,28,0.78)] shadow-[0_14px_32px_rgba(0,0,0,0.34)] backdrop-blur-2xl ${
-            isVoteCardCollapsed
-              ? 'rounded-[20px] border-white/14 p-3'
-              : 'rounded-[26px] border-white/18 p-4'
-          }`}
-        >
-          <motion.div
-            initial={false}
-            animate={{
-              opacity: isVoteCardCollapsed ? 1 : 0,
-              height: isVoteCardCollapsed ? 'auto' : 0,
-              y: isVoteCardCollapsed ? 0 : prefersReducedMotion ? 0 : -6,
-            }}
-            transition={cardTransition}
-            className="overflow-hidden"
-            style={{ pointerEvents: isVoteCardCollapsed ? 'auto' : 'none' }}
-          >
-            <div className="flex items-center justify-between gap-3">
+          <div className="p-5">
+            <motion.div layout className="mb-6 flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#ff9f0a]">
-                  실시간 인기 투표
-                </p>
-                <p className="truncate text-[14px] font-semibold text-white/92">{POPULAR_VOTE_FALLBACK.title}</p>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#ff9f0a4d] bg-[#ff9f0a1a] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#ffad33]">
+                    <ActivityIcon className="h-3 w-3" />
+                    LIVE
+                  </span>
+                  <span className="text-[11px] font-medium text-white/50">진행중인 투표</span>
+                </div>
+                <h2 className="text-xl font-bold leading-tight text-white/95">
+                  {featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
+                </h2>
               </div>
-                <button
-                  type="button"
-                  onClick={() => setIsVoteCardCollapsed(false)}
-                  className="inline-flex h-11 items-center rounded-xl border border-white/20 bg-white/10 px-4 text-[12px] font-semibold text-white hover:bg-white/15"
-                >
-                  투표하기
-                </button>
-            </div>
-            <div className="mt-2.5">
-              <div className="relative h-2.5 overflow-hidden rounded-full bg-white/14">
+              <button
+                type="button"
+                onClick={() => setIsVoteCardCollapsed((prev) => !prev)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
+              >
+                {isVoteCardCollapsed ? (
+                  <>
+                    참여하기
+                    <ChevronDownIcon className="h-3.5 w-3.5" />
+                  </>
+                ) : (
+                  <>
+                    접기
+                    <ChevronUpIcon className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </button>
+            </motion.div>
+
+            <motion.div layout className="mb-2">
+              <div className="mb-2 flex items-center justify-between text-sm font-semibold">
+                <span className="flex items-center gap-1.5 text-[#ff8b2f]">
+                  {featuredOptionALabel}
+                  <span className="text-white/90">{summary.hasData ? `${summary.aPercent}%` : '-'}</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-[#6ea6ff]">
+                  <span className="text-white/90">{summary.hasData ? `${summary.bPercent}%` : '-'}</span>
+                  {featuredOptionBLabel}
+                </span>
+              </div>
+              <div className="relative h-3 overflow-hidden rounded-full bg-slate-800 shadow-inner">
                 {summary.hasData ? (
                   <>
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-r-full bg-[#ff6b00]"
-                      style={{ width: `${summary.aPercent}%` }}
+                    <motion.div
+                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#ff6b00] to-[#ff9f0a]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${summary.aPercent}%` }}
+                      transition={{ duration: 0.55, ease: 'easeOut' }}
                     />
-                    <div
-                      className="absolute inset-y-0 right-0 rounded-l-full bg-[#2f74ff]"
-                      style={{ width: `${summary.bPercent}%` }}
+                    <motion.div
+                      className="absolute inset-y-0 right-0 bg-gradient-to-l from-[#2f74ff] to-[#6ea6ff]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${summary.bPercent}%` }}
+                      transition={{ duration: 0.55, ease: 'easeOut' }}
                     />
                   </>
                 ) : (
                   <div className="absolute inset-0 bg-white/8" />
                 )}
               </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={false}
-            animate={{
-              opacity: isVoteCardCollapsed ? 0 : 1,
-              height: isVoteCardCollapsed ? 0 : 'auto',
-              y: isVoteCardCollapsed ? (prefersReducedMotion ? 0 : 6) : 0,
-            }}
-            transition={cardTransition}
-            className="overflow-hidden"
-            style={{ pointerEvents: isVoteCardCollapsed ? 'none' : 'auto' }}
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-white">실시간 인기 투표</h2>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-[#ff9f0a66] bg-[#ff9f0a22] px-3 py-1 text-[12px] font-semibold text-[#ff9f0a]">
-                  {POPULAR_VOTE_FALLBACK.status}
+              <div className="mt-2 text-center">
+                <span className="text-[11px] font-medium text-white/40">
+                  {isStatsLoading
+                    ? '집계 중...'
+                    : `총 ${summary.totalVotes.toLocaleString()}명 참여${
+                        featuredMetrics ? ` · 실시간 ${featuredMetrics.realtimeVotes.toLocaleString()}표` : ''
+                      }`}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setIsVoteCardCollapsed(true)}
-                  className="inline-flex h-11 items-center rounded-lg border border-white/20 bg-white/10 px-3 text-[12px] font-semibold text-white/80 hover:bg-white/15"
+              </div>
+            </motion.div>
+
+            <AnimatePresence initial={false}>
+              {!isVoteCardCollapsed ? (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={cardTransition}
+                  className="overflow-hidden"
                 >
-                  최소화
-                </button>
-              </div>
-            </div>
+                  <div className="mt-6 border-t border-white/10 pt-6">
+                    <div className="mb-5 grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (featuredOptionAKey) {
+                            setSelectedOption(featuredOptionAKey);
+                          }
+                        }}
+                        aria-pressed={selectedOption === featuredOptionAKey}
+                        disabled={!featuredOptionAKey}
+                        className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
+                          selectedOption === featuredOptionAKey
+                            ? 'border-[#ff6b00] bg-[#ff6b001a] shadow-[0_0_20px_rgba(255,107,0,0.18)]'
+                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        } disabled:cursor-not-allowed disabled:opacity-60`}
+                      >
+                        {selectedOption === featuredOptionAKey ? (
+                          <span className="absolute right-2 top-2">
+                            <CircleCheckIcon className="h-4 w-4 text-[#ff9f0a]" />
+                          </span>
+                        ) : null}
+                        <span
+                          className={`text-lg font-bold ${
+                            selectedOption === featuredOptionAKey ? 'text-[#ffad33]' : 'text-white/85'
+                          }`}
+                        >
+                          {featuredOptionALabel}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (featuredOptionBKey) {
+                            setSelectedOption(featuredOptionBKey);
+                          }
+                        }}
+                        aria-pressed={selectedOption === featuredOptionBKey}
+                        disabled={!featuredOptionBKey}
+                        className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
+                          selectedOption === featuredOptionBKey
+                            ? 'border-[#2f74ff] bg-[#2f74ff1a] shadow-[0_0_20px_rgba(47,116,255,0.18)]'
+                            : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                        } disabled:cursor-not-allowed disabled:opacity-60`}
+                      >
+                        {selectedOption === featuredOptionBKey ? (
+                          <span className="absolute right-2 top-2">
+                            <CircleCheckIcon className="h-4 w-4 text-[#6ea6ff]" />
+                          </span>
+                        ) : null}
+                        <span
+                          className={`text-lg font-bold ${
+                            selectedOption === featuredOptionBKey ? 'text-[#6ea6ff]' : 'text-white/85'
+                          }`}
+                        >
+                          {featuredOptionBLabel}
+                        </span>
+                      </button>
+                    </div>
 
-            <h3 className="text-[20px] font-semibold leading-tight text-white">{POPULAR_VOTE_FALLBACK.title}</h3>
-            <p className="mt-1.5 text-[15px] text-white/62">
-              {isStatsLoading
-                ? '집계 불러오는 중...'
-                : `총 ${summary.totalVotes.toLocaleString()}표 참여`}
-            </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleVote()}
+                      disabled={
+                        !selectedOption ||
+                        !featuredTopic ||
+                        !featuredOptionAKey ||
+                        !featuredOptionBKey ||
+                        isFeaturedLoading ||
+                        isSubmittingVote ||
+                        (!isAuthenticated && guestHasVoted) ||
+                        (!isAuthenticated && !guestSessionId)
+                      }
+                      className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(140deg,#ff6b00_0%,#ff8a1f_100%)] text-base font-bold text-white shadow-[0_0_20px_rgba(255,107,0,0.35)] transition-all duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] disabled:cursor-not-allowed disabled:opacity-65"
+                    >
+                      {isSubmittingVote
+                        ? '처리 중...'
+                        : !selectedOption
+                          ? '선택 후 투표하기'
+                          : !isAuthenticated && guestHasVoted
+                            ? '이미 투표 완료'
+                            : '투표 제출하기'}
+                    </button>
 
-            <div className="mt-4 space-y-3 text-[15px]">
-              <div className="flex items-center justify-between text-white/88">
-                <span className="font-semibold">{POPULAR_VOTE_FALLBACK.teamA}</span>
-                <span className="font-semibold">{POPULAR_VOTE_FALLBACK.teamB}</span>
-              </div>
-
-              <div className="relative h-5 overflow-hidden rounded-full bg-white/14">
-                {summary.hasData ? (
-                  <>
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-r-full bg-[#ff6b00] shadow-[0_0_18px_rgba(255,107,0,0.45)]"
-                      style={{ width: `${summary.aPercent}%` }}
-                    />
-                    <div
-                      className="absolute inset-y-0 right-0 rounded-l-full bg-[#2f74ff] shadow-[0_0_18px_rgba(47,116,255,0.4)]"
-                      style={{ width: `${summary.bPercent}%` }}
-                    />
-                  </>
-                ) : (
-                  <div className="absolute inset-0 bg-white/8" />
-                )}
-              </div>
-
-              <div className="flex items-center justify-between text-[14px]">
-                <span className="font-semibold text-[#ffb784]">
-                  {summary.hasData ? `${summary.aPercent}%` : '-'}
-                </span>
-                <span className="font-semibold text-[#9cbcff]">
-                  {summary.hasData ? `${summary.bPercent}%` : '-'}
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedOption(POPULAR_OPTION_A)}
-                className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
-                  selectedOption === POPULAR_OPTION_A
-                    ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffbf88]'
-                    : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
-                }`}
-              >
-                서울 선택
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedOption(POPULAR_OPTION_B)}
-                className={`inline-flex h-11 items-center justify-center rounded-xl border text-[14px] font-semibold transition ${
-                  selectedOption === POPULAR_OPTION_B
-                    ? 'border-[#7fb0ff88] bg-[#2f74ff30] text-[#b8d2ff]'
-                    : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'
-                }`}
-              >
-                부산 선택
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void handleVote()}
-              disabled={
-                isSubmittingVote ||
-                (!isAuthenticated && guestHasVoted) ||
-                (!isAuthenticated && !guestSessionId)
-              }
-              className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-[22px] border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.45)] transition active:scale-[0.99] hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:opacity-65"
-            >
-              {isSubmittingVote
-                ? '처리 중...'
-                : !isAuthenticated && guestHasVoted
-                  ? '이미 투표 완료'
-                  : `${selectedOption === POPULAR_OPTION_A ? '서울' : '부산'}에 투표하기`}
-            </button>
-
-            {voteMessage ? <p className="mt-3 text-center text-xs text-white/75">{voteMessage}</p> : null}
-          </motion.div>
+                    {voteMessage ? <p className="mt-3 text-center text-xs text-white/85">{voteMessage}</p> : null}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
         </motion.section>
 
         {selectedRegion ? (
@@ -884,15 +1264,15 @@ export default function MainMapHome() {
                 return (
                   <div className="mt-2.5">
                     <div className="flex items-center justify-between text-[12px] text-white/80">
-                      <span>서울 {aPercent}%</span>
-                      <span>부산 {bPercent}%</span>
+                      <span>{featuredOptionALabel} {aPercent}%</span>
+                      <span>{featuredOptionBLabel} {bPercent}%</span>
                     </div>
                     <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
                       <div className="h-full bg-[#ff6b00]" style={{ width: `${aPercent}%` }} />
                       <div className="h-full bg-[#2f74ff]" style={{ width: `${bPercent}%` }} />
                     </div>
                     <p className="mt-2 text-[12px] text-white/65">
-                      참여 {total.toLocaleString()}표 · 서울 {countA.toLocaleString()} · 부산{' '}
+                      참여 {total.toLocaleString()}표 · {featuredOptionALabel} {countA.toLocaleString()} · {featuredOptionBLabel}{' '}
                       {countB.toLocaleString()}
                     </p>
                   </div>
@@ -949,69 +1329,167 @@ export default function MainMapHome() {
         </nav>
       </div>
 
-      {isTopicSheetOpen ? (
-        <div
-          className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 p-4 sm:items-end"
-          onClick={() => setIsTopicSheetOpen(false)}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center px-4">
+        <section
+          className="pointer-events-auto w-full max-w-[430px] overflow-hidden rounded-t-[28px] border border-white/12 bg-[rgba(22,22,26,0.97)] shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-[cubic-bezier(0.2,0.65,0.3,0.9)]"
+          style={{
+            transform: topicSheetTransform,
+            maxHeight: 'calc(100dvh - 12px - env(safe-area-inset-top))',
+          }}
+          onClick={(event) => event.stopPropagation()}
         >
-          <div
-            className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.97)] p-5 shadow-2xl backdrop-blur-2xl"
-            onClick={(event) => event.stopPropagation()}
+          <button
+            type="button"
+            aria-expanded={isTopicSheetOpen}
+            onClick={handleTopicSheetHandleClick}
+            onTouchStart={handleTopicSheetTouchStart}
+            onTouchMove={handleTopicSheetTouchMove}
+            onTouchEnd={handleTopicSheetTouchEnd}
+            onTouchCancel={handleTopicSheetTouchEnd}
+            className="flex w-full flex-col items-center gap-1.5 border-b border-white/10 px-4 pb-2 pt-2.5"
           >
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h4 className="text-[20px] font-semibold text-white">다른 주제 선택</h4>
-                <p className="mt-1 text-xs text-white/60">
-                  1개 이상 선택 · 최대 {TOPIC_SELECTION_LIMIT}개
-                </p>
+            <span className="h-1.5 w-12 rounded-full bg-white/35" />
+            <span className="text-[11px] font-semibold text-white/68">
+              {topicSheetDetent === 'full'
+                ? '아래로 쓸어 내려 축소'
+                : '위로 쓸어 올려 다른 주제 선택'}
+            </span>
+          </button>
+
+          <div
+            className={`px-5 pb-5 pt-3 transition-opacity duration-200 ${
+              topicSheetDetent === 'closed'
+                ? 'pointer-events-none opacity-0'
+                : 'pointer-events-auto opacity-100'
+            }`}
+            style={{
+              height: 'calc(100dvh - 84px - env(safe-area-inset-top))',
+              maxHeight: 'calc(100dvh - 84px - env(safe-area-inset-top))',
+            }}
+          >
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-[20px] font-semibold text-white">다른 주제 선택</h4>
+                  <p className="mt-1 text-xs text-white/60">
+                    1개 이상 선택 · 최대 {TOPIC_SELECTION_LIMIT}개
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTopicSelectionComplete}
+                  disabled={selectedTopicIds.length === 0}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-[#ff9f0a66] bg-[#ff6b00] px-3 text-sm font-semibold text-white transition hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-white/45"
+                >
+                  선택 완료
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsTopicSheetOpen(false)}
-                className="rounded-lg px-2 py-1 text-sm text-white/65 hover:bg-white/10 hover:text-white"
-              >
-                닫기
-              </button>
+
+              {isTopicsLoading ? (
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                  주제 불러오는 중...
+                </div>
+              ) : availableTopics.length === 0 ? (
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                  선택 가능한 LIVE 주제가 없습니다.
+                </div>
+              ) : (
+                <>
+                  <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {TOPIC_TAB_META.map((tab) => {
+                      const isActive = activeTopicTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTopicTab(tab.id)}
+                          className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
+                            isActive
+                              ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
+                              : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <section className="mb-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[12px] font-semibold text-white/84">담은 주제</p>
+                      <span className="text-[11px] text-white/56">
+                        {selectedTopicIds.length}/{TOPIC_SELECTION_LIMIT}
+                      </span>
+                    </div>
+                    {selectedTopicTags.length === 0 ? (
+                      <p className="mt-2 text-xs text-white/56">주제를 담아보세요.</p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedTopicTags.map((topic) => (
+                          <span
+                            key={topic.id}
+                            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2.5 py-1 text-[12px] text-white"
+                          >
+                            <span className="truncate">{topic.title}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSelectedTopic(topic.id)}
+                              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/25 text-[11px] text-white/86 hover:bg-black/40 hover:text-white"
+                              aria-label={`${topic.title} 제거`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <p className="min-h-5 text-xs text-white/65">{topicsError ?? `선택됨 ${selectedTopicIds.length}개`}</p>
+
+                  <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                    {filteredTopics.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
+                        이 카테고리에 표시할 주제가 없습니다.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 pb-1">
+                        {filteredTopics.map((topic) => {
+                          const isSelected = selectedTopicIds.includes(topic.id);
+                          return (
+                            <button
+                              key={topic.id}
+                              type="button"
+                              onClick={() => handleTopicToggle(topic)}
+                              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                                isSelected
+                                  ? 'border-[#ff9f0a66] bg-[#ff9f0a22] text-white'
+                                  : 'border-white/14 bg-white/5 text-white/84 hover:border-white/28 hover:bg-white/10'
+                              }`}
+                            >
+                              <p className="line-clamp-2 text-[14px] font-medium leading-5">{topic.title}</p>
+                              <span
+                                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold ${
+                                  isSelected
+                                    ? 'border-[#ffb75d] bg-[#ff9f0a33] text-[#ffd8a4]'
+                                    : 'border-white/24 bg-white/6 text-white/55'
+                                }`}
+                              >
+                                {isSelected ? '✓' : '+'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-
-            {isTopicsLoading ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
-                주제 불러오는 중...
-              </div>
-            ) : availableTopics.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
-                선택 가능한 LIVE 주제가 없습니다.
-              </div>
-            ) : (
-              <TagSelector<VoteTopic>
-                availableTags={availableTopics}
-                selectedTags={selectedTopicTags}
-                onChange={handleTopicTagsChange}
-                getValue={(topic) => topic.id}
-                getLabel={(topic) => topic.title}
-                heading="LIVE 주제"
-                placeholder="주제를 선택하세요"
-                inputPlaceholder="주제 검색"
-                emptyMessage="검색 결과가 없습니다."
-                className="mt-1"
-              />
-            )}
-
-            <p className="mt-2 min-h-5 text-xs text-white/65">
-              {topicsError ?? `선택됨 ${selectedTopicIds.length}개`}
-            </p>
-
-            <button
-              type="button"
-              onClick={handleTopicSelectionComplete}
-              disabled={selectedTopicIds.length === 0}
-              className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.35)] transition hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              선택 완료
-            </button>
           </div>
-        </div>
-      ) : null}
+        </section>
+      </div>
 
       {showProfileModal ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
