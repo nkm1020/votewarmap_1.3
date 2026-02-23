@@ -141,6 +141,18 @@ export function LiveVoteCard({
           </div>
 
           <motion.div layout className="mt-1 flex shrink-0 items-center gap-2">
+            <motion.button
+              layout
+              type="button"
+              onClick={onToggleExpanded}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[#ff9f0a]/70 bg-[#ff9f0a] px-3 text-xs font-semibold text-[#2d1a00] transition hover:bg-[#ffb547] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
+            >
+              <motion.span layout>{isExpanded ? '접기' : '투표하기'}</motion.span>
+              <motion.div layout animate={{ rotate: isExpanded ? 180 : 0 }}>
+                <ChevronDownIcon className="h-3.5 w-3.5" />
+              </motion.div>
+            </motion.button>
+
             {auth.isLoading ? (
               <span className="inline-flex h-9 min-w-[62px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80">
                 ...
@@ -190,18 +202,6 @@ export function LiveVoteCard({
                 로그인
               </Link>
             )}
-
-            <motion.button
-              layout
-              type="button"
-              onClick={onToggleExpanded}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-white/80 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]"
-            >
-              <motion.span layout>{isExpanded ? '접기' : '참여하기'}</motion.span>
-              <motion.div layout animate={{ rotate: isExpanded ? 180 : 0 }}>
-                <ChevronDownIcon className="h-3.5 w-3.5" />
-              </motion.div>
-            </motion.button>
           </motion.div>
         </div>
 

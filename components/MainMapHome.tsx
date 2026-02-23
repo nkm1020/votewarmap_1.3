@@ -320,6 +320,7 @@ export default function MainMapHome() {
       .filter((topic): topic is VoteTopic => Boolean(topic));
   }, [selectedTopicIds, sortedTopics]);
   const isTopicSheetOpen = topicSheetDetent !== 'closed';
+  const isTopicSheetFull = topicSheetDetent === 'full';
   const topicSheetTransform = useMemo(() => {
     if (topicSheetDetent === 'full') {
       return 'translateY(0)';
@@ -1140,14 +1141,21 @@ export default function MainMapHome() {
         <div className="h-3" />
       </div>
 
-      <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30 md:hidden">
+      <div
+        ref={bottomDockRef}
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200 md:hidden ${
+          isTopicSheetFull ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
         <section
           onWheel={handleBottomDockWheel}
           onTouchStart={handleBottomDockTouchStart}
           onTouchMove={handleBottomDockTouchMove}
           onTouchEnd={handleBottomDockTouchEnd}
           onTouchCancel={handleBottomDockTouchEnd}
-          className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
+          className={`border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl ${
+            isTopicSheetFull ? 'pointer-events-none' : 'pointer-events-auto'
+          }`}
           style={{ touchAction: 'pan-y' }}
         >
           <div className="mx-auto max-w-[430px] px-3">
@@ -1173,10 +1181,16 @@ export default function MainMapHome() {
 
       <div
         ref={bottomMenuRef}
-        className="pointer-events-none absolute inset-x-0 z-20 md:hidden"
+        className={`pointer-events-none absolute inset-x-0 z-20 transition-opacity duration-200 md:hidden ${
+          isTopicSheetFull ? 'opacity-0' : 'opacity-100'
+        }`}
         style={{ bottom: `${bottomAdHeight}px` }}
       >
-        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+        <nav
+          className={`rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl ${
+            isTopicSheetFull ? 'pointer-events-none' : 'pointer-events-auto'
+          }`}
+        >
           <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
             {[
               { id: 'home' as const, label: '홈' },
@@ -1199,7 +1213,11 @@ export default function MainMapHome() {
         </nav>
       </div>
 
-      <div className="pointer-events-none hidden absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 md:hidden">
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 md:hidden ${
+          isTopicSheetFull ? 'z-40' : 'z-10'
+        }`}
+      >
         <section
           className="pointer-events-auto w-full max-w-[430px] overflow-hidden rounded-t-[28px] border border-white/12 bg-[rgba(22,22,26,0.97)] shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-[cubic-bezier(0.2,0.65,0.3,0.9)]"
           style={{
