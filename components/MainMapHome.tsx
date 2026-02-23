@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent, type WheelEvent } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ActivityIcon, ChevronDownIcon, ChevronUpIcon, CircleCheckIcon, MapPinIcon } from 'lucide-react';
 import type { MapPointMarker, RegionVoteMap } from '@/components/KoreaAdminMap';
@@ -33,6 +33,7 @@ const MAIN_MAP_COLORS = {
 const TOPIC_SELECTION_LIMIT = 10;
 const TOPIC_SHEET_PEEK_HEIGHT = 38;
 const TOPIC_SHEET_SWIPE_THRESHOLD_PX = 42;
+const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 8;
 const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
   { value: 'male', label: '남성' },
   { value: 'female', label: '여성' },
@@ -236,11 +237,17 @@ export default function MainMapHome() {
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
   const [isTopicsLoading, setIsTopicsLoading] = useState(false);
   const [topicsError, setTopicsError] = useState<string | null>(null);
-  const [bottomDockHeight, setBottomDockHeight] = useState(124);
+  const [bottomAdHeight, setBottomAdHeight] = useState(0);
+  const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
+  const bottomMenuRef = useRef<HTMLDivElement | null>(null);
   const topicSheetTouchStartYRef = useRef<number | null>(null);
   const topicSheetTouchCurrentYRef = useRef<number | null>(null);
+  const dockTouchStartYRef = useRef<number | null>(null);
+  const dockTouchLastYRef = useRef<number | null>(null);
+  const dockTouchMovedRef = useRef(false);
+  const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
   const { isAuthenticated, isLoading, profile, user, signOut } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
@@ -334,6 +341,10 @@ export default function MainMapHome() {
     }
     return `translateY(calc(100% - (${bottomDockHeight}px + ${TOPIC_SHEET_PEEK_HEIGHT}px)))`;
   }, [bottomDockHeight, topicSheetDetent]);
+  const topicListBottomInset = useMemo(
+    () => `calc(${bottomDockHeight}px + env(safe-area-inset-bottom) + 12px)`,
+    [bottomDockHeight],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -634,21 +645,31 @@ export default function MainMapHome() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    const node = bottomDockRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') {
+    const adNode = bottomDockRef.current;
+    const menuNode = bottomMenuRef.current;
+    if (!adNode && !menuNode) {
       return;
     }
 
-    const updateHeight = () => {
-      const next = Math.max(124, Math.ceil(node.getBoundingClientRect().height));
-      if (next > 0) {
-        setBottomDockHeight(next);
-      }
+    const updateHeights = () => {
+      const nextAd = adNode ? Math.ceil(adNode.getBoundingClientRect().height) : 0;
+      const nextMenu = menuNode ? Math.ceil(menuNode.getBoundingClientRect().height) : 0;
+      setBottomAdHeight(nextAd > 0 ? nextAd : 0);
+      setBottomMenuHeight(nextMenu > 0 ? nextMenu : 0);
     };
 
-    updateHeight();
-    const observer = new ResizeObserver(() => updateHeight());
-    observer.observe(node);
+    updateHeights();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => updateHeights());
+    if (adNode) {
+      observer.observe(adNode);
+    }
+    if (menuNode) {
+      observer.observe(menuNode);
+    }
     return () => observer.disconnect();
   }, []);
 
@@ -965,8 +986,62 @@ export default function MainMapHome() {
     setTopicSheetDetent((prev) => (prev === 'closed' ? 'full' : 'closed'));
   }, []);
 
+  const handleBottomDockWheel = useCallback((event: WheelEvent<HTMLElement>) => {
+    if (event.deltaY === 0) {
+      return;
+    }
+    event.preventDefault();
+    window.scrollBy({ top: event.deltaY, behavior: 'auto' });
+  }, []);
+
+  const resetBottomDockTouchState = useCallback(() => {
+    dockTouchStartYRef.current = null;
+    dockTouchLastYRef.current = null;
+    dockTouchMovedRef.current = false;
+  }, []);
+
+  const handleBottomDockTouchStart = useCallback((event: TouchEvent<HTMLElement>) => {
+    const y = event.touches[0]?.clientY;
+    if (typeof y !== 'number') {
+      return;
+    }
+    dockTouchStartYRef.current = y;
+    dockTouchLastYRef.current = y;
+    dockTouchMovedRef.current = false;
+  }, []);
+
+  const handleBottomDockTouchMove = useCallback((event: TouchEvent<HTMLElement>) => {
+    const y = event.touches[0]?.clientY;
+    const startY = dockTouchStartYRef.current;
+    const lastY = dockTouchLastYRef.current;
+    if (typeof y !== 'number' || startY === null || lastY === null) {
+      return;
+    }
+
+    const totalDelta = Math.abs(y - startY);
+    if (!dockTouchMovedRef.current && totalDelta < DOCK_SCROLL_TOUCH_THRESHOLD_PX) {
+      return;
+    }
+
+    if (!dockTouchMovedRef.current) {
+      dockTouchMovedRef.current = true;
+    }
+
+    const stepDelta = lastY - y;
+    if (stepDelta !== 0) {
+      event.preventDefault();
+      window.scrollBy({ top: stepDelta, behavior: 'auto' });
+    }
+    dockTouchLastYRef.current = y;
+  }, []);
+
+  const handleBottomDockTouchEnd = useCallback(() => {
+    resetBottomDockTouchState();
+  }, [resetBottomDockTouchState]);
+
   return (
-    <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
+    <div className="bg-black text-white">
+      <main className="relative h-screen w-full overflow-hidden [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
       <div className="absolute inset-0">
         <KoreaAdminMap
           statsByCode={mergedMapStats}
@@ -1287,8 +1362,43 @@ export default function MainMapHome() {
         <div className="h-3" />
       </div>
 
-      <div ref={bottomDockRef} className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+      <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30 md:hidden">
+        <section
+          onWheel={handleBottomDockWheel}
+          onTouchStart={handleBottomDockTouchStart}
+          onTouchMove={handleBottomDockTouchMove}
+          onTouchEnd={handleBottomDockTouchEnd}
+          onTouchCancel={handleBottomDockTouchEnd}
+          className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
+          style={{ touchAction: 'pan-y' }}
+        >
+          <div className="mx-auto max-w-[430px] px-3">
+            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
+                  광고
+                </span>
+                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
+                  스폰서 배너 영역입니다.
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
+                >
+                  자세히
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <div
+        ref={bottomMenuRef}
+        className="pointer-events-none absolute inset-x-0 z-20 md:hidden"
+        style={{ bottom: `${bottomAdHeight}px` }}
+      >
+        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
           <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
             {[
               { id: 'home' as const, label: '홈' },
@@ -1308,28 +1418,10 @@ export default function MainMapHome() {
               </button>
             ))}
           </div>
-          <div className="mx-auto mt-2 max-w-[430px] px-3">
-            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
-                  광고
-                </span>
-                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
-                  스폰서 배너 영역입니다.
-                </p>
-                <button
-                  type="button"
-                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
-                >
-                  자세히
-                </button>
-              </div>
-            </section>
-          </div>
         </nav>
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center px-4">
+      <div className="pointer-events-none hidden absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 md:hidden">
         <section
           className="pointer-events-auto w-full max-w-[430px] overflow-hidden rounded-t-[28px] border border-white/12 bg-[rgba(22,22,26,0.97)] shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-[cubic-bezier(0.2,0.65,0.3,0.9)]"
           style={{
@@ -1448,7 +1540,13 @@ export default function MainMapHome() {
 
                   <p className="min-h-5 text-xs text-white/65">{topicsError ?? `선택됨 ${selectedTopicIds.length}개`}</p>
 
-                  <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                  <div
+                    className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1"
+                    style={{
+                      paddingBottom: topicListBottomInset,
+                      scrollPaddingBottom: topicListBottomInset,
+                    }}
+                  >
                     {filteredTopics.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
                         이 카테고리에 표시할 주제가 없습니다.
@@ -1603,6 +1701,18 @@ export default function MainMapHome() {
           </div>
         </div>
       ) : null}
-    </main>
+      </main>
+
+      <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
+        <div
+          className="mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+        >
+          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+          <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+        </div>
+      </footer>
+    </div>
   );
 }
