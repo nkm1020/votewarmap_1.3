@@ -47,12 +47,16 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function profilePayloadFromUser(user: User): UserProfile {
+  const provider = user.app_metadata?.provider ?? null;
+  const shouldIgnoreSocialAvatar = provider === 'google' || provider === 'kakao';
   return {
     id: user.id,
     email: user.email ?? null,
     full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
-    avatar_url: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null,
-    provider: user.app_metadata?.provider ?? null,
+    avatar_url: shouldIgnoreSocialAvatar
+      ? null
+      : (user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null),
+    provider,
     birth_year: null,
     gender: null,
     school_id: null,
@@ -220,10 +224,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: 'Supabase 환경변수(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)가 필요합니다.' };
     }
 
+    const scopesByProvider: Record<'google' | 'kakao', string> = {
+      google: 'openid email',
+      kakao: 'account_email',
+    };
     const redirectTo = `${window.location.origin}/auth`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        scopes: scopesByProvider[provider],
+      },
     });
 
     return { error: error?.message ?? null };
