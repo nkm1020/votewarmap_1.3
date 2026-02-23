@@ -909,7 +909,7 @@ export default function KoreaAdminMap({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.28 }}
           className="pointer-events-auto absolute left-3 z-10 inline-flex items-center overflow-hidden rounded-2xl border border-white/24 bg-[rgba(10,16,24,0.7)] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md"
-          style={{ bottom: `calc(env(safe-area-inset-bottom) + ${toggleBottomOffsetPx}px)` }}
+          style={{ bottom: `${toggleBottomOffsetPx}px` }}
           role="radiogroup"
           aria-label="행정구역 레벨 토글"
         >

@@ -1017,7 +1017,7 @@ export default function MainMapHome() {
           initialCenter={MAIN_INITIAL_CENTER}
           initialZoom={MAIN_INITIAL_ZOOM}
           bottomDockHeightPx={bottomDockHeight}
-          toggleClearancePx={18}
+          toggleClearancePx={TOPIC_SHEET_PEEK_HEIGHT + 18}
           theme="dark"
           showTooltip={false}
           showNavigationControl={false}

@@ -2,7 +2,6 @@
 
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,6 +30,7 @@ const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
   { value: 'male', label: '남성' },
   { value: 'female', label: '여성' },
 ];
+const TOPIC_SELECTOR_STACK_GAP_PX = 12;
 
 type TopicsMapPageProps = {
   initialTopicIds: string[];
@@ -43,6 +43,26 @@ type VoteSummary = {
   aPercent: number;
   bPercent: number;
   hasData: boolean;
+};
+type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
+type TopicTab = 'all' | TopicCategory;
+
+const TOPIC_TAB_META: Array<{ id: TopicTab; label: string }> = [
+  { id: 'all', label: '전체' },
+  { id: 'food', label: '음식&취향' },
+  { id: 'relationship', label: '연애&인간관계' },
+  { id: 'work', label: '직장&일상' },
+  { id: 'imagination', label: '황당한 상상' },
+];
+
+const KO_TOPIC_COLLATOR = new Intl.Collator('ko', {
+  sensitivity: 'base',
+  numeric: true,
+});
+
+const MANUAL_TOPIC_CATEGORY_BY_ID: Record<string, TopicCategory> = {
+  'balance-love-2026': 'relationship',
+  'balance-work-2026': 'work',
 };
 
 function normalizeSummary(summary: {
@@ -73,6 +93,31 @@ function normalizeSummary(summary: {
   return { ...summary, aPercent, bPercent, hasData: true };
 }
 
+function categorizeTopic(topic: VoteTopic): TopicCategory {
+  const manual = MANUAL_TOPIC_CATEGORY_BY_ID[topic.id];
+  if (manual) {
+    return manual;
+  }
+
+  if (topic.id.startsWith('food-')) {
+    return 'food';
+  }
+
+  if (topic.id.startsWith('rel-')) {
+    return 'relationship';
+  }
+
+  if (topic.id.startsWith('work-')) {
+    return 'work';
+  }
+
+  if (topic.id.startsWith('imagination-')) {
+    return 'imagination';
+  }
+
+  return 'imagination';
+}
+
 function bumpRegionStat(
   prev: RegionVoteMap,
   regionCode: string | null | undefined,
@@ -101,7 +146,8 @@ function normalizeBinaryGender(value: Gender | null | undefined): Gender {
 
 export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const router = useRouter();
-  const [topics, setTopics] = useState<VoteTopic[]>([]);
+  const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => initialTopicIds);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [selectedOptionKey, setSelectedOptionKey] = useState<string>('');
   const [topicsError, setTopicsError] = useState<string | null>(null);
@@ -133,15 +179,70 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const [gender, setGender] = useState<Gender>('male');
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
-  const [bottomDockHeight, setBottomDockHeight] = useState(152);
+  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('map');
+  const [bottomAdHeight, setBottomAdHeight] = useState(0);
+  const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
+  const [topicSelectorHeight, setTopicSelectorHeight] = useState(0);
+  const [isTopicEditorOpen, setIsTopicEditorOpen] = useState(false);
+  const [activeTopicTab, setActiveTopicTab] = useState<TopicTab>('all');
+  const [topicSearchQuery, setTopicSearchQuery] = useState('');
   const statsRequestRef = useRef(0);
   const topicStatsCacheRef = useRef<Record<string, { mapStats: RegionVoteMap; summary: VoteSummary }>>({});
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
+  const bottomMenuRef = useRef<HTMLDivElement | null>(null);
+  const topicSelectorRef = useRef<HTMLElement | null>(null);
+  const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
   const { isAuthenticated, isLoading, profile, signOut } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
+  const topics = useMemo(() => {
+    if (selectedTopicIds.length === 0) {
+      return [];
+    }
+
+    const byId = new Map(availableTopics.map((topic) => [topic.id, topic]));
+    return selectedTopicIds
+      .map((topicId) => byId.get(topicId))
+      .filter((topic): topic is VoteTopic => Boolean(topic));
+  }, [availableTopics, selectedTopicIds]);
+  const selectedTopicIdSet = useMemo(() => new Set(selectedTopicIds), [selectedTopicIds]);
+  const addableTopics = useMemo(
+    () => availableTopics.filter((topic) => !selectedTopicIdSet.has(topic.id)),
+    [availableTopics, selectedTopicIdSet],
+  );
+  const sortedAddableTopics = useMemo(
+    () => [...addableTopics].sort((a, b) => KO_TOPIC_COLLATOR.compare(a.title, b.title)),
+    [addableTopics],
+  );
+  const addableTopicsByCategory = useMemo(() => {
+    const grouped: Record<TopicCategory, VoteTopic[]> = {
+      food: [],
+      relationship: [],
+      work: [],
+      imagination: [],
+    };
+
+    sortedAddableTopics.forEach((topic) => {
+      grouped[categorizeTopic(topic)].push(topic);
+    });
+
+    return grouped;
+  }, [sortedAddableTopics]);
+  const tabFilteredAddableTopics = useMemo(() => {
+    if (activeTopicTab === 'all') {
+      return sortedAddableTopics;
+    }
+    return addableTopicsByCategory[activeTopicTab];
+  }, [activeTopicTab, addableTopicsByCategory, sortedAddableTopics]);
+  const filteredAddableTopics = useMemo(() => {
+    const normalizedQuery = topicSearchQuery.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return tabFilteredAddableTopics;
+    }
+    return tabFilteredAddableTopics.filter((topic) => topic.title.toLowerCase().includes(normalizedQuery));
+  }, [tabFilteredAddableTopics, topicSearchQuery]);
 
   const activeTopic = useMemo(
     () => topics.find((topic) => topic.id === activeTopicId) ?? null,
@@ -266,28 +367,24 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   }, []);
 
   useEffect(() => {
+    setSelectedTopicIds(initialTopicIds);
+  }, [initialTopicIds, topicIdsKey]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
-      if (!topicIdsKey) {
-        setIsTopicsLoading(false);
-        setTopics([]);
-        setActiveTopicId(null);
-        return;
-      }
-
       setIsTopicsLoading(true);
       setTopicsError(null);
       try {
-        const response = await fetch(`/api/votes/topics?status=LIVE&ids=${encodeURIComponent(topicIdsKey)}`, {
+        const response = await fetch('/api/votes/topics?status=LIVE', {
           cache: 'no-store',
         });
         const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
         if (!response.ok) {
           if (!cancelled) {
             setTopicsError(json.error ?? '주제 목록을 불러오지 못했습니다.');
-            setTopics([]);
-            setActiveTopicId(null);
+            setAvailableTopics([]);
           }
           return;
         }
@@ -297,13 +394,13 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
           return;
         }
 
-        setTopics(nextTopics);
-        setActiveTopicId(nextTopics[0]?.id ?? null);
+        const validTopicIdSet = new Set(nextTopics.map((topic) => topic.id));
+        setAvailableTopics(nextTopics);
+        setSelectedTopicIds((prev) => prev.filter((topicId) => validTopicIdSet.has(topicId)));
       } catch {
         if (!cancelled) {
           setTopicsError('주제 목록을 불러오지 못했습니다.');
-          setTopics([]);
-          setActiveTopicId(null);
+          setAvailableTopics([]);
         }
       } finally {
         if (!cancelled) {
@@ -317,7 +414,16 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [topicIdsKey]);
+  }, []);
+
+  useEffect(() => {
+    if (topics.length === 0) {
+      setActiveTopicId(null);
+      return;
+    }
+
+    setActiveTopicId((prev) => (prev && topics.some((topic) => topic.id === prev) ? prev : topics[0].id));
+  }, [topics]);
 
   useEffect(() => {
     if (!activeTopic) {
@@ -401,23 +507,54 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   }, [profile?.birth_year, profile?.gender]);
 
   useEffect(() => {
-    const node = bottomDockRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') {
+    const adNode = bottomDockRef.current;
+    const menuNode = bottomMenuRef.current;
+    if (!adNode && !menuNode) {
+      return;
+    }
+
+    const updateHeights = () => {
+      const nextAd = adNode ? Math.ceil(adNode.getBoundingClientRect().height) : 0;
+      const nextMenu = menuNode ? Math.ceil(menuNode.getBoundingClientRect().height) : 0;
+      setBottomAdHeight(nextAd > 0 ? nextAd : 0);
+      setBottomMenuHeight(nextMenu > 0 ? nextMenu : 0);
+    };
+
+    updateHeights();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => updateHeights());
+    if (adNode) {
+      observer.observe(adNode);
+    }
+    if (menuNode) {
+      observer.observe(menuNode);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const node = topicSelectorRef.current;
+    if (!node) {
       return;
     }
 
     const updateHeight = () => {
-      const next = Math.max(152, Math.ceil(node.getBoundingClientRect().height));
-      if (next > 0) {
-        setBottomDockHeight(next);
-      }
+      const next = Math.ceil(node.getBoundingClientRect().height);
+      setTopicSelectorHeight(next > 0 ? next : 0);
     };
 
     updateHeight();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
     const observer = new ResizeObserver(() => updateHeight());
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [isTopicEditorOpen, topics.length]);
 
   useEffect(() => {
     if (isAuthenticated || !activeTopicId) {
@@ -606,8 +743,53 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
     }
   }, [savePendingProfile, submitVote, voteAfterProfile]);
 
+  const handleAddTopic = useCallback((topicId: string) => {
+    setSelectedTopicIds((prev) => (prev.includes(topicId) ? prev : [...prev, topicId]));
+    setActiveTopicId(topicId);
+    setTopicSearchQuery('');
+    setTopicsError(null);
+  }, []);
+
+  const handleRemoveTopic = useCallback((topicId: string) => {
+    setSelectedTopicIds((prev) => prev.filter((id) => id !== topicId));
+    setTopicsError(null);
+  }, []);
+
+  const handleBottomTabClick = useCallback(
+    (tab: 'home' | 'map' | 'rank' | 'me') => {
+      if (tab === 'home') {
+        router.push('/');
+        return;
+      }
+      setActiveTab(tab);
+    },
+    [router],
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (selectedTopicIds.length > 0) {
+      params.set('topics', selectedTopicIds.join(','));
+    } else {
+      params.delete('topics');
+    }
+
+    const nextQuery = params.toString();
+    const currentQuery = window.location.search.replace(/^\?/, '');
+    if (nextQuery === currentQuery) {
+      return;
+    }
+
+    window.history.replaceState(window.history.state, '', nextQuery ? `/topics-map?${nextQuery}` : '/topics-map');
+  }, [selectedTopicIds]);
+
   return (
-    <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
+    <div className="bg-black text-white">
+      <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
       <div className="absolute inset-0">
         <KoreaAdminMap
           key={`${activeTopicId ?? 'topics-map-empty'}-${mapStatsSignature}`}
@@ -616,7 +798,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
           initialCenter={TOPICS_MAP_INITIAL_CENTER}
           initialZoom={6}
           bottomDockHeightPx={bottomDockHeight}
-          toggleClearancePx={22}
+          toggleClearancePx={Math.max(22, topicSelectorHeight + TOPIC_SELECTOR_STACK_GAP_PX * 2)}
           theme="dark"
           showNavigationControl={false}
           showTooltip={false}
@@ -639,153 +821,283 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.55),_rgba(4,10,18,0.18)_38%,_rgba(4,10,18,0.74))]" />
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
-      <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pb-[calc(8.2rem+env(safe-area-inset-bottom))] pt-[calc(0.7rem+env(safe-area-inset-top))]">
+      <div
+        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pt-[calc(0.7rem+env(safe-area-inset-top))]"
+        style={{ paddingBottom: `${bottomDockHeight + TOPIC_SELECTOR_STACK_GAP_PX}px` }}
+      >
         {isTopicsLoading ? (
           <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
             주제 목록 불러오는 중...
           </section>
-        ) : topics.length === 0 ? (
-          <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-            <h2 className="text-lg font-semibold text-white">선택된 주제가 없습니다.</h2>
-            <p className="mt-2 text-sm text-white/70">
-              {topicsError ?? '유효한 LIVE 주제를 찾지 못했습니다. 홈에서 주제를 다시 선택해 주세요.'}
-            </p>
-            <Link
-              href="/"
-              className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b00] px-4 text-sm font-bold text-white hover:bg-[#ff7c1f]"
-            >
-              홈에서 다시 선택하기
-            </Link>
-          </section>
         ) : (
           <>
-            <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/55">선택 주제 태그</p>
+            {topics.length === 0 ? (
+              <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+                <h2 className="text-lg font-semibold text-white">선택된 주제가 없습니다.</h2>
+                <p className="mt-2 text-sm text-white/70">하단의 주제 선택에서 원하는 LIVE 주제를 담아주세요.</p>
+              </section>
+            ) : (
+              <>
+                <LiveVoteCard
+                  className="mt-3 shrink-0"
+                  topicId={activeTopic?.id ?? null}
+                  title={activeTopic?.title ?? '주제 없음'}
+                  isExpanded={!isVoteCardCollapsed}
+                  onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
+                  selectedOptionKey={selectedOptionKey || null}
+                  onSelectOption={setSelectedOptionKey}
+                  onSubmitVote={() => void handleVote()}
+                  submitDisabled={
+                    isSubmittingVote ||
+                    !selectedOptionKey ||
+                    (!isAuthenticated && guestHasVoted) ||
+                    (!isAuthenticated && !guestSessionId)
+                  }
+                  submitLabel={
+                    isSubmittingVote
+                      ? '처리 중...'
+                      : !isAuthenticated && guestHasVoted
+                        ? '이미 투표 완료'
+                        : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+                  }
+                  message={voteMessage}
+                  isStatsLoading={isStatsLoading}
+                  totalVotes={summary.totalVotes}
+                  leftOption={{
+                    key: optionA?.key ?? null,
+                    label: optionA?.label ?? '선택지 A',
+                    percentage: summary.hasData ? summary.aPercent : null,
+                    subtext: getOptionSubtext(activeTopic?.id, optionA?.key ?? null),
+                  }}
+                  rightOption={{
+                    key: optionB?.key ?? null,
+                    label: optionB?.label ?? '선택지 B',
+                    percentage: summary.hasData ? summary.bPercent : null,
+                    subtext: getOptionSubtext(activeTopic?.id, optionB?.key ?? null),
+                  }}
+                  auth={{
+                    isLoading,
+                    isAuthenticated,
+                    avatarUrl: profile?.avatar_url ?? null,
+                    displayInitial: (profile?.full_name ?? profile?.email ?? 'U').slice(0, 1),
+                    onSignOut: signOut,
+                  }}
+                />
+
+                {selectedRegion ? (
+                  <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+                    <div className="flex items-center justify-between">
+                      <h4 className="truncate text-[15px] font-semibold text-white">
+                        {selectedRegion.name || selectedRegion.code}
+                      </h4>
+                      <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                        {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                      </span>
+                    </div>
+
+                    {selectedRegionStat ? (
+                      (() => {
+                        const countA = selectedRegionStat.countA ?? 0;
+                        const countB = selectedRegionStat.countB ?? 0;
+                        const total = selectedRegionStat.total ?? countA + countB;
+                        const aPercent = total > 0 ? Math.round((countA / total) * 100) : 0;
+                        const bPercent = total > 0 ? Math.max(0, 100 - aPercent) : 0;
+                        return (
+                          <div className="mt-2.5">
+                            <div className="flex items-center justify-between text-[12px] text-white/80">
+                              <span>{optionA?.label ?? 'A'} {aPercent}%</span>
+                              <span>{optionB?.label ?? 'B'} {bPercent}%</span>
+                            </div>
+                            <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
+                              <div className="h-full bg-[#ff6b00]" style={{ width: `${aPercent}%` }} />
+                              <div className="h-full bg-[#2f74ff]" style={{ width: `${bPercent}%` }} />
+                            </div>
+                            <p className="mt-2 text-[12px] text-white/65">
+                              참여 {total.toLocaleString()}표 · {optionA?.label ?? 'A'} {countA.toLocaleString()} ·{' '}
+                              {optionB?.label ?? 'B'} {countB.toLocaleString()}
+                            </p>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <p className="mt-2 text-[12px] text-white/60">이 지역에는 아직 투표 데이터가 없습니다.</p>
+                    )}
+                  </section>
+                ) : null}
+              </>
+            )}
+
+            <div className="flex-1" />
+
+            <section
+              ref={topicSelectorRef}
+              className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/55">선택 주제 태그</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTopicEditorOpen((prev) => !prev);
+                    setActiveTopicTab('all');
+                    setTopicSearchQuery('');
+                  }}
+                  className="inline-flex h-7 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff6b0022] px-2.5 text-[11px] font-semibold text-[#ffcc99] transition hover:bg-[#ff6b0030]"
+                >
+                  {isTopicEditorOpen ? '추가 닫기' : '주제 추가'}
+                </button>
+              </div>
+
               <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
                 {topics.map((topic) => {
                   const active = topic.id === activeTopicId;
                   return (
-                    <button
+                    <div
                       key={topic.id}
-                      type="button"
-                      onClick={() => setActiveTopicId(topic.id)}
-                      className={`shrink-0 rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                      className={`inline-flex shrink-0 items-center rounded-full border text-sm font-semibold transition ${
                         active
                           ? 'border-[#ff9f0a88] bg-[#ff6b0033] text-[#ffcc99]'
-                          : 'border-white/15 bg-white/8 text-white/80 hover:bg-white/12'
+                          : 'border-white/15 bg-white/8 text-white/80'
                       }`}
                     >
-                      {topic.title}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTopicId(topic.id)}
+                        className="max-w-[12rem] truncate px-3 py-1.5 text-left"
+                      >
+                        {topic.title}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTopic(topic.id)}
+                        className={`mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full transition ${
+                          active ? 'text-[#ffd5ad] hover:bg-[#ff9f0a33]' : 'text-white/60 hover:bg-white/12'
+                        }`}
+                        aria-label={`${topic.title} 제거`}
+                      >
+                        ×
+                      </button>
+                    </div>
                   );
                 })}
+                {topics.length === 0 ? (
+                  <span className="shrink-0 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-sm font-semibold text-white/70">
+                    선택된 주제가 없습니다
+                  </span>
+                ) : null}
               </div>
+
+              {isTopicEditorOpen ? (
+                <div className="mt-3 rounded-[18px] border border-white/12 bg-[rgba(14,14,18,0.82)] p-2.5 shadow-[0_8px_20px_rgba(0,0,0,0.28)]">
+                  <input
+                    type="text"
+                    value={topicSearchQuery}
+                    onChange={(event) => setTopicSearchQuery(event.target.value)}
+                    placeholder="추가할 주제를 검색하세요"
+                    className="h-9 w-full rounded-lg border border-white/14 bg-white/8 px-2.5 text-sm text-white outline-none placeholder:text-white/45 focus:border-[#ff9f0a66]"
+                  />
+                  <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {TOPIC_TAB_META.map((tab) => {
+                      const isActive = activeTopicTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTopicTab(tab.id)}
+                          className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
+                            isActive
+                              ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
+                              : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 max-h-44 overflow-y-auto pr-1">
+                    {filteredAddableTopics.length === 0 ? (
+                      <p className="rounded-lg border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/65">
+                        추가 가능한 주제가 없습니다.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {filteredAddableTopics.map((topic) => (
+                          <button
+                            key={topic.id}
+                            type="button"
+                            onClick={() => handleAddTopic(topic.id)}
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/12 bg-white/6 px-2.5 py-2 text-left transition hover:border-[#ff9f0a55] hover:bg-[#ff6b001f]"
+                          >
+                            <span className="line-clamp-2 text-sm text-white/86">{topic.title}</span>
+                            <span className="shrink-0 rounded-full border border-[#ff9f0a55] bg-[#ff6b0025] px-2 py-0.5 text-[11px] font-semibold text-[#ffcc99]">
+                              추가
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
               {topicsError ? <p className="mt-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
             </section>
 
-            <div className="flex-1" />
-
-            <LiveVoteCard
-              className="mt-3 shrink-0"
-              topicId={activeTopic?.id ?? null}
-              title={activeTopic?.title ?? '주제 없음'}
-              isExpanded={!isVoteCardCollapsed}
-              onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
-              selectedOptionKey={selectedOptionKey || null}
-              onSelectOption={setSelectedOptionKey}
-              onSubmitVote={() => void handleVote()}
-              submitDisabled={
-                isSubmittingVote ||
-                !selectedOptionKey ||
-                (!isAuthenticated && guestHasVoted) ||
-                (!isAuthenticated && !guestSessionId)
-              }
-              submitLabel={
-                isSubmittingVote
-                  ? '처리 중...'
-                  : !isAuthenticated && guestHasVoted
-                    ? '이미 투표 완료'
-                    : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
-              }
-              message={voteMessage}
-              isStatsLoading={isStatsLoading}
-              totalVotes={summary.totalVotes}
-              leftOption={{
-                key: optionA?.key ?? null,
-                label: optionA?.label ?? '선택지 A',
-                percentage: summary.hasData ? summary.aPercent : null,
-                subtext: getOptionSubtext(activeTopic?.id, optionA?.key ?? null),
-              }}
-              rightOption={{
-                key: optionB?.key ?? null,
-                label: optionB?.label ?? '선택지 B',
-                percentage: summary.hasData ? summary.bPercent : null,
-                subtext: getOptionSubtext(activeTopic?.id, optionB?.key ?? null),
-              }}
-              auth={{
-                isLoading,
-                isAuthenticated,
-                avatarUrl: profile?.avatar_url ?? null,
-                displayInitial: (profile?.full_name ?? profile?.email ?? 'U').slice(0, 1),
-                onSignOut: signOut,
-              }}
-            />
-
-            {selectedRegion ? (
-              <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-                <div className="flex items-center justify-between">
-                  <h4 className="truncate text-[15px] font-semibold text-white">
-                    {selectedRegion.name || selectedRegion.code}
-                  </h4>
-                  <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-                    {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
-                  </span>
-                </div>
-
-                {selectedRegionStat ? (
-                  (() => {
-                    const countA = selectedRegionStat.countA ?? 0;
-                    const countB = selectedRegionStat.countB ?? 0;
-                    const total = selectedRegionStat.total ?? countA + countB;
-                    const aPercent = total > 0 ? Math.round((countA / total) * 100) : 0;
-                    const bPercent = total > 0 ? Math.max(0, 100 - aPercent) : 0;
-                    return (
-                      <div className="mt-2.5">
-                        <div className="flex items-center justify-between text-[12px] text-white/80">
-                          <span>{optionA?.label ?? 'A'} {aPercent}%</span>
-                          <span>{optionB?.label ?? 'B'} {bPercent}%</span>
-                        </div>
-                        <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
-                          <div className="h-full bg-[#ff6b00]" style={{ width: `${aPercent}%` }} />
-                          <div className="h-full bg-[#2f74ff]" style={{ width: `${bPercent}%` }} />
-                        </div>
-                        <p className="mt-2 text-[12px] text-white/65">
-                          참여 {total.toLocaleString()}표 · {optionA?.label ?? 'A'} {countA.toLocaleString()} ·{' '}
-                          {optionB?.label ?? 'B'} {countB.toLocaleString()}
-                        </p>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <p className="mt-2 text-[12px] text-white/60">이 지역에는 아직 투표 데이터가 없습니다.</p>
-                )}
-              </section>
-            ) : null}
-
-            <div className="h-3" />
+            <div className="h-0" />
           </>
         )}
       </div>
 
-      <div ref={bottomDockRef} className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <div className="pointer-events-auto mx-auto w-full max-w-[430px] px-4 pb-[calc(0.8rem+env(safe-area-inset-bottom))]">
-          <Link
-            href="/"
-            className="inline-flex h-16 w-full items-center justify-center rounded-full border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_28px_rgba(255,107,0,0.5)] transition active:scale-[0.995] hover:bg-[#ff7c1f] [@media(max-height:700px)]:h-14"
-          >
-            주제 다시 고르기
-          </Link>
-        </div>
+      <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30 md:hidden">
+        <section className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <div className="mx-auto max-w-[430px] px-3">
+            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
+                  광고
+                </span>
+                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
+                  스폰서 배너 영역입니다.
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
+                >
+                  자세히
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <div
+        ref={bottomMenuRef}
+        className="pointer-events-none absolute inset-x-0 z-20 md:hidden"
+        style={{ bottom: `${bottomAdHeight}px` }}
+      >
+        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
+            {[
+              { id: 'home' as const, label: '홈' },
+              { id: 'map' as const, label: '지도' },
+              { id: 'rank' as const, label: '랭킹' },
+              { id: 'me' as const, label: 'MY' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleBottomTabClick(tab.id)}
+                className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${
+                  activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </div>
 
       {showProfileModal ? (
@@ -900,6 +1212,18 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
           </div>
         </div>
       ) : null}
-    </main>
+      </main>
+
+      <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
+        <div
+          className="mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+        >
+          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+          <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+        </div>
+      </footer>
+    </div>
   );
 }
