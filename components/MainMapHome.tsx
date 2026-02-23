@@ -31,7 +31,6 @@ const MAIN_MAP_COLORS = {
 } as const;
 const TOPIC_SELECTION_LIMIT = 10;
 const TOPIC_SHEET_PEEK_HEIGHT = 38;
-const TOPIC_SHEET_SWIPE_THRESHOLD_PX = 42;
 const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 8;
 const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
   { value: 'male', label: '남성' },
@@ -238,8 +237,6 @@ export default function MainMapHome() {
   const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
   const bottomMenuRef = useRef<HTMLDivElement | null>(null);
-  const topicSheetTouchStartYRef = useRef<number | null>(null);
-  const topicSheetTouchCurrentYRef = useRef<number | null>(null);
   const dockTouchStartYRef = useRef<number | null>(null);
   const dockTouchLastYRef = useRef<number | null>(null);
   const dockTouchMovedRef = useRef(false);
@@ -303,12 +300,11 @@ export default function MainMapHome() {
 
     return grouped;
   }, [sortedTopics]);
+  const selectedTopicIdSet = useMemo(() => new Set(selectedTopicIds), [selectedTopicIds]);
   const filteredTopics = useMemo(() => {
-    if (activeTopicTab === 'all') {
-      return sortedTopics;
-    }
-    return topicsByCategory[activeTopicTab];
-  }, [activeTopicTab, sortedTopics, topicsByCategory]);
+    const base = activeTopicTab === 'all' ? sortedTopics : topicsByCategory[activeTopicTab];
+    return base.filter((topic) => !selectedTopicIdSet.has(topic.id));
+  }, [activeTopicTab, selectedTopicIdSet, sortedTopics, topicsByCategory]);
   const selectedTopicTags = useMemo(() => {
     if (selectedTopicIds.length === 0) {
       return [];
@@ -327,10 +323,7 @@ export default function MainMapHome() {
     }
     return `translateY(calc(100% - (${bottomDockHeight}px + ${TOPIC_SHEET_PEEK_HEIGHT}px)))`;
   }, [bottomDockHeight, topicSheetDetent]);
-  const topicListBottomInset = useMemo(
-    () => `calc(${bottomDockHeight}px + env(safe-area-inset-bottom) + 12px)`,
-    [bottomDockHeight],
-  );
+  const topicListBottomInset = useMemo(() => 'calc(env(safe-area-inset-bottom) + 8px)', []);
 
   useEffect(() => {
     let cancelled = false;
@@ -892,11 +885,6 @@ export default function MainMapHome() {
     [selectedTopicIds],
   );
 
-  const handleRemoveSelectedTopic = useCallback((topicId: string) => {
-    setSelectedTopicIds((prev) => prev.filter((id) => id !== topicId));
-    setTopicsError(null);
-  }, []);
-
   const handleTopicSelectionComplete = useCallback(() => {
     if (selectedTopicIds.length === 0) {
       setTopicsError('주제를 1개 이상 선택해 주세요.');
@@ -908,45 +896,6 @@ export default function MainMapHome() {
     setTopicSheetDetent('closed');
     router.push(`/topics-map?${params.toString()}`);
   }, [router, selectedTopicIds]);
-
-  const handleTopicSheetTouchStart = useCallback((event: TouchEvent<HTMLButtonElement>) => {
-    const y = event.touches[0]?.clientY;
-    if (typeof y !== 'number') {
-      return;
-    }
-
-    topicSheetTouchStartYRef.current = y;
-    topicSheetTouchCurrentYRef.current = y;
-  }, []);
-
-  const handleTopicSheetTouchMove = useCallback((event: TouchEvent<HTMLButtonElement>) => {
-    const y = event.touches[0]?.clientY;
-    if (typeof y !== 'number') {
-      return;
-    }
-    topicSheetTouchCurrentYRef.current = y;
-  }, []);
-
-  const handleTopicSheetTouchEnd = useCallback(() => {
-    const startY = topicSheetTouchStartYRef.current;
-    const currentY = topicSheetTouchCurrentYRef.current;
-    topicSheetTouchStartYRef.current = null;
-    topicSheetTouchCurrentYRef.current = null;
-
-    if (startY === null || currentY === null) {
-      return;
-    }
-
-    const deltaY = currentY - startY;
-    if (deltaY <= -TOPIC_SHEET_SWIPE_THRESHOLD_PX) {
-      setTopicSheetDetent('full');
-      return;
-    }
-
-    if (deltaY >= TOPIC_SHEET_SWIPE_THRESHOLD_PX) {
-      setTopicSheetDetent('closed');
-    }
-  }, []);
 
   const handleTopicSheetHandleClick = useCallback(() => {
     setTopicSheetDetent((prev) => (prev === 'closed' ? 'full' : 'closed'));
@@ -1230,17 +1179,11 @@ export default function MainMapHome() {
             type="button"
             aria-expanded={isTopicSheetOpen}
             onClick={handleTopicSheetHandleClick}
-            onTouchStart={handleTopicSheetTouchStart}
-            onTouchMove={handleTopicSheetTouchMove}
-            onTouchEnd={handleTopicSheetTouchEnd}
-            onTouchCancel={handleTopicSheetTouchEnd}
             className="flex w-full flex-col items-center gap-1.5 border-b border-white/10 px-4 pb-2 pt-2.5"
           >
             <span className="h-1.5 w-12 rounded-full bg-white/35" />
             <span className="text-[11px] font-semibold text-white/68">
-              {topicSheetDetent === 'full'
-                ? '아래로 쓸어 내려 축소'
-                : '위로 쓸어 올려 다른 주제 선택'}
+              {topicSheetDetent === 'full' ? '바를 눌러 닫기' : '바를 눌러 다른 주제 선택'}
             </span>
           </button>
 
@@ -1315,20 +1258,15 @@ export default function MainMapHome() {
                     ) : (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {selectedTopicTags.map((topic) => (
-                          <span
+                          <button
                             key={topic.id}
-                            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2.5 py-1 text-[12px] text-white"
+                            type="button"
+                            onClick={() => handleTopicToggle(topic)}
+                            className="inline-flex max-w-full items-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2.5 py-1 text-[12px] text-white transition hover:bg-[#ff9f0a33]"
+                            aria-label={`${topic.title} 선택 취소`}
                           >
                             <span className="truncate">{topic.title}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveSelectedTopic(topic.id)}
-                              className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/25 text-[11px] text-white/86 hover:bg-black/40 hover:text-white"
-                              aria-label={`${topic.title} 제거`}
-                            >
-                              ×
-                            </button>
-                          </span>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -1349,32 +1287,19 @@ export default function MainMapHome() {
                       </div>
                     ) : (
                       <div className="space-y-2 pb-1">
-                        {filteredTopics.map((topic) => {
-                          const isSelected = selectedTopicIds.includes(topic.id);
-                          return (
-                            <button
-                              key={topic.id}
-                              type="button"
-                              onClick={() => handleTopicToggle(topic)}
-                              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
-                                isSelected
-                                  ? 'border-[#ff9f0a66] bg-[#ff9f0a22] text-white'
-                                  : 'border-white/14 bg-white/5 text-white/84 hover:border-white/28 hover:bg-white/10'
-                              }`}
-                            >
-                              <p className="line-clamp-2 text-[14px] font-medium leading-5">{topic.title}</p>
-                              <span
-                                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[13px] font-bold ${
-                                  isSelected
-                                    ? 'border-[#ffb75d] bg-[#ff9f0a33] text-[#ffd8a4]'
-                                    : 'border-white/24 bg-white/6 text-white/55'
-                                }`}
-                              >
-                                {isSelected ? '✓' : '+'}
-                              </span>
-                            </button>
-                          );
-                        })}
+                        {filteredTopics.map((topic) => (
+                          <button
+                            key={topic.id}
+                            type="button"
+                            onClick={() => handleTopicToggle(topic)}
+                            className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/14 bg-white/5 px-3 py-3 text-left text-white/84 transition hover:border-white/28 hover:bg-white/10"
+                          >
+                            <p className="line-clamp-2 text-[14px] font-medium leading-5">{topic.title}</p>
+                            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/24 bg-white/6 text-[13px] font-bold text-white/55">
+                              +
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>

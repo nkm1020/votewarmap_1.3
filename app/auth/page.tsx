@@ -13,8 +13,8 @@ const displayFont = Plus_Jakarta_Sans({
 
 export default function AuthPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, signInWithGoogle } = useAuth();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { isAuthenticated, isLoading, signInWithGoogle, signInWithKakao } = useAuth();
+  const [pendingProvider, setPendingProvider] = useState<'google' | 'kakao' | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,14 +23,14 @@ export default function AuthPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
-  const handleGoogleLogin = async () => {
+  const handleSocialLogin = async (provider: 'google' | 'kakao') => {
     setAuthError(null);
-    setIsSubmitting(true);
+    setPendingProvider(provider);
 
-    const { error } = await signInWithGoogle();
+    const { error } = provider === 'google' ? await signInWithGoogle() : await signInWithKakao();
     if (error) {
       setAuthError(error);
-      setIsSubmitting(false);
+      setPendingProvider(null);
     }
   };
 
@@ -60,21 +60,21 @@ export default function AuthPage() {
             </span>
 
             <h1 className="mt-4 text-2xl font-extrabold leading-tight text-white sm:text-[1.75rem]">
-              Google 계정으로
+              소셜 계정으로
               <br />
               투표 지도 시작하기
             </h1>
 
             <p className="mt-3 text-sm leading-relaxed text-white/70">
-              로그인과 회원가입을 분리하지 않습니다. Google로 계속하면 기존 계정 로그인 또는 신규
+              로그인과 회원가입을 분리하지 않습니다. 소셜 계정으로 계속하면 기존 계정 로그인 또는 신규
               계정 생성이 자동으로 처리됩니다.
             </p>
 
             <button
               type="button"
               aria-label="Google로 계속하기"
-              onClick={handleGoogleLogin}
-              disabled={isSubmitting || isLoading}
+              onClick={() => handleSocialLogin('google')}
+              disabled={pendingProvider !== null || isLoading}
               className="mt-7 flex w-full items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white px-5 py-3.5 text-sm font-bold text-[#1f2937] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
             >
               <span
@@ -86,7 +86,35 @@ export default function AuthPage() {
                 <span className="bg-[#fbbc05]" />
                 <span className="bg-[#34a853]" />
               </span>
-              {isSubmitting || isLoading ? '로그인 준비 중...' : 'Google로 계속하기'}
+              {pendingProvider === 'google' || isLoading ? '로그인 준비 중...' : 'Google로 계속하기'}
+            </button>
+
+            <button
+              type="button"
+              aria-label="카카오로 계속하기"
+              onClick={() => handleSocialLogin('kakao')}
+              disabled={pendingProvider !== null || isLoading}
+              className="mt-3 flex w-full items-center justify-center gap-3 rounded-2xl border border-[#3d2f00] bg-[#fee500] px-5 py-3.5 text-sm font-bold text-[#191919] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <span
+                aria-hidden
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#191919] text-[11px] font-black text-[#fee500]"
+              >
+                K
+              </span>
+              {pendingProvider === 'kakao' || isLoading ? '로그인 준비 중...' : '카카오로 계속하기'}
+            </button>
+
+            <button
+              type="button"
+              aria-label="Apple 로그인 출시 예정"
+              disabled
+              className="mt-3 flex w-full cursor-not-allowed items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-5 py-3.5 text-sm font-bold text-white/55 opacity-80"
+            >
+              <span aria-hidden className="text-base leading-none text-white/70">
+                
+              </span>
+              Apple 로그인 (출시 예정)
             </button>
 
             {authError ? (

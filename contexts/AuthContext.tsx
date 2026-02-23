@@ -39,6 +39,7 @@ type AuthContextValue = {
   isLoading: boolean;
   isAuthenticated: boolean;
   signInWithGoogle: () => Promise<{ error: string | null }>;
+  signInWithKakao: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -213,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [applySession, supabase]);
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithOAuth = useCallback(async (provider: 'google' | 'kakao') => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       return { error: 'Supabase 환경변수(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)가 필요합니다.' };
@@ -221,12 +222,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const redirectTo = `${window.location.origin}/auth`;
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+      provider,
       options: { redirectTo },
     });
 
     return { error: error?.message ?? null };
   }, []);
+
+  const signInWithGoogle = useCallback(async () => {
+    return signInWithOAuth('google');
+  }, [signInWithOAuth]);
+
+  const signInWithKakao = useCallback(async () => {
+    return signInWithOAuth('kakao');
+  }, [signInWithOAuth]);
 
   const signOut = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
@@ -247,10 +256,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       isAuthenticated: !!user,
       signInWithGoogle,
+      signInWithKakao,
       signOut,
       refreshProfile,
     }),
-    [user, profile, isLoading, signInWithGoogle, signOut, refreshProfile],
+    [user, profile, isLoading, signInWithGoogle, signInWithKakao, signOut, refreshProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
