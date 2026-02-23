@@ -5,7 +5,6 @@ import { ensureSchool, getSchoolIdentityById } from '@/lib/server/schools';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
-const ADMIN_UNLIMITED_VOTE_EMAILS = new Set(['skynkm0307@gmail.com']);
 
 const profileSchema = z.object({
   birthYear: z.number().int().min(1900).max(2100),
@@ -30,7 +29,7 @@ const profileSchema = z.object({
 const voteBodySchema = z.object({
   topicId: z.string().min(1),
   optionKey: z.string().min(1),
-  guestToken: z.string().uuid().optional(),
+  guestSessionId: z.string().uuid().optional(),
   profile: profileSchema.optional(),
 });
 
@@ -48,12 +47,10 @@ export async function POST(request: Request) {
     const body = parsed.data;
     const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
     const voterUserId = user?.id ?? null;
-    const userEmail = user?.email?.toLowerCase() ?? null;
-    const isUnlimitedAdmin = !!userEmail && ADMIN_UNLIMITED_VOTE_EMAILS.has(userEmail);
-    const guestToken = voterUserId ? null : body.guestToken ?? null;
+    const guestSessionId = voterUserId ? null : body.guestSessionId ?? null;
 
-    if (!voterUserId && !guestToken) {
-      return NextResponse.json({ error: '비로그인 투표에는 guestToken이 필요합니다.' }, { status: 400 });
+    if (!voterUserId && !guestSessionId) {
+      return NextResponse.json({ error: '비로그인 투표에는 guestSessionId가 필요합니다.' }, { status: 400 });
     }
 
     const supabase = getSupabaseServiceRoleClient();
@@ -72,7 +69,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '유효하지 않은 투표 선택지입니다.' }, { status: 400 });
     }
 
-    if (voterUserId && !isUnlimitedAdmin) {
+    if (voterUserId) {
       const { data: existingUserVote, error: existingUserVoteError } = await supabase
         .from('votes')
         .select('id')
@@ -86,12 +83,12 @@ export async function POST(request: Request) {
       if (existingUserVote) {
         return NextResponse.json({ error: '이미 해당 주제에 투표했습니다.' }, { status: 409 });
       }
-    } else if (guestToken) {
+    } else if (guestSessionId) {
       const { data: existingGuestVote, error: existingGuestVoteError } = await supabase
-        .from('votes')
+        .from('guest_votes_temp')
         .select('id')
         .eq('topic_id', body.topicId)
-        .eq('guest_token', guestToken)
+        .eq('session_id', guestSessionId)
         .maybeSingle();
 
       if (existingGuestVoteError) {
@@ -108,8 +105,6 @@ export async function POST(request: Request) {
     let aggregateSchoolId: string;
     let sidoCode: string | null;
     let sigunguCode: string | null;
-    let insertUserId: string | null = voterUserId;
-    let insertGuestToken: string | null = guestToken;
 
     if (body.profile) {
       const ensuredSchool = await ensureSchool(body.profile.school);
@@ -174,41 +169,77 @@ export async function POST(request: Request) {
       sigunguCode = userRow.sigungu_code ?? schoolIdentity.sigunguCode;
     }
 
-    if (isUnlimitedAdmin) {
-      const randomToken =
-        typeof globalThis.crypto?.randomUUID === 'function'
-          ? globalThis.crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    if (voterUserId) {
+      const { data: insertedVote, error: voteInsertError } = await supabase
+        .from('votes')
+        .insert({
+          topic_id: body.topicId,
+          option_key: body.optionKey,
+          user_id: voterUserId,
+          guest_token: null,
+          school_id: schoolId,
+          aggregate_school_id: aggregateSchoolId,
+          birth_year: birthYear,
+          gender,
+          sido_code: sidoCode,
+          sigungu_code: sigunguCode,
+        })
+        .select('id, topic_id, option_key, user_id, created_at')
+        .single();
 
-      insertUserId = null;
-      insertGuestToken = `admin-${voterUserId}-${randomToken}`;
+      if (voteInsertError) {
+        if (voteInsertError.code === '23505') {
+          return NextResponse.json({ error: '이미 해당 주제에 투표했습니다.' }, { status: 409 });
+        }
+        return NextResponse.json({ error: voteInsertError.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ vote: insertedVote }, { status: 201 });
     }
 
-    const { data: insertedVote, error: voteInsertError } = await supabase
-      .from('votes')
+    if (!guestSessionId) {
+      return NextResponse.json({ error: 'guest session이 유효하지 않습니다.' }, { status: 400 });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { error: sessionUpsertError } = await supabase
+      .from('guest_vote_sessions')
+      .upsert({ id: guestSessionId, last_seen_at: nowIso }, { onConflict: 'id' });
+
+    if (sessionUpsertError) {
+      return NextResponse.json({ error: sessionUpsertError.message }, { status: 500 });
+    }
+
+    const { data: insertedTempVote, error: tempVoteInsertError } = await supabase
+      .from('guest_votes_temp')
       .insert({
+        session_id: guestSessionId,
         topic_id: body.topicId,
         option_key: body.optionKey,
-        user_id: insertUserId,
-        guest_token: insertGuestToken,
         school_id: schoolId,
         aggregate_school_id: aggregateSchoolId,
-        birth_year: birthYear,
-        gender,
         sido_code: sidoCode,
         sigungu_code: sigunguCode,
       })
-      .select('id, topic_id, option_key, user_id, guest_token, created_at')
+      .select('id, topic_id, option_key, voted_at')
       .single();
 
-    if (voteInsertError) {
-      if (voteInsertError.code === '23505') {
+    if (tempVoteInsertError) {
+      if (tempVoteInsertError.code === '23505') {
         return NextResponse.json({ error: '이미 해당 주제에 투표했습니다.' }, { status: 409 });
       }
-      return NextResponse.json({ error: voteInsertError.message }, { status: 500 });
+      return NextResponse.json({ error: tempVoteInsertError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ vote: insertedVote }, { status: 201 });
+    return NextResponse.json(
+      {
+        vote: {
+          ...insertedTempVote,
+          session_id: guestSessionId,
+        },
+      },
+      { status: 201 },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'vote submit failed';
     return NextResponse.json({ error: message }, { status: 500 });

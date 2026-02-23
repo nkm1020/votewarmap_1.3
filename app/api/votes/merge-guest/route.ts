@@ -6,7 +6,13 @@ import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 export const runtime = 'nodejs';
 
 const mergeSchema = z.object({
-  guestToken: z.string().uuid(),
+  guestSessionId: z.string().uuid(),
+  profile: z
+    .object({
+      birthYear: z.number().int().min(1900).max(2100),
+      gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']),
+    })
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -26,12 +32,21 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase.rpc('merge_guest_votes_to_user', {
-      p_guest_token: parsed.data.guestToken,
+    const { data, error } = await supabase.rpc('promote_guest_session_votes_to_user', {
+      p_session_id: parsed.data.guestSessionId,
       p_user_id: user.id,
+      p_birth_year: parsed.data.profile?.birthYear ?? null,
+      p_gender: parsed.data.profile?.gender ?? null,
     });
 
     if (error) {
+      const lowered = error.message.toLowerCase();
+      if (lowered.includes('profile')) {
+        return NextResponse.json(
+          { error: '승격을 위해 출생연도/성별 정보가 필요합니다.' },
+          { status: 400 },
+        );
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

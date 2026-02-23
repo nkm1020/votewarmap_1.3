@@ -12,8 +12,13 @@ import {
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
-import { clearPendingProfile, clearPendingVotes } from '@/lib/vote/client-storage';
+import {
+  clearGuestSessionId,
+  clearPendingProfile,
+  clearPendingVotes,
+  readGuestSessionId,
+  readPendingProfile,
+} from '@/lib/vote/client-storage';
 
 type UserProfile = {
   id: string;
@@ -104,11 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const guestToken = localStorage.getItem(LOCAL_STORAGE_KEYS.guestToken);
-    if (!guestToken) {
+    const guestSessionId = readGuestSessionId();
+    if (!guestSessionId) {
       mergedUserRef.current = session.user.id;
       return;
     }
+
+    const pendingProfile = readPendingProfile();
 
     const response = await fetch('/api/votes/merge-guest', {
       method: 'POST',
@@ -116,12 +123,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ guestToken }),
+      body: JSON.stringify({
+        guestSessionId,
+        ...(pendingProfile
+          ? {
+              profile: {
+                birthYear: pendingProfile.birthYear,
+                gender: pendingProfile.gender,
+              },
+            }
+          : {}),
+      }),
     });
 
     if (response.ok) {
       clearPendingVotes();
       clearPendingProfile();
+      clearGuestSessionId();
     }
 
     mergedUserRef.current = session.user.id;

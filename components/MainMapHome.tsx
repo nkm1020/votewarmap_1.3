@@ -6,16 +6,16 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { SearchIcon } from 'lucide-react';
-import type { RegionVoteMap } from '@/components/KoreaAdminMap';
+import type { MapPointMarker, RegionVoteMap } from '@/components/KoreaAdminMap';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
-  getOrCreateGuestToken,
   readPendingProfile,
   readPendingVotes,
   writePendingProfile,
 } from '@/lib/vote/client-storage';
+import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import {
   LOCAL_STORAGE_KEYS,
   POPULAR_OPTION_A,
@@ -151,6 +151,7 @@ export default function MainMapHome() {
   const prefersReducedMotion = useReducedMotion();
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('home');
   const [mapStats, setMapStats] = useState<RegionVoteMap>({});
+  const [topSchoolMarkers, setTopSchoolMarkers] = useState<MapPointMarker[]>([]);
   const [isStatsLoading, setIsStatsLoading] = useState(true);
   const [summary, setSummary] = useState({
     totalVotes: 0,
@@ -172,7 +173,6 @@ export default function MainMapHome() {
   const [gender, setGender] = useState<Gender>('male');
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
   const [voteAfterProfile, setVoteAfterProfile] = useState(false);
-  const [guestToken, setGuestToken] = useState<string | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<{
@@ -190,6 +190,7 @@ export default function MainMapHome() {
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
 
   const { isAuthenticated, isLoading, profile, user, signOut } = useAuth();
+  const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
 
   const mergedMapStats = useMemo(() => mapStats, [mapStats]);
@@ -236,9 +237,10 @@ export default function MainMapHome() {
     setIsStatsLoading(true);
     try {
       const nonce = Date.now();
-      const [sidoRes, sigunguRes] = await Promise.allSettled([
+      const [sidoRes, sigunguRes, topSchoolsRes] = await Promise.allSettled([
         fetch(`/api/votes/region-stats?topicId=${POPULAR_TOPIC_ID}&level=sido&ts=${nonce}`, { cache: 'no-store' }),
         fetch(`/api/votes/region-stats?topicId=${POPULAR_TOPIC_ID}&level=sigungu&ts=${nonce}`, { cache: 'no-store' }),
+        fetch(`/api/votes/top-schools-by-region?scope=all&ts=${nonce}`, { cache: 'no-store' }),
       ]);
 
       let sidoJson:
@@ -248,6 +250,7 @@ export default function MainMapHome() {
           }
         | null = null;
       let sigunguJson: { statsByCode?: RegionVoteMap } | null = null;
+      let topSchoolsJson: { markers?: MapPointMarker[] } | null = null;
 
       if (sidoRes.status === 'fulfilled' && sidoRes.value.ok) {
         sidoJson = (await sidoRes.value.json()) as {
@@ -258,12 +261,18 @@ export default function MainMapHome() {
       if (sigunguRes.status === 'fulfilled' && sigunguRes.value.ok) {
         sigunguJson = (await sigunguRes.value.json()) as { statsByCode?: RegionVoteMap };
       }
+      if (topSchoolsRes.status === 'fulfilled' && topSchoolsRes.value.ok) {
+        topSchoolsJson = (await topSchoolsRes.value.json()) as { markers?: MapPointMarker[] };
+      }
 
       const nextMapStats: RegionVoteMap = {
         ...(sidoJson?.statsByCode ?? {}),
         ...(sigunguJson?.statsByCode ?? {}),
       };
       setMapStats(nextMapStats);
+      if (topSchoolsJson && Array.isArray(topSchoolsJson.markers)) {
+        setTopSchoolMarkers(topSchoolsJson.markers);
+      }
 
       if (sidoJson?.summary) {
         setSummary(normalizeSummary(sidoJson.summary));
@@ -311,9 +320,6 @@ export default function MainMapHome() {
   }, [loadRegionStats]);
 
   useEffect(() => {
-    const token = getOrCreateGuestToken();
-    setGuestToken(token);
-
     const cachedRegionState = readCachedRegionState();
     if (cachedRegionState) {
       setMapStats(cachedRegionState.statsByCode);
@@ -430,6 +436,11 @@ export default function MainMapHome() {
       setVoteMessage(null);
 
       try {
+        if (!isAuthenticated && !guestSessionId) {
+          setVoteMessage('세션 연결 중입니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        }
+
         let accessToken: string | null = null;
         if (isAuthenticated) {
           const supabase = getSupabaseBrowserClient();
@@ -448,7 +459,7 @@ export default function MainMapHome() {
           body: JSON.stringify({
             topicId: POPULAR_TOPIC_ID,
             optionKey: selectedOption,
-            guestToken: isAuthenticated ? undefined : guestToken,
+            guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(profilePayload ? { profile: profilePayload } : {}),
           }),
         });
@@ -523,7 +534,7 @@ export default function MainMapHome() {
       }
     },
     [
-      guestToken,
+      guestSessionId,
       isAuthenticated,
       loadRegionStats,
       mapStats,
@@ -593,6 +604,8 @@ export default function MainMapHome() {
       <div className="absolute inset-0">
         <KoreaAdminMap
           statsByCode={mergedMapStats}
+          pointMarkers={topSchoolMarkers}
+          markerEffect="gps"
           height="100%"
           initialCenter={MAIN_INITIAL_CENTER}
           initialZoom={MAIN_INITIAL_ZOOM}
@@ -832,7 +845,11 @@ export default function MainMapHome() {
             <button
               type="button"
               onClick={() => void handleVote()}
-              disabled={isSubmittingVote || (!isAuthenticated && guestHasVoted)}
+              disabled={
+                isSubmittingVote ||
+                (!isAuthenticated && guestHasVoted) ||
+                (!isAuthenticated && !guestSessionId)
+              }
               className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-[22px] border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.45)] transition active:scale-[0.99] hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:opacity-65"
             >
               {isSubmittingVote

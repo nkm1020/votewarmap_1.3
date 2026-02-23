@@ -3,7 +3,8 @@ export const POPULAR_OPTION_A = 'seoul';
 export const POPULAR_OPTION_B = 'busan';
 
 export const LOCAL_STORAGE_KEYS = {
-  guestToken: 'vwm_guest_token',
+  guestSessionId: 'vwm_guest_session_id',
+  legacyGuestToken: 'vwm_guest_token',
   pendingProfile: 'vwm_pending_profile',
   pendingVotes: 'vwm_pending_votes',
   cachedRegionStatsPopular: 'vwm_cached_region_stats_popular',

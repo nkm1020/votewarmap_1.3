@@ -8,11 +8,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
-  getOrCreateGuestToken,
   readPendingProfile,
   readPendingVotes,
   writePendingProfile,
 } from '@/lib/vote/client-storage';
+import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
 import type { RegionVoteMap } from './KoreaAdminMap';
 import { TagSelector } from '@/components/ui/tag-selector';
@@ -130,7 +130,6 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const [birthYear, setBirthYear] = useState<number>(() => new Date().getFullYear() - 17);
   const [gender, setGender] = useState<Gender>('male');
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
-  const [guestToken, setGuestToken] = useState<string | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
   const [bottomDockHeight, setBottomDockHeight] = useState(152);
   const statsRequestRef = useRef(0);
@@ -139,6 +138,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
   const { isAuthenticated, isLoading, profile, signOut } = useAuth();
+  const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
   const cardEase: [number, number, number, number] = [0.2, 0.65, 0.3, 0.9];
   const cardTransition = {
@@ -397,9 +397,6 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   }, [activeTopicId, loadRegionStats]);
 
   useEffect(() => {
-    const token = getOrCreateGuestToken();
-    setGuestToken(token);
-
     const storedProfile = readPendingProfile();
     if (storedProfile) {
       setBirthYear(storedProfile.birthYear);
@@ -493,6 +490,11 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
       setVoteMessage(null);
 
       try {
+        if (!isAuthenticated && !guestSessionId) {
+          setVoteMessage('세션 연결 중입니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        }
+
         let accessToken: string | null = null;
         if (isAuthenticated) {
           const supabase = getSupabaseBrowserClient();
@@ -511,7 +513,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
           body: JSON.stringify({
             topicId: activeTopicId,
             optionKey: selectedOptionKey,
-            guestToken: isAuthenticated ? undefined : guestToken,
+            guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(profilePayload ? { profile: profilePayload } : {}),
           }),
         });
@@ -569,7 +571,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
     },
     [
       activeTopicId,
-      guestToken,
+      guestSessionId,
       isAuthenticated,
       loadRegionStats,
       optionA,
@@ -856,7 +858,12 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
                 <button
                   type="button"
                   onClick={() => void handleVote()}
-                  disabled={isSubmittingVote || !selectedOptionKey || (!isAuthenticated && guestHasVoted)}
+                  disabled={
+                    isSubmittingVote ||
+                    !selectedOptionKey ||
+                    (!isAuthenticated && guestHasVoted) ||
+                    (!isAuthenticated && !guestSessionId)
+                  }
                   className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-[22px] border border-[#ff9f0a66] bg-[#ff6b00] text-[17px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.45)] transition active:scale-[0.99] hover:bg-[#ff7c1f] disabled:cursor-not-allowed disabled:opacity-65"
                 >
                   {isSubmittingVote

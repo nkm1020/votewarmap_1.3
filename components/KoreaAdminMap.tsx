@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FeatureCollection, Geometry } from 'geojson';
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource } from 'maplibre-gl';
 import { Layers3Icon, MapIcon } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 
 type RegionLevel = 'sido' | 'sigungu';
 
@@ -18,6 +18,19 @@ export type RegionVoteStat = {
 };
 
 export type RegionVoteMap = Record<string, RegionVoteStat>;
+
+export type MapPointMarker = {
+  id: string;
+  name: string;
+  rankLevel: 'sido';
+  regionCode: string;
+  schoolId: string;
+  voteCount: number;
+  lastVoteAt: string;
+  lat: number;
+  lng: number;
+  coordinateSource: 'school' | 'centroid';
+};
 
 type HoveredRegion = {
   code: string;
@@ -39,6 +52,8 @@ type MapTheme = 'light' | 'dark';
 
 export interface KoreaAdminMapProps {
   statsByCode?: RegionVoteMap;
+  pointMarkers?: MapPointMarker[];
+  markerEffect?: 'gps' | 'static';
   className?: string;
   height?: number | string;
   initialCenter?: [number, number];
@@ -95,6 +110,11 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection<Geometry> = {
 const REGION_NAME_OVERRIDES: Record<string, string> = {
   '23030': '미추홀구',
 };
+
+const MARKER_SOURCE_ID = 'school-points';
+const MARKER_GLOW_LAYER_ID = 'school-point-glow';
+const MARKER_CORE_LAYER_ID = 'school-point-core';
+const MARKER_LABEL_LAYER_ID = 'school-point-labels';
 
 const LEVEL_TRANSITION_MS = 420;
 const AUTO_BLEND_MARGIN = 0.55;
@@ -158,8 +178,37 @@ function buildFillOpacityExpression(baseOpacity: number): ExpressionSpecificatio
   return ['case', ['boolean', ['feature-state', 'hover'], false], hoverOpacity, safeBase] as ExpressionSpecification;
 }
 
+function isFiniteCoordinate(value: number): boolean {
+  return Number.isFinite(value);
+}
+
+function buildPointMarkerFeatureCollection(markers: MapPointMarker[]): FeatureCollection<Geometry> {
+  return {
+    type: 'FeatureCollection',
+    features: markers
+      .filter((marker) => isFiniteCoordinate(marker.lat) && isFiniteCoordinate(marker.lng))
+      .map((marker) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [marker.lng, marker.lat],
+        },
+        properties: {
+          id: marker.id,
+          name: marker.name,
+          voteCount: marker.voteCount,
+          regionCode: marker.regionCode,
+          coordinateSource: marker.coordinateSource,
+          lastVoteAt: marker.lastVoteAt,
+        },
+      })),
+  };
+}
+
 export default function KoreaAdminMap({
   statsByCode = {},
+  pointMarkers = [],
+  markerEffect = 'gps',
   className,
   height = 640,
   initialCenter,
@@ -175,21 +224,27 @@ export default function KoreaAdminMap({
   onRegionClick,
   onMapZoomDirectionChange,
 }: KoreaAdminMapProps) {
+  const prefersReducedMotion = useReducedMotion();
   const defaultCenter: [number, number] = initialCenter ?? [127.8, 36.2];
   const defaultZoom = initialZoom ?? 6.3;
   const toggleBottomOffsetPx = Math.max(120, bottomDockHeightPx + toggleClearancePx);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const markerPulseIntervalRef = useRef<number | null>(null);
   const sigunguLoadedRef = useRef(false);
   const sigunguCodesRef = useRef<string[]>([]);
   const activeLevelRef = useRef<RegionLevel>('sido');
   const hoverRef = useRef<{ source: RegionLevel; id: string | number } | null>(null);
   const statsRef = useRef<RegionVoteMap>(statsByCode);
+  const pointMarkersRef = useRef<MapPointMarker[]>(pointMarkers);
+  const markerEffectRef = useRef<'gps' | 'static'>(markerEffect);
+  const prefersReducedMotionRef = useRef(Boolean(prefersReducedMotion));
   const colorsRef = useRef<MapColors>({ ...getDefaultColors(theme), ...colors });
   const onRegionClickRef = useRef(onRegionClick);
   const onMapZoomDirectionChangeRef = useRef(onMapZoomDirectionChange);
   const switchTimeoutRef = useRef<number | null>(null);
   const requestLevelSwitchRef = useRef<((level?: RegionLevel) => void) | null>(null);
+  const requestMarkerEffectSyncRef = useRef<(() => void) | null>(null);
   const suppressAutoLevelSyncRef = useRef(false);
   const selectedLevelRef = useRef<RegionLevel>('sido');
   const [hovered, setHovered] = useState<HoveredRegion | null>(null);
@@ -208,6 +263,16 @@ export default function KoreaAdminMap({
   }, [selectedLevel]);
 
   useEffect(() => {
+    pointMarkersRef.current = pointMarkers;
+  }, [pointMarkers]);
+
+  useEffect(() => {
+    markerEffectRef.current = markerEffect;
+    prefersReducedMotionRef.current = Boolean(prefersReducedMotion);
+    requestMarkerEffectSyncRef.current?.();
+  }, [markerEffect, prefersReducedMotion]);
+
+  useEffect(() => {
     if (!mapNodeRef.current || mapRef.current) {
       return;
     }
@@ -216,6 +281,7 @@ export default function KoreaAdminMap({
       theme === 'dark'
         ? {
             version: 8,
+            glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
             sources: {
               'carto-dark': {
                 type: 'raster',
@@ -246,6 +312,7 @@ export default function KoreaAdminMap({
           }
         : {
             version: 8,
+            glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
             sources: {},
             layers: [
               {
@@ -281,6 +348,47 @@ export default function KoreaAdminMap({
       }
     };
 
+    const clearMarkerPulse = () => {
+      if (markerPulseIntervalRef.current) {
+        window.clearInterval(markerPulseIntervalRef.current);
+        markerPulseIntervalRef.current = null;
+      }
+    };
+
+    const setGlowPaint = (radius: number, opacity: number) => {
+      if (!map.getLayer(MARKER_GLOW_LAYER_ID)) {
+        return;
+      }
+      map.setPaintProperty(MARKER_GLOW_LAYER_ID, 'circle-radius', radius);
+      map.setPaintProperty(MARKER_GLOW_LAYER_ID, 'circle-opacity', opacity);
+    };
+
+    const syncMarkerEffect = () => {
+      const shouldPulse = markerEffectRef.current === 'gps' && !prefersReducedMotionRef.current;
+      clearMarkerPulse();
+      if (!map.getLayer(MARKER_GLOW_LAYER_ID)) {
+        return;
+      }
+
+      if (!shouldPulse) {
+        setGlowPaint(16, 0.22);
+        return;
+      }
+
+      let expanded = false;
+      const tick = () => {
+        expanded = !expanded;
+        if (expanded) {
+          setGlowPaint(24, 0.08);
+          return;
+        }
+        setGlowPaint(16, 0.22);
+      };
+
+      tick();
+      markerPulseIntervalRef.current = window.setInterval(tick, 950);
+    };
+
     const themeStyle = THEME_STYLES[theme];
     const majorOpacity = theme === 'dark' ? 0.68 : 0.74;
     const minorOpacity = theme === 'dark' ? 0.62 : 0.7;
@@ -300,6 +408,15 @@ export default function KoreaAdminMap({
         if (map.getLayer('sigungu-borders')) {
           map.moveLayer('sigungu-borders');
         }
+        if (map.getLayer(MARKER_GLOW_LAYER_ID)) {
+          map.moveLayer(MARKER_GLOW_LAYER_ID);
+        }
+        if (map.getLayer(MARKER_CORE_LAYER_ID)) {
+          map.moveLayer(MARKER_CORE_LAYER_ID);
+        }
+        if (map.getLayer(MARKER_LABEL_LAYER_ID)) {
+          map.moveLayer(MARKER_LABEL_LAYER_ID);
+        }
         return;
       }
 
@@ -308,6 +425,15 @@ export default function KoreaAdminMap({
       }
       if (map.getLayer('sido-borders')) {
         map.moveLayer('sido-borders');
+      }
+      if (map.getLayer(MARKER_GLOW_LAYER_ID)) {
+        map.moveLayer(MARKER_GLOW_LAYER_ID);
+      }
+      if (map.getLayer(MARKER_CORE_LAYER_ID)) {
+        map.moveLayer(MARKER_CORE_LAYER_ID);
+      }
+      if (map.getLayer(MARKER_LABEL_LAYER_ID)) {
+        map.moveLayer(MARKER_LABEL_LAYER_ID);
       }
     };
 
@@ -585,6 +711,69 @@ export default function KoreaAdminMap({
         },
       });
 
+      map.addSource(MARKER_SOURCE_ID, {
+        type: 'geojson',
+        data: buildPointMarkerFeatureCollection(pointMarkersRef.current),
+      });
+
+      map.addLayer({
+        id: MARKER_GLOW_LAYER_ID,
+        type: 'circle',
+        source: MARKER_SOURCE_ID,
+        paint: {
+          'circle-color': 'rgba(94, 224, 255, 0.72)',
+          'circle-radius': 16,
+          'circle-opacity': 0.22,
+          'circle-blur': 0.45,
+          'circle-radius-transition': {
+            duration: 850,
+            delay: 0,
+          },
+          'circle-opacity-transition': {
+            duration: 850,
+            delay: 0,
+          },
+        },
+      });
+
+      map.addLayer({
+        id: MARKER_CORE_LAYER_ID,
+        type: 'circle',
+        source: MARKER_SOURCE_ID,
+        paint: {
+          'circle-color': '#93ECFF',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5.5, 3.2, 10.5, 5.3],
+          'circle-stroke-color': 'rgba(4, 16, 28, 0.92)',
+          'circle-stroke-width': 1.1,
+          'circle-opacity': 0.95,
+        },
+      });
+
+      map.addLayer({
+        id: MARKER_LABEL_LAYER_ID,
+        type: 'symbol',
+        source: MARKER_SOURCE_ID,
+        minzoom: 7.15,
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['Open Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 7.15, 9, 9.2, 11],
+          'text-anchor': 'top',
+          'text-offset': [0, 1.15],
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
+          'text-max-width': 10,
+        },
+        paint: {
+          'text-color': 'rgba(240, 248, 255, 0.96)',
+          'text-halo-color': 'rgba(6, 14, 24, 0.92)',
+          'text-halo-width': 1.2,
+        },
+      });
+
+      requestMarkerEffectSyncRef.current = syncMarkerEffect;
+      syncMarkerEffect();
+
       registerHoverAndClick('sido-fills', 'sido');
       registerHoverAndClick('sigungu-fills', 'sigungu');
       void ensureSigunguLoaded();
@@ -617,6 +806,8 @@ export default function KoreaAdminMap({
 
     return () => {
       setHovered(null);
+      requestMarkerEffectSyncRef.current = null;
+      clearMarkerPulse();
       if (switchTimeoutRef.current) {
         window.clearTimeout(switchTimeoutRef.current);
         switchTimeoutRef.current = null;
@@ -644,6 +835,17 @@ export default function KoreaAdminMap({
       map.setPaintProperty('sigungu-fills', 'fill-color', fillExpression);
     }
   }, [statsByCode, colors, theme]);
+
+  useEffect(() => {
+    pointMarkersRef.current = pointMarkers;
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const source = map.getSource(MARKER_SOURCE_ID) as GeoJSONSource | undefined;
+    source?.setData(buildPointMarkerFeatureCollection(pointMarkers));
+  }, [pointMarkers]);
 
   const handleSelectLevel = (nextLevel: RegionLevel) => {
     setSelectedLevel(nextLevel);

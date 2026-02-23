@@ -9,28 +9,85 @@ function isBrowser(): boolean {
   return typeof window !== 'undefined';
 }
 
-export function getOrCreateGuestToken(): string | null {
+function createUuid(): string {
+  if (typeof crypto?.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function migrateLegacyGuestToken(sessionStorageRef: Storage): string | null {
+  const legacyToken = localStorage.getItem(LOCAL_STORAGE_KEYS.legacyGuestToken);
+  if (!legacyToken) {
+    return null;
+  }
+
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.guestSessionId, legacyToken);
+  localStorage.removeItem(LOCAL_STORAGE_KEYS.legacyGuestToken);
+  return legacyToken;
+}
+
+function getSessionStorage(): Storage | null {
   if (!isBrowser()) {
     return null;
   }
 
-  const existing = localStorage.getItem(LOCAL_STORAGE_KEYS.guestToken);
+  return window.sessionStorage;
+}
+
+export function readGuestSessionId(): string | null {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return null;
+  }
+
+  return (
+    sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.guestSessionId) ??
+    migrateLegacyGuestToken(sessionStorageRef)
+  );
+}
+
+export function getOrCreateGuestSessionId(): string | null {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return null;
+  }
+
+  const existing =
+    sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.guestSessionId) ??
+    migrateLegacyGuestToken(sessionStorageRef);
   if (existing) {
     return existing;
   }
 
-  const token = crypto.randomUUID();
-  localStorage.setItem(LOCAL_STORAGE_KEYS.guestToken, token);
-  return token;
+  const sessionId = createUuid();
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.guestSessionId, sessionId);
+  return sessionId;
+}
+
+// Backward-compatible alias used by legacy callers.
+export function getOrCreateGuestToken(): string | null {
+  return getOrCreateGuestSessionId();
+}
+
+export function clearGuestSessionId(): void {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return;
+  }
+
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.guestSessionId);
+  localStorage.removeItem(LOCAL_STORAGE_KEYS.legacyGuestToken);
 }
 
 export function readPendingProfile(): VoteProfileInput | null {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return null;
   }
 
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEYS.pendingProfile);
+    const raw = sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.pendingProfile);
     if (!raw) {
       return null;
     }
@@ -42,28 +99,31 @@ export function readPendingProfile(): VoteProfileInput | null {
 }
 
 export function writePendingProfile(profile: VoteProfileInput): void {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return;
   }
 
-  localStorage.setItem(LOCAL_STORAGE_KEYS.pendingProfile, JSON.stringify(profile));
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.pendingProfile, JSON.stringify(profile));
 }
 
 export function clearPendingProfile(): void {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return;
   }
 
-  localStorage.removeItem(LOCAL_STORAGE_KEYS.pendingProfile);
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingProfile);
 }
 
 export function readPendingVotes(): string[] {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return [];
   }
 
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEYS.pendingVotes);
+    const raw = sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.pendingVotes);
     if (!raw) {
       return [];
     }
@@ -80,19 +140,24 @@ export function readPendingVotes(): string[] {
 }
 
 export function addPendingVoteTopic(topicId: string): void {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return;
   }
 
   const current = new Set(readPendingVotes());
   current.add(topicId);
-  localStorage.setItem(LOCAL_STORAGE_KEYS.pendingVotes, JSON.stringify({ topicIds: Array.from(current) }));
+  sessionStorageRef.setItem(
+    LOCAL_STORAGE_KEYS.pendingVotes,
+    JSON.stringify({ topicIds: Array.from(current) }),
+  );
 }
 
 export function clearPendingVotes(): void {
-  if (!isBrowser()) {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
     return;
   }
 
-  localStorage.removeItem(LOCAL_STORAGE_KEYS.pendingVotes);
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingVotes);
 }
