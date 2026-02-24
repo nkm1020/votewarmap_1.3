@@ -16,7 +16,6 @@ import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
 import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
 import type { RegionVoteMap } from './KoreaAdminMap';
-import { TagSelector } from '@/components/ui/tag-selector';
 
 const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
 const TOPICS_MAP_INITIAL_CENTER: [number, number] = [127.75, 36.18];
@@ -175,6 +174,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const [isSchoolSearching, setIsSchoolSearching] = useState(false);
   const [schoolResults, setSchoolResults] = useState<SchoolSearchItem[]>([]);
   const [schoolQuery, setSchoolQuery] = useState('');
+  const [highlightedSchoolIndex, setHighlightedSchoolIndex] = useState(0);
   const [birthYear, setBirthYear] = useState<number>(() => new Date().getFullYear() - 17);
   const [gender, setGender] = useState<Gender>('male');
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
@@ -190,6 +190,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const topicStatsCacheRef = useRef<Record<string, { mapStats: RegionVoteMap; summary: VoteSummary }>>({});
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
   const bottomMenuRef = useRef<HTMLDivElement | null>(null);
+  const schoolResultsListRef = useRef<HTMLDivElement | null>(null);
   const topicSelectorRef = useRef<HTMLElement | null>(null);
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
@@ -251,6 +252,9 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const optionA = activeTopic?.options.find((option) => option.position === 1) ?? null;
   const optionB = activeTopic?.options.find((option) => option.position === 2) ?? null;
   const selectedOptionLabel = activeTopic?.options.find((option) => option.key === selectedOptionKey)?.label ?? null;
+  const isSchoolListVisible = Boolean(
+    schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName),
+  );
   const mapStatsSignature = useMemo(
     () =>
       Object.entries(mapStats)
@@ -273,15 +277,6 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
     }
     return options;
   }, []);
-  const selectedBirthYearTag = useMemo(
-    () => [{ value: String(birthYear), label: `${birthYear}년` }],
-    [birthYear],
-  );
-  const selectedGenderTag = useMemo(() => {
-    const match = GENDER_OPTIONS.find((option) => option.value === gender);
-    return match ? [match] : [];
-  }, [gender]);
-  const selectedSchoolTag = useMemo(() => (selectedSchool ? [selectedSchool] : []), [selectedSchool]);
 
   const loadRegionStats = useCallback(async (topicId: string) => {
     const requestId = ++statsRequestRef.current;
@@ -593,6 +588,35 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
 
     return () => clearTimeout(handle);
   }, [schoolQuery, showProfileModal]);
+
+  useEffect(() => {
+    if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+      setHighlightedSchoolIndex(0);
+      return;
+    }
+
+    setHighlightedSchoolIndex((prev) => Math.min(Math.max(prev, 0), schoolResults.length - 1));
+  }, [isSchoolListVisible, isSchoolSearching, schoolResults.length]);
+
+  useEffect(() => {
+    if (!isSchoolListVisible || schoolResults.length === 0) {
+      return;
+    }
+
+    const listNode = schoolResultsListRef.current;
+    if (!listNode) {
+      return;
+    }
+
+    const targetButton = listNode.querySelector<HTMLButtonElement>(`[data-school-index="${highlightedSchoolIndex}"]`);
+    targetButton?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedSchoolIndex, isSchoolListVisible, schoolResults.length]);
+
+  const handleSelectSchool = useCallback((school: SchoolSearchItem) => {
+    setSelectedSchool(school);
+    setSchoolQuery(school.schoolName);
+    setHighlightedSchoolIndex(0);
+  }, []);
 
   const savePendingProfile = useCallback((): VoteProfileInput | null => {
     if (!selectedSchool) {
@@ -1120,84 +1144,121 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
             <div className="space-y-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-white/70">출생연도</span>
-                <TagSelector<{ value: string; label: string }>
-                  availableTags={birthYearOptions}
-                  selectedTags={selectedBirthYearTag}
-                  onChange={(tags) => {
-                    const nextYear = Number(tags[0]?.value);
+                <select
+                  value={String(birthYear)}
+                  onChange={(event) => {
+                    const nextYear = Number(event.target.value);
                     if (Number.isFinite(nextYear)) {
                       setBirthYear(nextYear);
                     }
                   }}
-                  getValue={(tag) => tag.value}
-                  getLabel={(tag) => tag.label}
-                  heading="출생연도"
-                  placeholder="출생연도 선택"
-                  inputPlaceholder="출생연도 검색"
-                  emptyMessage="조건에 맞는 연도가 없습니다."
-                  allowClear={false}
-                  multiple={false}
-                />
+                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none transition focus:border-[#ff9f0a66]"
+                >
+                  {birthYearOptions.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-[#1f1f24] text-white">
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-white/70">성별</span>
-                <TagSelector<{ value: Gender; label: string }>
-                  availableTags={GENDER_OPTIONS}
-                  selectedTags={selectedGenderTag}
-                  onChange={(tags) => {
-                    const nextGender = tags[0]?.value;
+                <select
+                  value={gender}
+                  onChange={(event) => {
+                    const nextGender = event.target.value;
                     if (nextGender === 'male' || nextGender === 'female') {
                       setGender(nextGender);
                     }
                   }}
-                  getValue={(tag) => tag.value}
-                  getLabel={(tag) => tag.label}
-                  heading="성별"
-                  placeholder="성별 선택"
-                  inputPlaceholder="성별 검색"
-                  emptyMessage="조건에 맞는 성별이 없습니다."
-                  allowClear={false}
-                  multiple={false}
-                />
+                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none transition focus:border-[#ff9f0a66]"
+                >
+                  {GENDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-[#1f1f24] text-white">
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
-                <TagSelector<SchoolSearchItem>
-                  availableTags={schoolResults}
-                  selectedTags={selectedSchoolTag}
-                  onChange={(tags) => {
-                    const nextSchool = tags[0] ?? null;
-                    setSelectedSchool(nextSchool);
-                    setSchoolQuery(nextSchool?.schoolName ?? '');
+                <input
+                  value={schoolQuery}
+                  onKeyDown={(event) => {
+                    if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+                      return;
+                    }
+
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
+                      return;
+                    }
+
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
+                      return;
+                    }
+
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
+                      if (target) {
+                        handleSelectSchool(target);
+                      }
+                    }
                   }}
-                  getValue={(school) => `${school.source}:${school.schoolCode}`}
-                  getLabel={(school) => school.schoolName}
-                  heading="학교"
-                  placeholder="학교를 선택하세요"
-                  inputPlaceholder="학교명을 입력하세요"
-                  emptyMessage={schoolQuery.trim() ? '검색 결과가 없습니다.' : '학교명을 입력해 주세요.'}
-                  loadingMessage="학교 검색 중..."
-                  isLoading={isSchoolSearching}
-                  multiple={false}
-                  inputValue={schoolQuery}
-                  onInputValueChange={(value) => {
-                    setSchoolQuery(value);
-                    if (selectedSchool && value !== selectedSchool.schoolName) {
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setSchoolQuery(nextValue);
+                    setHighlightedSchoolIndex(0);
+                    if (selectedSchool && nextValue !== selectedSchool.schoolName) {
                       setSelectedSchool(null);
                     }
                   }}
-                  renderOption={(school) => (
-                    <>
-                      <p className="font-semibold">{school.schoolName}</p>
-                      <p className="mt-0.5 text-[11px] text-white/60">
-                        {school.sidoName ?? '-'} · {school.schoolLevel}
-                        {school.campusType ? ` · ${school.campusType}` : ''}
-                      </p>
-                    </>
-                  )}
+                  placeholder="학교명을 입력하세요"
+                  autoComplete="off"
+                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
                 />
+                {isSchoolListVisible ? (
+                  <div
+                    ref={schoolResultsListRef}
+                    className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+                  >
+                    {isSchoolSearching ? (
+                      <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                    ) : schoolResults.length === 0 ? (
+                      <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                    ) : (
+                      schoolResults.map((school, index) => (
+                        <button
+                          key={`${school.source}:${school.schoolCode}`}
+                          data-school-index={index}
+                          type="button"
+                          onMouseEnter={() => setHighlightedSchoolIndex(index)}
+                          onClick={() => handleSelectSchool(school)}
+                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
+                            index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                          }`}
+                        >
+                          <p className="font-semibold">{school.schoolName}</p>
+                          <p className="mt-0.5 text-[11px] text-white/60">
+                            {school.sidoName ?? '-'} · {school.schoolLevel}
+                            {school.campusType ? ` · ${school.campusType}` : ''}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+                {selectedSchool ? (
+                  <p className="mt-1 text-[11px] font-medium text-[#ffcc99]">
+                    선택됨: {selectedSchool.schoolName}
+                  </p>
+                ) : null}
               </label>
 
               <button

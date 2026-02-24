@@ -32,6 +32,13 @@ export type MapPointMarker = {
   coordinateSource: 'school' | 'centroid';
 };
 
+export type MapViewRequest = {
+  id: string;
+  center: [number, number];
+  zoom: number;
+  reason?: 'my-region-focus' | 'reset';
+};
+
 type HoveredRegion = {
   code: string;
   name: string;
@@ -49,6 +56,8 @@ type MapColors = {
 };
 
 type MapTheme = 'light' | 'dark';
+type MapFillMode = 'winner' | 'activity';
+type FillTargetLevel = 'sido' | 'sigungu';
 
 export interface KoreaAdminMapProps {
   statsByCode?: RegionVoteMap;
@@ -66,9 +75,12 @@ export interface KoreaAdminMapProps {
   showTooltip?: boolean;
   showNavigationControl?: boolean;
   showRegionLevelToggle?: boolean;
+  regionLevelToggleAlign?: 'left' | 'right';
+  fillMode?: MapFillMode;
   onRegionClick?: (region: { code: string; name: string; level: RegionLevel }) => void;
   onMapZoomDirectionChange?: (payload: { zoom: number; direction: 'in' | 'out' }) => void;
   onMapPointerDown?: () => void;
+  viewRequest?: MapViewRequest;
 }
 
 const DEFAULT_COLORS: MapColors = {
@@ -128,15 +140,51 @@ function getDefaultColors(theme: MapTheme): MapColors {
   return theme === 'dark' ? DARK_THEME_COLORS : DEFAULT_COLORS;
 }
 
-function buildFillExpression(statsByCode: RegionVoteMap, colors: MapColors): ExpressionSpecification {
+function buildActivityFillColor(intensity: number): string {
+  const clamped = Math.max(0, Math.min(1, intensity));
+  const from = [34, 49, 69];
+  const to = [101, 176, 255];
+  const r = Math.round(from[0] + (to[0] - from[0]) * clamped);
+  const g = Math.round(from[1] + (to[1] - from[1]) * clamped);
+  const b = Math.round(from[2] + (to[2] - from[2]) * clamped);
+  const alpha = (0.18 + clamped * 0.72).toFixed(3);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function buildFillExpression(
+  statsByCode: RegionVoteMap,
+  colors: MapColors,
+  fillMode: MapFillMode,
+  targetLevel?: FillTargetLevel,
+): ExpressionSpecification {
   const entries: string[] = [];
   const featureCode: ExpressionSpecification = ['to-string', ['coalesce', ['get', 'code'], ['id']]];
+  const expectedCodeLength = targetLevel === 'sigungu' ? 5 : targetLevel === 'sido' ? 2 : null;
 
-  Object.entries(statsByCode).forEach(([code, stat]) => {
-    const winner = resolveWinner(stat);
-    const fill = winner === 'A' ? colors.a : winner === 'B' ? colors.b : colors.tie;
-    entries.push(code, fill);
-  });
+  if (fillMode === 'activity') {
+    const candidateEntries = Object.entries(statsByCode).filter(([code]) =>
+      expectedCodeLength === null ? true : code.length === expectedCodeLength,
+    );
+    const maxTotal = candidateEntries.reduce((max, [, stat]) => {
+      const total = Math.max(0, stat.total ?? 0);
+      return Math.max(max, total);
+    }, 0);
+
+    candidateEntries.forEach(([code, stat]) => {
+      const total = Math.max(0, stat.total ?? 0);
+      const intensity = maxTotal > 0 ? total / maxTotal : 0;
+      entries.push(code, buildActivityFillColor(intensity));
+    });
+  } else {
+    Object.entries(statsByCode).forEach(([code, stat]) => {
+      if (expectedCodeLength !== null && code.length !== expectedCodeLength) {
+        return;
+      }
+      const winner = resolveWinner(stat);
+      const fill = winner === 'A' ? colors.a : winner === 'B' ? colors.b : colors.tie;
+      entries.push(code, fill);
+    });
+  }
 
   if (entries.length === 0) {
     // `match` requires at least one label/output pair, so keep a harmless fallback pair.
@@ -227,9 +275,12 @@ export default function KoreaAdminMap({
   showTooltip = true,
   showNavigationControl = true,
   showRegionLevelToggle = false,
+  regionLevelToggleAlign = 'left',
+  fillMode = 'winner',
   onRegionClick,
   onMapZoomDirectionChange,
   onMapPointerDown,
+  viewRequest,
 }: KoreaAdminMapProps) {
   const prefersReducedMotion = useReducedMotion();
   const defaultCenter: [number, number] = initialCenter ?? [127.8, 36.2];
@@ -253,6 +304,7 @@ export default function KoreaAdminMap({
   const switchTimeoutRef = useRef<number | null>(null);
   const requestLevelSwitchRef = useRef<((level?: RegionLevel) => void) | null>(null);
   const requestMarkerEffectSyncRef = useRef<(() => void) | null>(null);
+  const lastAppliedViewRequestIdRef = useRef<string | null>(null);
   const suppressAutoLevelSyncRef = useRef(false);
   const selectedLevelRef = useRef<RegionLevel>('sido');
   const [hovered, setHovered] = useState<HoveredRegion | null>(null);
@@ -277,6 +329,44 @@ export default function KoreaAdminMap({
   useEffect(() => {
     pointMarkersRef.current = pointMarkers;
   }, [pointMarkers]);
+
+  useEffect(() => {
+    if (!viewRequest) {
+      return;
+    }
+
+    if (lastAppliedViewRequestIdRef.current === viewRequest.id) {
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const [lng, lat] = viewRequest.center;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || !Number.isFinite(viewRequest.zoom)) {
+      return;
+    }
+
+    const applyView = () => {
+      const targetZoom = Math.max(5.5, Math.min(10.5, viewRequest.zoom));
+      map.easeTo({
+        center: [lng, lat],
+        zoom: targetZoom,
+        duration: 520,
+        essential: true,
+      });
+    };
+
+    lastAppliedViewRequestIdRef.current = viewRequest.id;
+    if (map.isStyleLoaded()) {
+      applyView();
+      return;
+    }
+
+    map.once('load', applyView);
+  }, [viewRequest]);
 
   useEffect(() => {
     markerEffectRef.current = markerEffect;
@@ -559,7 +649,7 @@ export default function KoreaAdminMap({
         .map((feature: { properties?: { code?: unknown } }) => normalizeCode(feature?.properties?.code))
         .filter(Boolean);
 
-      const resolvedFill = buildFillExpression(statsRef.current, colorsRef.current);
+      const resolvedFill = buildFillExpression(statsRef.current, colorsRef.current, fillMode, 'sigungu');
       if (map.getLayer('sigungu-fills')) {
         map.setPaintProperty('sigungu-fills', 'fill-color', resolvedFill);
       }
@@ -656,7 +746,7 @@ export default function KoreaAdminMap({
     };
 
     map.on('load', () => {
-      const initialFill = buildFillExpression(statsRef.current, colorsRef.current);
+      const initialFill = buildFillExpression(statsRef.current, colorsRef.current, fillMode, 'sido');
 
       map.addSource('sido', {
         type: 'geojson',
@@ -835,7 +925,7 @@ export default function KoreaAdminMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [zoomThreshold, theme, showNavigationControl, showTooltip, initialCenter, initialZoom]);
+  }, [zoomThreshold, theme, showNavigationControl, showTooltip, initialCenter, initialZoom, fillMode]);
 
   useEffect(() => {
     statsRef.current = statsByCode;
@@ -846,14 +936,15 @@ export default function KoreaAdminMap({
       return;
     }
 
-    const fillExpression = buildFillExpression(statsByCode, colorsRef.current);
+    const sidoFillExpression = buildFillExpression(statsByCode, colorsRef.current, fillMode, 'sido');
+    const sigunguFillExpression = buildFillExpression(statsByCode, colorsRef.current, fillMode, 'sigungu');
     if (map.getLayer('sido-fills')) {
-      map.setPaintProperty('sido-fills', 'fill-color', fillExpression);
+      map.setPaintProperty('sido-fills', 'fill-color', sidoFillExpression);
     }
     if (map.getLayer('sigungu-fills')) {
-      map.setPaintProperty('sigungu-fills', 'fill-color', fillExpression);
+      map.setPaintProperty('sigungu-fills', 'fill-color', sigunguFillExpression);
     }
-  }, [statsByCode, colors, theme]);
+  }, [statsByCode, colors, fillMode, theme]);
 
   useEffect(() => {
     pointMarkersRef.current = pointMarkers;
@@ -908,7 +999,9 @@ export default function KoreaAdminMap({
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.28 }}
-          className="pointer-events-auto absolute left-3 z-10 inline-flex items-center overflow-hidden rounded-2xl border border-white/24 bg-[rgba(10,16,24,0.7)] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md"
+          className={`pointer-events-auto absolute z-10 inline-flex items-center overflow-hidden rounded-2xl border border-white/24 bg-[rgba(10,16,24,0.7)] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md ${
+            regionLevelToggleAlign === 'right' ? 'right-3' : 'left-3'
+          }`}
           style={{ bottom: `${toggleBottomOffsetPx}px` }}
           role="radiogroup"
           aria-label="행정구역 레벨 토글"

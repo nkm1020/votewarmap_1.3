@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const querySchema = z.object({
-  topicId: z.string().min(1),
+  topicId: z.string().trim().min(1).optional(),
+  scope: z.enum(['topic', 'all']).optional(),
   level: z.enum(['sido', 'sigungu']).default('sido'),
 });
 
@@ -43,50 +44,102 @@ export async function GET(request: Request) {
       );
     }
 
-    const { topicId, level } = parsed.data;
+    const { level } = parsed.data;
+    const scope = parsed.data.scope ?? (parsed.data.topicId ? 'topic' : 'all');
+    const topicId = scope === 'topic' ? parsed.data.topicId ?? null : null;
+    if (scope === 'topic' && !topicId) {
+      return NextResponse.json({ error: 'scope=topic 조회에는 topicId가 필요합니다.' }, { status: 400 });
+    }
+
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data: rpcRows, error: rpcError } = await supabase.rpc('get_region_vote_stats', {
-      p_topic_id: topicId,
-      p_level: level,
-    });
+    const accumulated = new Map<string, { total: number; countA: number; countB: number }>();
+    const appendRows = (rows: RegionStatsRpcRow[]) => {
+      rows.forEach((row) => {
+        const regionCode = String(row.region ?? '').trim();
+        if (!regionCode) {
+          return;
+        }
 
-    if (rpcError) {
-      return NextResponse.json({ error: rpcError.message }, { status: 500 });
+        const current = accumulated.get(regionCode) ?? { total: 0, countA: 0, countB: 0 };
+        current.total += normalizeInt(row.total);
+        current.countA += normalizeInt(row.count_a);
+        current.countB += normalizeInt(row.count_b);
+        accumulated.set(regionCode, current);
+      });
+    };
+
+    let topicCount = 0;
+    if (scope === 'topic') {
+      const { data: rpcRows, error: rpcError } = await supabase.rpc('get_region_vote_stats', {
+        p_topic_id: topicId,
+        p_level: level,
+      });
+
+      if (rpcError) {
+        return NextResponse.json({ error: rpcError.message }, { status: 500 });
+      }
+
+      appendRows((Array.isArray(rpcRows) ? rpcRows : []) as RegionStatsRpcRow[]);
+      topicCount = 1;
+    } else {
+      const { data: topicRows, error: topicError } = await supabase
+        .from('vote_topics')
+        .select('id')
+        .eq('status', 'LIVE');
+
+      if (topicError) {
+        return NextResponse.json({ error: topicError.message }, { status: 500 });
+      }
+
+      const topicIds = (topicRows ?? [])
+        .map((row) => String(row.id ?? '').trim())
+        .filter((id) => id.length > 0);
+      topicCount = topicIds.length;
+
+      if (topicIds.length > 0) {
+        const rpcResults = await Promise.all(
+          topicIds.map((id) =>
+            supabase.rpc('get_region_vote_stats', {
+              p_topic_id: id,
+              p_level: level,
+            }),
+          ),
+        );
+
+        for (const result of rpcResults) {
+          if (result.error) {
+            return NextResponse.json({ error: result.error.message }, { status: 500 });
+          }
+          appendRows((Array.isArray(result.data) ? result.data : []) as RegionStatsRpcRow[]);
+        }
+      }
     }
 
     const statsByCode: RegionVoteMap = {};
     let totalA = 0;
     let totalB = 0;
 
-    (Array.isArray(rpcRows) ? rpcRows : []).forEach((row) => {
-      const typedRow = row as RegionStatsRpcRow;
-      const regionCode = String(typedRow.region ?? '').trim();
-      if (!regionCode) {
-        return;
-      }
-
-      const countA = normalizeInt(typedRow.count_a);
-      const countB = normalizeInt(typedRow.count_b);
-      const total = normalizeInt(typedRow.total);
+    accumulated.forEach((value, regionCode) => {
       const winner =
-        typedRow.winner === 'A' || typedRow.winner === 'B' || typedRow.winner === 'TIE'
-          ? typedRow.winner
-          : 'TIE';
-
+        value.countA > value.countB
+          ? 'A'
+          : value.countB > value.countA
+            ? 'B'
+            : 'TIE';
       statsByCode[regionCode] = {
-        countA,
-        countB,
-        total,
+        countA: value.countA,
+        countB: value.countB,
+        total: value.total,
         winner,
       };
 
-      totalA += countA;
-      totalB += countB;
+      totalA += value.countA;
+      totalB += value.countB;
     });
 
-    return NextResponse.json({
-      topicId,
+    const payload = {
+      scope,
       level,
       statsByCode,
       summary: {
@@ -94,7 +147,17 @@ export async function GET(request: Request) {
         countA: totalA,
         countB: totalB,
       },
-    });
+      topicCount,
+    } as const;
+
+    if (scope === 'topic') {
+      return NextResponse.json({
+        ...payload,
+        topicId,
+      });
+    }
+
+    return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'region stats failed';
     return NextResponse.json({ error: message }, { status: 500 });

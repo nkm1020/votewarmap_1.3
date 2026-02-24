@@ -8,6 +8,7 @@ export const LOCAL_STORAGE_KEYS = {
   pendingProfile: 'vwm_pending_profile',
   pendingVotes: 'vwm_pending_votes',
   cachedRegionStatsPopular: 'vwm_cached_region_stats_popular',
+  resultIntroSeenByTopic: 'vwm_result_intro_seen_by_topic',
 } as const;
 
 export const GENDER_LABEL: Record<string, string> = {

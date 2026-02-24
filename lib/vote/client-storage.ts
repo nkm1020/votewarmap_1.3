@@ -5,6 +5,10 @@ type PendingVotesPayload = {
   topicIds: string[];
 };
 
+type ResultIntroSeenPayload = {
+  topicIds: string[];
+};
+
 function isBrowser(): boolean {
   return typeof window !== 'undefined';
 }
@@ -160,4 +164,52 @@ export function clearPendingVotes(): void {
   }
 
   sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingVotes);
+}
+
+export function readResultIntroSeenTopicIds(): string[] {
+  if (!isBrowser()) {
+    return [];
+  }
+
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEYS.resultIntroSeenByTopic);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as ResultIntroSeenPayload | string[];
+    if (Array.isArray(parsed)) {
+      return parsed.filter((topicId) => typeof topicId === 'string');
+    }
+
+    if (!Array.isArray(parsed.topicIds)) {
+      return [];
+    }
+
+    return parsed.topicIds.filter((topicId) => typeof topicId === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export function hasSeenResultIntroForTopic(topicId: string): boolean {
+  if (!topicId) {
+    return false;
+  }
+
+  return readResultIntroSeenTopicIds().includes(topicId);
+}
+
+export function markResultIntroSeenForTopic(topicId: string): void {
+  if (!isBrowser() || !topicId) {
+    return;
+  }
+
+  const next = new Set(readResultIntroSeenTopicIds());
+  next.add(topicId);
+
+  localStorage.setItem(
+    LOCAL_STORAGE_KEYS.resultIntroSeenByTopic,
+    JSON.stringify({ topicIds: Array.from(next) }),
+  );
 }
