@@ -207,7 +207,7 @@ export async function GET(request: Request) {
       const [{ data: voteRow, error: voteError }, { data: userRow, error: userRowError }] = await Promise.all([
         supabase
           .from('votes')
-          .select('option_key')
+          .select('option_key, sido_code, sigungu_code')
           .eq('topic_id', topicId)
           .eq('user_id', user.id)
           .maybeSingle(),
@@ -226,8 +226,19 @@ export async function GET(request: Request) {
       }
 
       myOptionKey = voteRow?.option_key ?? null;
-      mySidoCode = userRow?.sido_code ?? null;
-      mySigunguCode = userRow?.sigungu_code ?? null;
+      // 결과 비교의 지역 기준은 "유저 프로필"이 아니라 "해당 주제 투표 당시 위치"가 우선이다.
+      const voteSidoCode = voteRow?.sido_code ?? null;
+      const voteSigunguCode = voteRow?.sigungu_code ?? null;
+      const hasVoteRegion = Boolean(voteSidoCode || voteSigunguCode);
+
+      if (hasVoteRegion) {
+        mySidoCode = voteSidoCode;
+        mySigunguCode = voteSigunguCode;
+      } else {
+        // 과거 데이터 호환: 투표 행에 지역이 없는 경우에만 사용자 프로필 지역을 fallback으로 사용.
+        mySidoCode = userRow?.sido_code ?? null;
+        mySigunguCode = userRow?.sigungu_code ?? null;
+      }
     } else if (guestSessionId) {
       viewerType = 'guest';
 
