@@ -1,5 +1,5 @@
 import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
-import type { VoteProfileInput } from '@/lib/vote/types';
+import type { SchoolSearchItem, VoteRegionInput } from '@/lib/vote/types';
 
 type PendingVotesPayload = {
   topicIds: string[];
@@ -84,40 +84,82 @@ export function clearGuestSessionId(): void {
   localStorage.removeItem(LOCAL_STORAGE_KEYS.legacyGuestToken);
 }
 
-export function readPendingProfile(): VoteProfileInput | null {
-  const sessionStorageRef = getSessionStorage();
-  if (!sessionStorageRef) {
+function parsePendingRegionInput(raw: string | null): VoteRegionInput | null {
+  if (!raw) {
     return null;
   }
 
   try {
-    const raw = sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.pendingProfile);
-    if (!raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
       return null;
     }
 
-    return JSON.parse(raw) as VoteProfileInput;
+    if (
+      'source' in parsed &&
+      ((parsed as { source?: string }).source === 'school' ||
+        (parsed as { source?: string }).source === 'gps')
+    ) {
+      return parsed as VoteRegionInput;
+    }
+
+    // Legacy payload migration: { birthYear, gender, school }
+    if ('school' in parsed) {
+      const school = (parsed as { school?: unknown }).school;
+      if (school && typeof school === 'object') {
+        return {
+          source: 'school',
+          school: school as SchoolSearchItem,
+        };
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
-export function writePendingProfile(profile: VoteProfileInput): void {
+export function readPendingRegionInput(): VoteRegionInput | null {
   const sessionStorageRef = getSessionStorage();
   if (!sessionStorageRef) {
-    return;
+    return null;
   }
 
-  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.pendingProfile, JSON.stringify(profile));
+  const raw = sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.pendingRegionInput);
+  const parsed = parsePendingRegionInput(raw);
+  if (parsed) {
+    return parsed;
+  }
+
+  const legacyRaw = sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.legacyPendingProfile);
+  const migrated = parsePendingRegionInput(legacyRaw);
+  if (migrated) {
+    sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.pendingRegionInput, JSON.stringify(migrated));
+    sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.legacyPendingProfile);
+  }
+
+  return migrated;
 }
 
-export function clearPendingProfile(): void {
+export function writePendingRegionInput(regionInput: VoteRegionInput): void {
   const sessionStorageRef = getSessionStorage();
   if (!sessionStorageRef) {
     return;
   }
 
-  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingProfile);
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.pendingRegionInput, JSON.stringify(regionInput));
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.legacyPendingProfile);
+}
+
+export function clearPendingRegionInput(): void {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return;
+  }
+
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingRegionInput);
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.legacyPendingProfile);
 }
 
 export function readPendingVotes(): string[] {

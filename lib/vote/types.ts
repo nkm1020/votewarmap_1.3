@@ -35,11 +35,30 @@ export type SchoolSearchItem = {
   isActive: boolean;
 };
 
-export type VoteProfileInput = {
-  birthYear: number;
-  gender: Gender;
+export type VoteRegionSource = 'school' | 'gps';
+
+export type VoteRegionInputBySchool = {
+  source: 'school';
   school: SchoolSearchItem;
 };
+
+export type VoteRegionInputByGps = {
+  source: 'gps';
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracy: number | null;
+  };
+  region: {
+    sidoCode: string;
+    sigunguCode: string | null;
+    sidoName: string | null;
+    sigunguName: string | null;
+    provider: string | null;
+  };
+};
+
+export type VoteRegionInput = VoteRegionInputBySchool | VoteRegionInputByGps;
 
 export type VoteTopicOption = {
   key: string;

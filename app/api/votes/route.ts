@@ -6,32 +6,62 @@ import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
-const profileSchema = z.object({
-  birthYear: z.number().int().min(1900).max(2100),
-  gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']),
-  school: z.object({
-    id: z.string().uuid().optional(),
-    source: z.enum(['nais', 'local_xls']),
-    schoolCode: z.string().min(1),
-    schoolName: z.string().min(1),
-    schoolLevel: z.enum(['middle', 'high', 'university', 'graduate']),
-    campusType: z.string().nullable(),
-    parentSchoolId: z.string().uuid().nullable(),
-    sidoName: z.string().nullable(),
-    sidoCode: z.string().nullable(),
-    sigunguName: z.string().nullable(),
-    sigunguCode: z.string().nullable(),
-    address: z.string().nullable(),
-    isActive: z.boolean(),
-  }),
+const schoolSchema = z.object({
+  id: z.string().uuid().optional(),
+  source: z.enum(['nais', 'local_xls']),
+  schoolCode: z.string().min(1),
+  schoolName: z.string().min(1),
+  schoolLevel: z.enum(['middle', 'high', 'university', 'graduate']),
+  campusType: z.string().nullable(),
+  parentSchoolId: z.string().uuid().nullable(),
+  sidoName: z.string().nullable(),
+  sidoCode: z.string().nullable(),
+  sigunguName: z.string().nullable(),
+  sigunguCode: z.string().nullable(),
+  address: z.string().nullable(),
+  isActive: z.boolean(),
 });
+
+const regionInputSchema = z.discriminatedUnion('source', [
+  z.object({
+    source: z.literal('school'),
+    school: schoolSchema,
+  }),
+  z.object({
+    source: z.literal('gps'),
+    location: z.object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      accuracy: z.number().min(0).nullable(),
+    }),
+    region: z.object({
+      sidoCode: z.string().min(2),
+      sigunguCode: z.string().min(5).nullable(),
+      sidoName: z.string().nullable(),
+      sigunguName: z.string().nullable(),
+      provider: z.string().nullable(),
+    }),
+  }),
+]);
 
 const voteBodySchema = z.object({
   topicId: z.string().min(1),
   optionKey: z.string().min(1),
   guestSessionId: z.string().uuid().optional(),
-  profile: profileSchema.optional(),
+  regionInput: regionInputSchema.optional(),
 });
+
+type UserRegionRow = {
+  birth_year: number | null;
+  gender: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
+  school_id: string | null;
+  sido_code: string | null;
+  sigungu_code: string | null;
+  signup_completed_at: string | null;
+};
+
+const REGION_REQUIRED_ERROR = '투표를 위해 학교를 선택하거나 정확한 위치를 설정해 주세요.';
+const SIGNUP_COMPLETION_REQUIRED_ERROR = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
 
 export async function POST(request: Request) {
   try {
@@ -99,74 +129,99 @@ export async function POST(request: Request) {
       }
     }
 
-    let birthYear: number;
-    let gender: 'male' | 'female' | 'other' | 'prefer_not_to_say';
-    let schoolId: string;
-    let aggregateSchoolId: string;
-    let sidoCode: string | null;
-    let sigunguCode: string | null;
+    let schoolId: string | null = null;
+    let aggregateSchoolId: string | null = null;
+    let sidoCode: string | null = null;
+    let sigunguCode: string | null = null;
+    let birthYearSnapshot: number | null = null;
+    let genderSnapshot: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null = null;
+    let userRegionRow: UserRegionRow | null = null;
 
-    if (body.profile) {
-      const ensuredSchool = await ensureSchool(body.profile.school);
-      birthYear = body.profile.birthYear;
-      gender = body.profile.gender;
-      schoolId = ensuredSchool.schoolId;
-      aggregateSchoolId = ensuredSchool.aggregateSchoolId;
-      sidoCode = ensuredSchool.schoolRow.sido_code;
-      sigunguCode = ensuredSchool.schoolRow.sigungu_code;
-
-      if (voterUserId) {
-        const { error: updateUserError } = await supabase
-          .from('users')
-          .update({
-            birth_year: birthYear,
-            gender,
-            school_id: schoolId,
-            sido_code: sidoCode,
-            sigungu_code: sigunguCode,
-          })
-          .eq('id', voterUserId);
-
-        if (updateUserError) {
-          return NextResponse.json({ error: updateUserError.message }, { status: 500 });
-        }
-      }
-    } else {
-      if (!voterUserId) {
-        return NextResponse.json(
-          { error: '비로그인 투표에는 최초 프로필 정보가 필요합니다.' },
-          { status: 400 },
-        );
-      }
-
-      const { data: userRow, error: userRowError } = await supabase
+    if (voterUserId) {
+      const { data: row, error: rowError } = await supabase
         .from('users')
-        .select('birth_year, gender, school_id, sido_code, sigungu_code')
+        .select('birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at')
         .eq('id', voterUserId)
         .maybeSingle();
 
-      if (userRowError) {
-        return NextResponse.json({ error: userRowError.message }, { status: 500 });
+      if (rowError) {
+        return NextResponse.json({ error: rowError.message }, { status: 500 });
       }
 
-      if (!userRow?.birth_year || !userRow?.gender || !userRow?.school_id) {
-        return NextResponse.json(
-          { error: '최초 투표를 위해 나이, 성별, 학교 정보를 먼저 입력해 주세요.' },
-          { status: 400 },
-        );
+      userRegionRow = (row as UserRegionRow | null) ?? null;
+      if (!userRegionRow?.signup_completed_at) {
+        return NextResponse.json({ error: SIGNUP_COMPLETION_REQUIRED_ERROR }, { status: 403 });
       }
 
-      const schoolIdentity = await getSchoolIdentityById(userRow.school_id);
-      if (!schoolIdentity) {
-        return NextResponse.json({ error: '저장된 학교 정보를 찾을 수 없습니다.' }, { status: 400 });
-      }
+      birthYearSnapshot = userRegionRow?.birth_year ?? null;
+      genderSnapshot = userRegionRow?.gender ?? null;
+    }
 
-      birthYear = userRow.birth_year;
-      gender = userRow.gender as 'male' | 'female' | 'other' | 'prefer_not_to_say';
-      schoolId = schoolIdentity.schoolId;
-      aggregateSchoolId = schoolIdentity.aggregateSchoolId;
-      sidoCode = userRow.sido_code ?? schoolIdentity.sidoCode;
-      sigunguCode = userRow.sigungu_code ?? schoolIdentity.sigunguCode;
+    if (body.regionInput) {
+      if (body.regionInput.source === 'school') {
+        const ensuredSchool = await ensureSchool(body.regionInput.school);
+        schoolId = ensuredSchool.schoolId;
+        aggregateSchoolId = ensuredSchool.aggregateSchoolId;
+        sidoCode = ensuredSchool.schoolRow.sido_code;
+        sigunguCode = ensuredSchool.schoolRow.sigungu_code;
+
+        if (voterUserId) {
+          const { error: updateUserError } = await supabase
+            .from('users')
+            .update({
+              school_id: schoolId,
+              sido_code: sidoCode,
+              sigungu_code: sigunguCode,
+            })
+            .eq('id', voterUserId);
+
+          if (updateUserError) {
+            return NextResponse.json({ error: updateUserError.message }, { status: 500 });
+          }
+        }
+      } else {
+        schoolId = null;
+        aggregateSchoolId = null;
+        sidoCode = body.regionInput.region.sidoCode;
+        sigunguCode = body.regionInput.region.sigunguCode ?? null;
+
+        if (voterUserId) {
+          const { error: updateUserError } = await supabase
+            .from('users')
+            .update({
+              sido_code: sidoCode,
+              sigungu_code: sigunguCode,
+            })
+            .eq('id', voterUserId);
+
+          if (updateUserError) {
+            return NextResponse.json({ error: updateUserError.message }, { status: 500 });
+          }
+        }
+      }
+    } else if (voterUserId) {
+      const existingSchoolId = userRegionRow?.school_id ?? null;
+      if (existingSchoolId) {
+        const schoolIdentity = await getSchoolIdentityById(existingSchoolId);
+        if (!schoolIdentity) {
+          return NextResponse.json({ error: '저장된 학교 정보를 찾을 수 없습니다.' }, { status: 400 });
+        }
+        schoolId = schoolIdentity.schoolId;
+        aggregateSchoolId = schoolIdentity.aggregateSchoolId;
+        sidoCode = userRegionRow?.sido_code ?? schoolIdentity.sidoCode;
+        sigunguCode = userRegionRow?.sigungu_code ?? schoolIdentity.sigunguCode;
+      } else {
+        schoolId = null;
+        aggregateSchoolId = null;
+        sidoCode = userRegionRow?.sido_code ?? null;
+        sigunguCode = userRegionRow?.sigungu_code ?? null;
+      }
+    } else {
+      return NextResponse.json({ error: REGION_REQUIRED_ERROR }, { status: 400 });
+    }
+
+    if (!sidoCode && !sigunguCode) {
+      return NextResponse.json({ error: REGION_REQUIRED_ERROR }, { status: 400 });
     }
 
     if (voterUserId) {
@@ -179,8 +234,8 @@ export async function POST(request: Request) {
           guest_token: null,
           school_id: schoolId,
           aggregate_school_id: aggregateSchoolId,
-          birth_year: birthYear,
-          gender,
+          birth_year: birthYearSnapshot,
+          gender: genderSnapshot,
           sido_code: sidoCode,
           sigungu_code: sigunguCode,
         })

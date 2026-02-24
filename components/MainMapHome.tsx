@@ -9,14 +9,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
-  readPendingProfile,
+  readPendingRegionInput,
   readPendingVotes,
-  writePendingProfile,
+  writePendingRegionInput,
 } from '@/lib/vote/client-storage';
 import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
+import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
 import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
 import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
-import type { Gender, SchoolSearchItem, VoteProfileInput, VoteTopic } from '@/lib/vote/types';
+import type { SchoolSearchItem, VoteRegionInput, VoteTopic } from '@/lib/vote/types';
 
 const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
 
@@ -30,10 +31,9 @@ const MAIN_MAP_COLORS = {
 } as const;
 const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 8;
 const HOME_MAP_CACHE_KEY = 'all-live-topics';
-const GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
-  { value: 'male', label: '남성' },
-  { value: 'female', label: '여성' },
-];
+const REGION_MODAL_HINT =
+  '지역과 결과 비교를 위해 학교를 입력하시거나 정확한 위치 사용을 허용해주세요.';
+const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
 
 type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
 type TopicTab = 'all' | TopicCategory;
@@ -79,6 +79,8 @@ type PendingTopicPickerVote = {
   optionAKey: string;
   optionBKey: string;
 };
+
+type VoteRegionInputByGps = Extract<VoteRegionInput, { source: 'gps' }>;
 
 const TOPIC_TAB_META: Array<{ id: TopicTab; label: string }> = [
   { id: 'all', label: '전체' },
@@ -214,10 +216,6 @@ function writeCachedRegionState(payload: CachedRegionStatePayload): void {
   }
 }
 
-function normalizeBinaryGender(value: Gender | null | undefined): Gender {
-  return value === 'female' ? 'female' : 'male';
-}
-
 export default function MainMapHome() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('home');
@@ -245,9 +243,10 @@ export default function MainMapHome() {
   const [schoolResults, setSchoolResults] = useState<SchoolSearchItem[]>([]);
   const [schoolQuery, setSchoolQuery] = useState('');
   const [highlightedSchoolIndex, setHighlightedSchoolIndex] = useState(0);
-  const [birthYear, setBirthYear] = useState<number>(() => new Date().getFullYear() - 17);
-  const [gender, setGender] = useState<Gender>('male');
   const [selectedSchool, setSelectedSchool] = useState<SchoolSearchItem | null>(null);
+  const [gpsRegionInput, setGpsRegionInput] = useState<VoteRegionInputByGps | null>(null);
+  const [isLocatingRegion, setIsLocatingRegion] = useState(false);
+  const [profileModalMessage, setProfileModalMessage] = useState<string | null>(null);
   const [voteAfterProfile, setVoteAfterProfile] = useState(false);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<{
@@ -284,9 +283,9 @@ export default function MainMapHome() {
   const dockTouchMovedRef = useRef(false);
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
-  const { isAuthenticated, isLoading, profile, user, signOut } = useAuth();
+  const { isAuthenticated, isLoading, profile, user, signOut, requiresSignupCompletion } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
-  const hasServerProfile = Boolean(profile?.birth_year && profile?.gender && profile?.school_id);
+  const hasServerRegion = Boolean(profile?.school_id || profile?.sido_code || profile?.sigungu_code);
   const featuredOptionA = useMemo(
     () => featuredTopic?.options.find((option) => option.position === 1) ?? null,
     [featuredTopic],
@@ -307,14 +306,6 @@ export default function MainMapHome() {
     }
     return mergedMapStats[selectedRegion.code] ?? null;
   }, [mergedMapStats, selectedRegion]);
-  const birthYearOptions = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const options: Array<{ value: string; label: string }> = [];
-    for (let year = currentYear; year >= 1900; year -= 1) {
-      options.push({ value: String(year), label: `${year}년` });
-    }
-    return options;
-  }, []);
   const sortedTopics = useMemo(
     () => [...availableTopics].sort((a, b) => KO_TOPIC_COLLATOR.compare(a.title, b.title)),
     [availableTopics],
@@ -339,6 +330,7 @@ export default function MainMapHome() {
   const isSchoolListVisible = Boolean(
     schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName),
   );
+  const hasPendingRegionInput = Boolean(selectedSchool || gpsRegionInput);
   const hintReservePaddingPx = useMemo(() => {
     if (isTopicPickerOpen) {
       return 0;
@@ -615,17 +607,20 @@ export default function MainMapHome() {
   }, [featuredTopic?.id, loadFeaturedSummary]);
 
   useEffect(() => {
-    const storedProfile = readPendingProfile();
-    if (storedProfile) {
-      setBirthYear(storedProfile.birthYear);
-      setGender(normalizeBinaryGender(storedProfile.gender));
-      setSelectedSchool(storedProfile.school);
-      setSchoolQuery(storedProfile.school.schoolName);
-    } else if (profile?.birth_year) {
-      setBirthYear(profile.birth_year);
-      setGender(normalizeBinaryGender(profile.gender));
+    const storedRegionInput = readPendingRegionInput();
+    if (!storedRegionInput) {
+      return;
     }
-  }, [profile?.birth_year, profile?.gender]);
+
+    if (storedRegionInput.source === 'school') {
+      setSelectedSchool(storedRegionInput.school);
+      setSchoolQuery(storedRegionInput.school.schoolName);
+      setGpsRegionInput(null);
+      return;
+    }
+
+    setGpsRegionInput(storedRegionInput);
+  }, []);
 
   useEffect(() => {
     const topicId = featuredTopic?.id;
@@ -930,24 +925,78 @@ export default function MainMapHome() {
     setSelectedSchool(school);
     setSchoolQuery(school.schoolName);
     setHighlightedSchoolIndex(0);
+    setGpsRegionInput(null);
+    setProfileModalMessage(null);
   }, []);
 
-  const savePendingProfile = useCallback((): VoteProfileInput | null => {
-    if (!selectedSchool) {
-      return null;
+  const buildPendingRegionInput = useCallback((): VoteRegionInput | null => {
+    if (selectedSchool) {
+      const payload: VoteRegionInput = {
+        source: 'school',
+        school: selectedSchool,
+      };
+      writePendingRegionInput(payload);
+      return payload;
     }
 
-    const payload: VoteProfileInput = {
-      birthYear,
-      gender,
-      school: selectedSchool,
-    };
-    writePendingProfile(payload);
-    return payload;
-  }, [birthYear, gender, selectedSchool]);
+    if (gpsRegionInput) {
+      writePendingRegionInput(gpsRegionInput);
+      return gpsRegionInput;
+    }
+
+    return null;
+  }, [gpsRegionInput, selectedSchool]);
+
+  const resolveOptimisticRegionCodes = useCallback(
+    (regionInput: VoteRegionInput | null) => {
+      if (regionInput?.source === 'school') {
+        return {
+          sidoCode: regionInput.school.sidoCode ?? profile?.sido_code ?? null,
+          sigunguCode: regionInput.school.sigunguCode ?? profile?.sigungu_code ?? null,
+        };
+      }
+
+      if (regionInput?.source === 'gps') {
+        return {
+          sidoCode: regionInput.region.sidoCode ?? profile?.sido_code ?? null,
+          sigunguCode: regionInput.region.sigunguCode ?? profile?.sigungu_code ?? null,
+        };
+      }
+
+      return {
+        sidoCode: profile?.sido_code ?? null,
+        sigunguCode: profile?.sigungu_code ?? null,
+      };
+    },
+    [profile?.sido_code, profile?.sigungu_code],
+  );
+
+  const handleUseCurrentLocation = useCallback(async () => {
+    setIsLocatingRegion(true);
+    setProfileModalMessage(null);
+
+    try {
+      const nextGpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
+      setGpsRegionInput(nextGpsRegionInput);
+      setSelectedSchool(null);
+      setSchoolQuery('');
+      writePendingRegionInput(nextGpsRegionInput);
+      setProfileModalMessage('정확한 위치 확인이 완료되었습니다.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '위치 정보를 확인하지 못했습니다.';
+      setProfileModalMessage(message);
+    } finally {
+      setIsLocatingRegion(false);
+    }
+  }, []);
+
+  const handleClearGpsRegion = useCallback(() => {
+    setGpsRegionInput(null);
+    setProfileModalMessage(null);
+  }, []);
 
   const submitVote = useCallback(
-    async (profilePayload: VoteProfileInput | null) => {
+    async (regionInputPayload: VoteRegionInput | null) => {
       setIsSubmittingVote(true);
       setVoteMessage(null);
       const topicId = featuredTopic?.id ?? null;
@@ -992,7 +1041,7 @@ export default function MainMapHome() {
             topicId,
             optionKey,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
-            ...(profilePayload ? { profile: profilePayload } : {}),
+            ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
@@ -1014,8 +1063,9 @@ export default function MainMapHome() {
           setGuestHasVoted(true);
         }
 
-        const optimisticSidoCode = profilePayload?.school.sidoCode ?? profile?.sido_code ?? null;
-        const optimisticSigunguCode = profilePayload?.school.sigunguCode ?? profile?.sigungu_code ?? null;
+        const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
+        const optimisticSidoCode = optimisticRegion.sidoCode;
+        const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
         if (optimisticSidoCode || optimisticSigunguCode) {
           let optimisticMap = mapStats;
@@ -1067,8 +1117,7 @@ export default function MainMapHome() {
       guestSessionId,
       isAuthenticated,
       mapStats,
-      profile?.sido_code,
-      profile?.sigungu_code,
+      resolveOptimisticRegionCodes,
       router,
       selectedOption,
     ],
@@ -1077,6 +1126,12 @@ export default function MainMapHome() {
   const handleVote = useCallback(async () => {
     if (canOpenFeaturedResult && featuredTopic?.id) {
       router.push(`/results/${featuredTopic.id}`);
+      return;
+    }
+
+    if (isAuthenticated && requiresSignupCompletion) {
+      setVoteMessage(SIGNUP_COMPLETION_REQUIRED_MESSAGE);
+      router.push('/auth/complete-signup');
       return;
     }
 
@@ -1092,34 +1147,36 @@ export default function MainMapHome() {
       return;
     }
 
-    const payload = savePendingProfile();
+    const payload = buildPendingRegionInput();
     if (payload) {
       await submitVote(payload);
       return;
     }
 
-    if (isAuthenticated && hasServerProfile) {
+    if (isAuthenticated && hasServerRegion) {
       await submitVote(null);
       return;
     }
 
+    setProfileModalMessage(null);
     setVoteAfterProfile(true);
     setShowProfileModal(true);
   }, [
     canOpenFeaturedResult,
+    buildPendingRegionInput,
     featuredOptionAKey,
     featuredOptionBKey,
     featuredTopic,
-    hasServerProfile,
+    hasServerRegion,
     isAuthenticated,
+    requiresSignupCompletion,
     router,
-    savePendingProfile,
     selectedOption,
     submitVote,
   ]);
 
   const submitTopicPickerVote = useCallback(
-    async (targetVote: PendingTopicPickerVote, profilePayload: VoteProfileInput | null) => {
+    async (targetVote: PendingTopicPickerVote, regionInputPayload: VoteRegionInput | null) => {
       const { topicId, optionKey, optionAKey, optionBKey } = targetVote;
       setIsPickerSubmittingVote(true);
       setPickerVoteMessage(null);
@@ -1148,7 +1205,7 @@ export default function MainMapHome() {
             topicId,
             optionKey,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
-            ...(profilePayload ? { profile: profilePayload } : {}),
+            ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
@@ -1172,8 +1229,9 @@ export default function MainMapHome() {
           setGuestHasVoted(true);
         }
 
-        const optimisticSidoCode = profilePayload?.school.sidoCode ?? profile?.sido_code ?? null;
-        const optimisticSigunguCode = profilePayload?.school.sigunguCode ?? profile?.sigungu_code ?? null;
+        const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
+        const optimisticSidoCode = optimisticRegion.sidoCode;
+        const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
         if (optimisticSidoCode || optimisticSigunguCode) {
           let optimisticMap = mapStats;
@@ -1225,14 +1283,19 @@ export default function MainMapHome() {
       guestSessionId,
       isAuthenticated,
       mapStats,
-      profile?.sido_code,
-      profile?.sigungu_code,
+      resolveOptimisticRegionCodes,
       router,
     ],
   );
 
   const handleTopicPickerVoteSubmit = useCallback(
     async (topic: VoteTopic) => {
+      if (isAuthenticated && requiresSignupCompletion) {
+        setPickerVoteMessage(SIGNUP_COMPLETION_REQUIRED_MESSAGE);
+        router.push('/auth/complete-signup');
+        return;
+      }
+
       const optionA = topic.options.find((option) => option.position === 1) ?? null;
       const optionB = topic.options.find((option) => option.position === 2) ?? null;
       if (!optionA || !optionB) {
@@ -1252,31 +1315,40 @@ export default function MainMapHome() {
         optionBKey: optionB.key,
       };
 
-      const payload = savePendingProfile();
+      const payload = buildPendingRegionInput();
       if (payload) {
         await submitTopicPickerVote(targetVote, payload);
         return;
       }
 
-      if (isAuthenticated && hasServerProfile) {
+      if (isAuthenticated && hasServerRegion) {
         await submitTopicPickerVote(targetVote, null);
         return;
       }
 
       setPendingPickerVote(targetVote);
+      setProfileModalMessage(null);
       setVoteAfterProfile(false);
       setShowProfileModal(true);
     },
-    [hasServerProfile, isAuthenticated, pickerSelectedOptionKey, savePendingProfile, submitTopicPickerVote],
+    [
+      buildPendingRegionInput,
+      hasServerRegion,
+      isAuthenticated,
+      pickerSelectedOptionKey,
+      requiresSignupCompletion,
+      router,
+      submitTopicPickerVote,
+    ],
   );
 
-  const handleSaveProfileOnly = useCallback(async () => {
-    const payload = savePendingProfile();
+  const handleSaveRegionOnly = useCallback(async () => {
+    const payload = buildPendingRegionInput();
     if (!payload) {
       if (pendingPickerVote) {
-        setPickerVoteMessage('학교를 선택해 주세요.');
+        setPickerVoteMessage(REGION_MODAL_HINT);
       } else {
-        setVoteMessage('학교를 선택해 주세요.');
+        setVoteMessage(REGION_MODAL_HINT);
       }
       return;
     }
@@ -1294,9 +1366,9 @@ export default function MainMapHome() {
       setVoteAfterProfile(false);
       await submitVote(payload);
     } else {
-      setVoteMessage('프로필이 저장되었습니다.');
+      setVoteMessage('지역 정보가 저장되었습니다.');
     }
-  }, [pendingPickerVote, savePendingProfile, submitTopicPickerVote, submitVote, voteAfterProfile]);
+  }, [buildPendingRegionInput, pendingPickerVote, submitTopicPickerVote, submitVote, voteAfterProfile]);
 
   const handleTopicPickerClose = useCallback(() => {
     setIsTopicPickerOpen(false);
@@ -1492,7 +1564,10 @@ export default function MainMapHome() {
             isLoading,
             isAuthenticated,
             avatarUrl: profile?.avatar_url ?? null,
-            displayInitial: (profile?.full_name ?? profile?.email ?? user?.email ?? 'U').slice(0, 1),
+            displayInitial: (profile?.nickname ?? profile?.full_name ?? profile?.email ?? user?.email ?? 'U').slice(
+              0,
+              1,
+            ),
             onSignOut: signOut,
           }}
         />
@@ -1847,13 +1922,14 @@ export default function MainMapHome() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
           <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
             <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-[20px] font-semibold text-white">최초 투표 정보 입력</h4>
+              <h4 className="text-[20px] font-semibold text-white">최초 투표 지역 입력</h4>
               <button
                 type="button"
                 onClick={() => {
                   setShowProfileModal(false);
                   setVoteAfterProfile(false);
                   setPendingPickerVote(null);
+                  setProfileModalMessage(null);
                 }}
                 className="rounded-lg px-2 py-1 text-sm text-white/65 hover:bg-white/10 hover:text-white"
               >
@@ -1862,45 +1938,7 @@ export default function MainMapHome() {
             </div>
 
             <div className="space-y-3">
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-white/70">출생연도</span>
-                <select
-                  value={String(birthYear)}
-                  onChange={(event) => {
-                    const nextYear = Number(event.target.value);
-                    if (Number.isFinite(nextYear)) {
-                      setBirthYear(nextYear);
-                    }
-                  }}
-                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none transition focus:border-[#ff9f0a66]"
-                >
-                  {birthYearOptions.map((option) => (
-                    <option key={option.value} value={option.value} className="bg-[#1f1f24] text-white">
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-white/70">성별</span>
-                <select
-                  value={gender}
-                  onChange={(event) => {
-                    const nextGender = event.target.value;
-                    if (nextGender === 'male' || nextGender === 'female') {
-                      setGender(nextGender);
-                    }
-                  }}
-                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none transition focus:border-[#ff9f0a66]"
-                >
-                  {GENDER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value} className="bg-[#1f1f24] text-white">
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <p className="text-sm leading-relaxed text-white/72">{REGION_MODAL_HINT}</p>
 
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
@@ -1935,6 +1973,7 @@ export default function MainMapHome() {
                     const nextValue = event.target.value;
                     setSchoolQuery(nextValue);
                     setHighlightedSchoolIndex(0);
+                    setProfileModalMessage(null);
                     if (selectedSchool && nextValue !== selectedSchool.schoolName) {
                       setSelectedSchool(null);
                     }
@@ -1975,16 +2014,72 @@ export default function MainMapHome() {
                   </div>
                 ) : null}
                 {selectedSchool ? (
-                  <p className="mt-1 text-[11px] font-medium text-[#ffcc99]">
-                    선택됨: {selectedSchool.schoolName}
-                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSchool(null);
+                        setSchoolQuery('');
+                        setProfileModalMessage(null);
+                      }}
+                      className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                    >
+                      학교 선택 해제
+                    </button>
+                  </div>
                 ) : null}
               </label>
 
+              <div className="flex items-center gap-2">
+                <div className="h-px flex-1 bg-white/14" />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
+                <div className="h-px flex-1 bg-white/14" />
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+                <button
+                  type="button"
+                  onClick={() => void handleUseCurrentLocation()}
+                  disabled={isLocatingRegion}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
+                </button>
+
+                {gpsRegionInput ? (
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-[#9dd2ff]">
+                    <p className="truncate">
+                      선택됨: {gpsRegionInput.region.sidoName ?? gpsRegionInput.region.sidoCode}
+                      {gpsRegionInput.region.sigunguName
+                        ? ` · ${gpsRegionInput.region.sigunguName}`
+                        : gpsRegionInput.region.sigunguCode
+                          ? ` · ${gpsRegionInput.region.sigunguCode}`
+                          : ''}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleClearGpsRegion}
+                      className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                    >
+                      위치 선택 해제
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
+                )}
+              </div>
+
+              {profileModalMessage ? (
+                <p className="rounded-lg border border-white/12 bg-white/6 px-3 py-2 text-xs text-white/78">
+                  {profileModalMessage}
+                </p>
+              ) : null}
+
               <button
                 type="button"
-                onClick={() => void handleSaveProfileOnly()}
-                disabled={!selectedSchool}
+                onClick={() => void handleSaveRegionOnly()}
+                disabled={!hasPendingRegionInput || isLocatingRegion}
                 className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 저장{voteAfterProfile || pendingPickerVote ? ' 후 투표하기' : ''}

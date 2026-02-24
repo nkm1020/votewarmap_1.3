@@ -14,23 +14,41 @@ import type { Session, User } from '@supabase/supabase-js';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   clearGuestSessionId,
-  clearPendingProfile,
+  clearPendingRegionInput,
   clearPendingVotes,
   readGuestSessionId,
-  readPendingProfile,
 } from '@/lib/vote/client-storage';
+import type { Gender } from '@/lib/vote/types';
 
 type UserProfile = {
   id: string;
   email: string | null;
   full_name: string | null;
+  nickname: string | null;
   avatar_url: string | null;
+  avatar_preset: string | null;
   provider: string | null;
   birth_year: number | null;
   gender: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
   school_id: string | null;
   sido_code: string | null;
   sigungu_code: string | null;
+  signup_completed_at: string | null;
+};
+
+type UserSyncPayload = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  provider: string | null;
+};
+
+type CompleteSignupInput = {
+  nickname: string;
+  avatarPreset: string;
+  birthYear: number;
+  gender: Gender;
 };
 
 type AuthContextValue = {
@@ -38,8 +56,10 @@ type AuthContextValue = {
   profile: UserProfile | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isSignupCompleted: boolean;
+  requiresSignupCompletion: boolean;
   signInWithGoogle: () => Promise<{ error: string | null }>;
-  signInWithKakao: () => Promise<{ error: string | null }>;
+  completeSignup: (input: CompleteSignupInput) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -47,6 +67,21 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function profilePayloadFromUser(user: User): UserProfile {
+  const synced = userSyncPayloadFromUser(user);
+  return {
+    ...synced,
+    nickname: null,
+    avatar_preset: null,
+    birth_year: null,
+    gender: null,
+    school_id: null,
+    sido_code: null,
+    sigungu_code: null,
+    signup_completed_at: null,
+  };
+}
+
+function userSyncPayloadFromUser(user: User): UserSyncPayload {
   const provider = user.app_metadata?.provider ?? null;
   const shouldIgnoreSocialAvatar = provider === 'google' || provider === 'kakao';
   return {
@@ -57,11 +92,6 @@ function profilePayloadFromUser(user: User): UserProfile {
       ? null
       : (user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null),
     provider,
-    birth_year: null,
-    gender: null,
-    school_id: null,
-    sido_code: null,
-    sigungu_code: null,
   };
 }
 
@@ -71,7 +101,7 @@ async function syncUserToPublicUsers(user: User): Promise<void> {
     return;
   }
 
-  const payload = profilePayloadFromUser(user);
+  const payload = userSyncPayloadFromUser(user);
   const { error } = await supabase.from('users').upsert(payload, { onConflict: 'id' });
   if (error) {
     console.error('[auth] failed to upsert users row:', error.message);
@@ -84,11 +114,38 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     return null;
   }
 
+  const fullSelect =
+    'id, email, full_name, nickname, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at';
+
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, full_name, avatar_url, provider, birth_year, gender, school_id, sido_code, sigungu_code')
+    .select(fullSelect)
     .eq('id', userId)
     .maybeSingle();
+
+  if (error?.message.toLowerCase().includes('column')) {
+    const { data: legacyData, error: legacyError } = await supabase
+      .from('users')
+      .select('id, email, full_name, avatar_url, provider, birth_year, gender, school_id, sido_code, sigungu_code')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (legacyError) {
+      console.error('[auth] failed to fetch profile (legacy):', legacyError.message);
+      return null;
+    }
+
+    if (!legacyData) {
+      return null;
+    }
+
+    return {
+      ...legacyData,
+      nickname: null,
+      avatar_preset: null,
+      signup_completed_at: null,
+    };
+  }
 
   if (error) {
     console.error('[auth] failed to fetch profile:', error.message);
@@ -120,30 +177,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const pendingProfile = readPendingProfile();
-
     const response = await fetch('/api/votes/merge-guest', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({
-        guestSessionId,
-        ...(pendingProfile
-          ? {
-              profile: {
-                birthYear: pendingProfile.birthYear,
-                gender: pendingProfile.gender,
-              },
-            }
-          : {}),
-      }),
+      body: JSON.stringify({ guestSessionId }),
     });
 
     if (response.ok) {
       clearPendingVotes();
-      clearPendingProfile();
+      clearPendingRegionInput();
       clearGuestSessionId();
     }
 
@@ -218,22 +263,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [applySession, supabase]);
 
-  const signInWithOAuth = useCallback(async (provider: 'google' | 'kakao') => {
+  const signInWithOAuth = useCallback(async (provider: 'google') => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       return { error: 'Supabase 환경변수(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)가 필요합니다.' };
     }
 
-    const scopesByProvider: Record<'google' | 'kakao', string> = {
-      google: 'openid email',
-      kakao: 'account_email',
-    };
     const redirectTo = `${window.location.origin}/auth`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
-        scopes: scopesByProvider[provider],
+        scopes: 'openid email',
       },
     });
 
@@ -244,9 +285,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return signInWithOAuth('google');
   }, [signInWithOAuth]);
 
-  const signInWithKakao = useCallback(async () => {
-    return signInWithOAuth('kakao');
-  }, [signInWithOAuth]);
+  const completeSignup = useCallback(
+    async (input: CompleteSignupInput) => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        return { error: 'Supabase 환경변수(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)가 필요합니다.' };
+      }
+
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token ?? null;
+      if (!accessToken) {
+        return { error: '로그인이 필요합니다.' };
+      }
+
+      try {
+        const response = await fetch('/api/auth/complete-signup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(input),
+        });
+
+        const json = (await response.json()) as { error?: string; profile?: UserProfile };
+        if (!response.ok) {
+          return { error: json.error ?? '회원가입 완료 처리에 실패했습니다.' };
+        }
+
+        if (json.profile) {
+          setProfile(json.profile);
+        } else if (data.session?.user) {
+          const nextProfile = await fetchProfile(data.session.user.id);
+          if (nextProfile) {
+            setProfile(nextProfile);
+          }
+        }
+
+        return { error: null };
+      } catch {
+        return { error: '회원가입 완료 처리에 실패했습니다.' };
+      }
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
@@ -260,18 +342,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const isSignupCompleted = Boolean(profile?.signup_completed_at);
+  const requiresSignupCompletion = Boolean(user) && !isLoading && !isSignupCompleted;
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       profile,
       isLoading,
       isAuthenticated: !!user,
+      isSignupCompleted,
+      requiresSignupCompletion,
       signInWithGoogle,
-      signInWithKakao,
+      completeSignup,
       signOut,
       refreshProfile,
     }),
-    [user, profile, isLoading, signInWithGoogle, signInWithKakao, signOut, refreshProfile],
+    [
+      user,
+      profile,
+      isLoading,
+      isSignupCompleted,
+      requiresSignupCompletion,
+      signInWithGoogle,
+      completeSignup,
+      signOut,
+      refreshProfile,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
