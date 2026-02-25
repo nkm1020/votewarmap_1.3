@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
@@ -8,9 +9,10 @@ export const runtime = 'nodejs';
 
 const completeSignupSchema = z.object({
   nickname: z.string().trim().min(1).max(20),
-  avatarPreset: z.enum(AVATAR_PRESETS),
+  avatarPreset: z.enum(AVATAR_PRESETS).optional(),
   birthYear: z.number().int().min(1900).max(2100),
-  gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']),
+  gender: z.enum(['male', 'female']),
+  agreedToTerms: z.literal(true),
 });
 
 export async function POST(request: Request) {
@@ -29,12 +31,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
 
+    const randomAvatarPreset = AVATAR_PRESETS[randomInt(AVATAR_PRESETS.length)] ?? AVATAR_PRESETS[0];
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('users')
       .update({
         nickname: parsed.data.nickname,
-        avatar_preset: parsed.data.avatarPreset,
+        avatar_preset: randomAvatarPreset,
         birth_year: parsed.data.birthYear,
         gender: parsed.data.gender,
         signup_completed_at: new Date().toISOString(),

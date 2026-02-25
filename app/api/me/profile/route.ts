@@ -2,21 +2,12 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
-import { AVATAR_PRESETS } from '@/lib/vote/constants';
 
 export const runtime = 'nodejs';
 
 const bodySchema = z
   .object({
     nickname: z.string().trim().min(1).max(20).optional(),
-    username: z
-      .string()
-      .trim()
-      .min(3)
-      .max(20)
-      .regex(/^[a-zA-Z0-9_]+$/)
-      .optional(),
-    avatarPreset: z.enum(AVATAR_PRESETS).optional(),
     region: z
       .object({
         sidoCode: z.string().trim().min(2),
@@ -25,12 +16,9 @@ const bodySchema = z
       })
       .optional(),
   })
+  .strict()
   .refine(
-    (value) =>
-      typeof value.nickname !== 'undefined' ||
-      typeof value.username !== 'undefined' ||
-      typeof value.avatarPreset !== 'undefined' ||
-      typeof value.region !== 'undefined',
+    (value) => typeof value.nickname !== 'undefined' || typeof value.region !== 'undefined',
     { message: '수정할 항목이 없습니다.' },
   );
 
@@ -41,7 +29,15 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
 
-    const parsed = bodySchema.safeParse((await request.json()) as unknown);
+    const rawBody = (await request.json()) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawBody, 'username')) {
+      return NextResponse.json({ error: '사용자명은 변경할 수 없습니다.' }, { status: 400 });
+    }
+    if (Object.prototype.hasOwnProperty.call(rawBody, 'avatarPreset')) {
+      return NextResponse.json({ error: '아바타는 자동 랜덤 배정됩니다.' }, { status: 400 });
+    }
+
+    const parsed = bodySchema.safeParse(rawBody);
     if (!parsed.success) {
       return NextResponse.json(
         { error: '잘못된 요청 형식입니다.', details: parsed.error.flatten() },
@@ -54,14 +50,6 @@ export async function PATCH(request: Request) {
 
     if (typeof payload.nickname !== 'undefined') {
       updates.nickname = payload.nickname;
-    }
-
-    if (typeof payload.username !== 'undefined') {
-      updates.username = payload.username.toLowerCase();
-    }
-
-    if (typeof payload.avatarPreset !== 'undefined') {
-      updates.avatar_preset = payload.avatarPreset;
     }
 
     if (typeof payload.region !== 'undefined') {

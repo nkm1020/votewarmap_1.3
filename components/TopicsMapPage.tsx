@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
@@ -143,6 +144,7 @@ function bumpRegionStat(
 
 export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount = false }: TopicsMapPageProps) {
   const router = useRouter();
+  const shouldReduceMotion = useReducedMotion();
   const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => initialTopicIds);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
@@ -918,6 +920,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
           showNavigationControl={false}
           showTooltip={false}
           showRegionLevelToggle
+          regionLevelToggleAlign="right"
           colors={TOPICS_MAP_COLORS}
           onMapZoomDirectionChange={({ direction }) => {
             if (direction === 'in') {
@@ -1046,10 +1049,15 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
 
             <section
               ref={topicSelectorRef}
-              className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl"
+              className="pointer-events-auto mt-3 w-full rounded-t-[32px] border-t border-white/12 bg-[rgba(20,20,24,0.78)] pb-3 shadow-[0_-10px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl"
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/55">선택 주제 태그</p>
+              <div className="mx-auto mb-2 mt-3.5 h-1.5 w-12 rounded-full bg-white/20" />
+
+              <div className="flex items-center justify-between px-6 pb-5 pt-3">
+                <h3 className="text-[20px] font-bold tracking-tight text-white">
+                  선택 주제 태그{' '}
+                  <span className="ml-1 text-[14px] font-medium text-white/55">{topics.length}개</span>
+                </h3>
                 <button
                   type="button"
                   onClick={() => {
@@ -1057,106 +1065,166 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
                     setActiveTopicTab('all');
                     setTopicSearchQuery('');
                   }}
-                  className="inline-flex h-7 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff6b0022] px-2.5 text-[11px] font-semibold text-[#ffcc99] transition hover:bg-[#ff6b0030]"
+                  className="text-[15px] font-semibold text-white/72 transition-colors hover:text-[#ffd29c]"
                 >
-                  {isTopicEditorOpen ? '추가 닫기' : '주제 추가'}
+                  {isTopicEditorOpen ? '닫기' : '열기'}
                 </button>
               </div>
 
-              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-                {topics.map((topic) => {
-                  const active = topic.id === activeTopicId;
-                  return (
-                    <div
-                      key={topic.id}
-                      className={`inline-flex shrink-0 items-center rounded-full border text-sm font-semibold transition ${
-                        active
-                          ? 'border-[#ff9f0a88] bg-[#ff6b0033] text-[#ffcc99]'
-                          : 'border-white/15 bg-white/8 text-white/80'
-                      }`}
+              <div className="mb-5 px-5">
+                <div className="flex min-h-[72px] flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/12 bg-[rgba(8,10,14,0.88)] p-2.5">
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {topics.length === 0 ? (
+                    <motion.div
+                      key="empty-topics"
+                      initial={shouldReduceMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+                      className="flex w-full flex-col items-center justify-center py-1 text-center text-white/60"
                     >
-                      <button
-                        type="button"
-                        onClick={() => setActiveTopicId(topic.id)}
-                        className="max-w-[12rem] truncate px-3 py-1.5 text-left"
-                      >
-                        {topic.title}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveTopic(topic.id)}
-                        className={`mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full transition ${
-                          active ? 'text-[#ffd5ad] hover:bg-[#ff9f0a33]' : 'text-white/60 hover:bg-white/12'
-                        }`}
-                        aria-label={`${topic.title} 제거`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-                {topics.length === 0 ? (
-                  <span className="shrink-0 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-sm font-semibold text-white/70">
-                    선택된 주제가 없습니다
-                  </span>
-                ) : null}
+                      <p className="text-[14px] font-medium text-white/80">선택된 주제가 없습니다</p>
+                      <p className="mt-1 text-[12px] text-white/52">아래 목록에서 원하는 LIVE 주제를 담아주세요</p>
+                    </motion.div>
+                  ) : (
+                    <motion.div key="selected-topic-chips" layout className="flex w-full flex-wrap gap-2">
+                      {topics.map((topic) => {
+                        const active = topic.id === activeTopicId;
+                        return (
+                          <motion.div
+                            key={topic.id}
+                            layout
+                            initial={shouldReduceMotion ? false : { scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={shouldReduceMotion ? undefined : { scale: 0.8, opacity: 0 }}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] ${
+                              active
+                                ? 'border-[#ff9f0a66] bg-[#ff6b0028] text-[#ffcc99]'
+                                : 'border-white/16 bg-white/8 text-white/84'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setActiveTopicId(topic.id)}
+                              className="max-w-[11.5rem] truncate text-left font-bold"
+                              aria-label={`${topic.title} 선택`}
+                            >
+                              {topic.title}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTopic(topic.id)}
+                              className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] transition-colors ${
+                                active
+                                  ? 'bg-[#ff9f0a33] text-[#ffd5ad] hover:bg-[#ff9f0a40]'
+                                  : 'bg-white/15 text-white/75 hover:bg-white/20 hover:text-white'
+                              }`}
+                              aria-label={`${topic.title} 제거`}
+                            >
+                              ✕
+                            </button>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
               </div>
 
               {isTopicEditorOpen ? (
-                <div className="mt-3 rounded-[18px] border border-white/12 bg-[rgba(14,14,18,0.82)] p-2.5 shadow-[0_8px_20px_rgba(0,0,0,0.28)]">
-                  <input
-                    type="text"
-                    value={topicSearchQuery}
-                    onChange={(event) => setTopicSearchQuery(event.target.value)}
-                    placeholder="추가할 주제를 검색하세요"
-                    className="h-9 w-full rounded-lg border border-white/14 bg-white/8 px-2.5 text-sm text-white outline-none placeholder:text-white/45 focus:border-[#ff9f0a66]"
-                  />
-                  <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1">
-                    {TOPIC_TAB_META.map((tab) => {
-                      const isActive = activeTopicTab === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setActiveTopicTab(tab.id)}
-                          className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
-                            isActive
-                              ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
-                              : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      );
-                    })}
+                <>
+                  <div className="mb-5 px-5">
+                    <div className="flex h-[44px] items-center gap-2 rounded-xl border border-white/14 bg-white/8 px-3 transition-colors focus-within:border-[#ff9f0a66]">
+                    <span aria-hidden className="text-base text-white/55">
+                      🔍
+                    </span>
+                    <input
+                      type="text"
+                      value={topicSearchQuery}
+                      onChange={(event) => setTopicSearchQuery(event.target.value)}
+                      placeholder="추가할 주제를 검색하세요"
+                      className="w-full bg-transparent text-[15px] text-white outline-none placeholder:text-white/45"
+                    />
+                    {topicSearchQuery ? (
+                      <button
+                        type="button"
+                        onClick={() => setTopicSearchQuery('')}
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/15 text-[10px] text-white/70 transition hover:bg-white/22 hover:text-white"
+                        aria-label="검색어 지우기"
+                      >
+                        ✕
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="mt-2 max-h-44 overflow-y-auto pr-1">
-                    {filteredAddableTopics.length === 0 ? (
-                      <p className="rounded-lg border border-white/10 bg-white/6 px-3 py-2 text-xs text-white/65">
-                        추가 가능한 주제가 없습니다.
-                      </p>
-                    ) : (
-                      <div className="space-y-1">
-                        {filteredAddableTopics.map((topic) => (
+                  </div>
+
+                  <div className="border-b border-white/10 px-5">
+                    <div className="hide-scrollbar flex gap-5 overflow-x-auto scroll-smooth">
+                      {TOPIC_TAB_META.map((tab) => {
+                        const isActive = activeTopicTab === tab.id;
+                        return (
                           <button
-                            key={topic.id}
+                            key={tab.id}
                             type="button"
-                            onClick={() => handleAddTopic(topic.id)}
-                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/12 bg-white/6 px-2.5 py-2 text-left transition hover:border-[#ff9f0a55] hover:bg-[#ff6b001f]"
+                            onClick={() => setActiveTopicTab(tab.id)}
+                            className="relative whitespace-nowrap pb-3 text-[15px] font-medium transition-colors"
                           >
-                            <span className="line-clamp-2 text-sm text-white/86">{topic.title}</span>
-                            <span className="shrink-0 rounded-full border border-[#ff9f0a55] bg-[#ff6b0025] px-2 py-0.5 text-[11px] font-semibold text-[#ffcc99]">
-                              추가
-                            </span>
+                            <span className={isActive ? 'font-bold text-white' : 'text-white/56'}>{tab.label}</span>
+                            {isActive ? (
+                              <motion.div
+                                layoutId="topic-selector-active-tab"
+                                className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-white"
+                              />
+                            ) : null}
                           </button>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+
+                  <div className="custom-scrollbar max-h-52 overflow-y-auto px-5 pb-8 pt-2">
+                    <AnimatePresence initial={false}>
+                      {filteredAddableTopics.length === 0 ? (
+                        <motion.p
+                          key="empty-addable-topics"
+                          initial={shouldReduceMotion ? false : { opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+                          className="py-10 text-center text-[14px] text-white/58"
+                        >
+                          일치하는 주제가 없습니다.
+                        </motion.p>
+                      ) : (
+                        <motion.div key="addable-topics-list" layout>
+                          {filteredAddableTopics.map((topic) => (
+                            <motion.div
+                              key={topic.id}
+                              layout
+                              initial={shouldReduceMotion ? false : { opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.95 }}
+                              className="group flex items-center justify-between border-b border-white/8 py-4"
+                            >
+                              <span className="line-clamp-2 text-[16px] font-medium text-white/90 transition-colors group-hover:text-white">
+                                {topic.title}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAddTopic(topic.id)}
+                                className="shrink-0 rounded-full border border-[#ff9f0a55] bg-[#ff6b0025] px-4 py-1.5 text-[13px] font-bold tracking-wide text-[#ffcc99] transition-all hover:bg-[#ff6b0036] active:scale-95"
+                              >
+                                추가
+                              </button>
+                            </motion.div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </>
               ) : null}
 
-              {topicsError ? <p className="mt-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
+              {topicsError ? <p className="px-5 pt-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
             </section>
 
             <div className="h-0" />

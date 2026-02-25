@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { UsersIcon, CheckIcon, ChevronDownIcon, CircleCheckIcon } from 'lucide-react';
 
 type LiveVoteCardOption = {
@@ -93,8 +93,11 @@ export function LiveVoteCard({
   auth,
   className,
 }: LiveVoteCardProps) {
+  const prefersReducedMotion = useReducedMotion();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [titleOverflowPx, setTitleOverflowPx] = useState(0);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const isMenuVisible = auth.isAuthenticated && isProfileMenuOpen;
 
   useEffect(() => {
@@ -112,11 +115,42 @@ export function LiveVoteCard({
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [isMenuVisible]);
 
+  useEffect(() => {
+    const updateTitleOverflow = () => {
+      const el = titleRef.current;
+      if (!el) {
+        setTitleOverflowPx(0);
+        return;
+      }
+
+      const overflow = Math.ceil(el.scrollWidth - el.clientWidth);
+      setTitleOverflowPx(overflow > 0 ? overflow : 0);
+    };
+
+    updateTitleOverflow();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => updateTitleOverflow());
+    if (titleRef.current) {
+      observer.observe(titleRef.current);
+      if (titleRef.current.parentElement) {
+        observer.observe(titleRef.current.parentElement);
+      }
+    }
+
+    return () => observer.disconnect();
+  }, [title]);
+
   const hasPercentageData = leftOption.percentage !== null && rightOption.percentage !== null;
   const leftPercent = hasPercentageData ? clampPercent(leftOption.percentage ?? 0) : 0;
   const rightPercent = hasPercentageData ? clampPercent(rightOption.percentage ?? 0) : 0;
   const normalizedInitial = (auth.displayInitial.trim().slice(0, 1) || 'U').toUpperCase();
   const totalParticipantsCount = isStatsLoading ? '...' : totalVotes.toLocaleString();
+  const shouldAnimateTitle = titleOverflowPx > 0 && !prefersReducedMotion;
+  const marqueeDistance = Math.max(0, titleOverflowPx + 12);
+  const marqueeDuration = Math.min(18, Math.max(6, marqueeDistance / 18));
 
   return (
     <motion.section
@@ -135,9 +169,27 @@ export function LiveVoteCard({
                 <span className="tabular-nums">{totalParticipantsCount}명</span>
               </span>
             </div>
-            <h2 className="truncate text-xl font-bold leading-tight text-white/95">
-              {title}
-            </h2>
+            <div className="min-w-0 overflow-hidden">
+              <motion.h2
+                ref={titleRef}
+                title={title}
+                className={`text-xl font-bold leading-tight text-white/95 ${shouldAnimateTitle ? 'whitespace-nowrap pr-3' : 'truncate'}`}
+                animate={shouldAnimateTitle ? { x: [0, -marqueeDistance] } : { x: 0 }}
+                transition={
+                  shouldAnimateTitle
+                    ? {
+                        duration: marqueeDuration,
+                        ease: 'linear',
+                        repeat: Infinity,
+                        repeatType: 'reverse',
+                        repeatDelay: 0.8,
+                      }
+                    : { duration: 0.2 }
+                }
+              >
+                {title}
+              </motion.h2>
+            </div>
           </div>
 
           <motion.div layout className="mt-1 flex shrink-0 items-center gap-2">

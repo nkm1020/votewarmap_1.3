@@ -1,6 +1,7 @@
 'use client';
 
 import { motion, useReducedMotion } from 'framer-motion';
+import { AlertCircle, ChevronLeft, MapPin } from 'lucide-react';
 import {
   type CSSProperties,
   type ReactNode,
@@ -159,20 +160,6 @@ const MAIN_VIEW_STYLE = {
   fontFamily: '"Pretendard","Pretendard Variable",var(--font-geist-sans),sans-serif',
 } as CSSProperties;
 
-const CARD_CLASS =
-  'rounded-[22px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl';
-
-const PANEL_CLASS = 'rounded-xl border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] p-3';
-
-const FIELD_CLASS =
-  'h-10 w-full rounded-lg border border-[color:var(--my-border)] bg-white/8 px-2.5 text-sm text-[color:var(--my-text-main)] outline-none transition focus:border-[color:var(--my-accent)] focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60';
-
-const BUTTON_PRIMARY_CLASS =
-  'inline-flex h-10 items-center justify-center rounded-lg border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] px-3 text-sm font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60';
-
-const BUTTON_SECONDARY_CLASS =
-  'inline-flex h-10 items-center justify-center rounded-lg border border-[color:var(--my-border)] bg-white/8 px-3 text-sm font-semibold text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60';
-
 const AVATAR_EMOJI: Record<(typeof AVATAR_PRESETS)[number], string> = {
   sun: '🌞',
   moon: '🌙',
@@ -194,6 +181,23 @@ function normalizePercent(value: number): number {
   }
   const rounded = Math.round(value * 10) / 10;
   return Math.max(0, Math.min(100, rounded));
+}
+
+function formatKoreanDateTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '-';
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const rawHour = parsed.getHours();
+  const minute = String(parsed.getMinutes()).padStart(2, '0');
+  const meridiem = rawHour < 12 ? '오전' : '오후';
+  const hour = rawHour % 12 === 0 ? 12 : rawHour % 12;
+
+  return `${year}. ${month}. ${day}. ${meridiem} ${String(hour).padStart(2, '0')}:${minute}`;
 }
 
 function tierLabel(tier: DashboardResponse['level']['tier']): string {
@@ -229,23 +233,6 @@ function getMotionProps(reducedMotion: boolean, delay = 0) {
       : { duration: 0.24, ease: 'easeOut' as const, delay },
   };
 }
-
-type AnimatedSectionProps = {
-  children: ReactNode;
-  className: string;
-  reducedMotion: boolean;
-  delay?: number;
-};
-
-function AnimatedSection({ children, className, reducedMotion, delay = 0 }: AnimatedSectionProps) {
-  const motionProps = getMotionProps(reducedMotion, delay);
-  return (
-    <motion.section {...motionProps} className={className}>
-      {children}
-    </motion.section>
-  );
-}
-
 
 type MainAnimatedSectionProps = {
   children: ReactNode;
@@ -464,7 +451,7 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
           >
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">📜</div>
-              <span className="text-[15px] font-medium">투표 / 게임 히스토리</span>
+              <span className="text-[15px] font-medium">투표 히스토리</span>
             </div>
             <span className="text-lg text-[#8E8E93]">›</span>
           </button>
@@ -504,201 +491,200 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
   );
 }
 
-type HeaderProps = {
-  notice: string | null;
-  error: string | null;
+type HistoryViewProps = {
+  dashboard: DashboardResponse;
+  history: HistoryResponse;
+  onBack: () => void;
   reducedMotion: boolean;
 };
 
-function Header({ notice, error, reducedMotion }: HeaderProps) {
-  const motionProps = getMotionProps(reducedMotion, 0);
+function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewProps) {
+  const sortedVotes = useMemo(
+    () => [...history.votes].sort((a, b) => Date.parse(b.votedAt) - Date.parse(a.votedAt)),
+    [history.votes],
+  );
 
   return (
-    <motion.header
-      {...motionProps}
-      className="rounded-[24px] border border-[color:var(--my-border)] bg-[var(--my-surface-strong)] p-4 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
-    >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#ffd29c]">MY 대시보드</p>
-      <h1 className="mt-1 text-[22px] font-bold leading-tight text-[color:var(--my-text-main)]">내 계정 상태와 최근 활동을 관리</h1>
-      <p className="mt-1 text-xs text-[color:var(--my-text-muted)]">프로필, 활동 통계, 공개 범위를 이 화면에서 한 번에 수정할 수 있습니다.</p>
+    <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
+      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="MY로 돌아가기"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+        >
+          <ChevronLeft size={24} />
+        </button>
+        <div className="h-11 w-11" aria-hidden />
+      </motion.header>
 
-      {notice ? <p className="mt-2 text-xs text-[#ffd7b5]">{notice}</p> : null}
-      {error ? <p className="mt-2 text-xs text-[#ffb4b4]">{error}</p> : null}
-    </motion.header>
+      <motion.section {...getMotionProps(reducedMotion, 0.02)} className="mb-6">
+        <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-[color:var(--my-text-main)]">
+          투표 히스토리를
+          <br />
+          확인할 수 있어요
+        </h1>
+        <p className="mt-2 text-sm text-[color:var(--my-text-muted)]">내 최근 투표 기록입니다.</p>
+      </motion.section>
+
+      <section className="space-y-3" aria-label="투표 히스토리 목록">
+        {sortedVotes.length === 0 ? (
+          <div className="rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-5 text-sm text-[color:var(--my-text-muted)]">
+            아직 투표 기록이 없습니다.
+          </div>
+        ) : (
+          sortedVotes.map((vote, index) => {
+            const regionLabel = vote.region?.name ?? dashboard.profile.region.name ?? '지역 미설정';
+            const motionProps = getMotionProps(reducedMotion, reducedMotion ? 0 : Math.min(index, 6) * 0.04);
+
+            return (
+              <motion.article
+                key={vote.id}
+                {...motionProps}
+                className="flex items-center gap-3 rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
+              >
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/7 text-xl text-white/68">∿</div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[19px] font-bold text-[color:var(--my-text-main)]">{vote.topicTitle}</p>
+                  <p className="mt-1 text-[13px] text-[color:var(--my-text-muted)]">
+                    {regionLabel} • {formatKoreanDateTime(vote.votedAt)}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full border border-[color:var(--my-border)] bg-white/8 px-4 py-2 text-[14px] font-semibold text-white/90">
+                  {vote.optionLabel}
+                </span>
+              </motion.article>
+            );
+          })
+        )}
+      </section>
+    </div>
   );
 }
 
-type SettingsCardProps = {
+type EditProfileViewProps = {
   dashboard: DashboardResponse;
   nicknameInput: string;
   usernameInput: string;
-  privacyShowLeaderboardName: boolean;
-  privacyShowRegion: boolean;
-  privacyShowActivityHistory: boolean;
   isSaveDirty: boolean;
   isSavingAny: boolean;
   isResolvingRegion: boolean;
+  notice: string | null;
+  error: string | null;
+  onBack: () => void;
   onNicknameChange: (value: string) => void;
-  onUsernameChange: (value: string) => void;
-  onPrivacyShowLeaderboardNameChange: (value: boolean) => void;
-  onPrivacyShowRegionChange: (value: boolean) => void;
-  onPrivacyShowActivityHistoryChange: (value: boolean) => void;
   onSaveAll: () => Promise<void>;
-  onCancelEdits: () => void;
   onResolveCurrentRegion: () => Promise<void>;
-  onSignOut: () => Promise<void>;
   reducedMotion: boolean;
-  delay?: number;
 };
 
-function SettingsCard({
+function EditProfileView({
   dashboard,
   nicknameInput,
   usernameInput,
-  privacyShowLeaderboardName,
-  privacyShowRegion,
-  privacyShowActivityHistory,
   isSaveDirty,
   isSavingAny,
   isResolvingRegion,
+  notice,
+  error,
+  onBack,
   onNicknameChange,
-  onUsernameChange,
-  onPrivacyShowLeaderboardNameChange,
-  onPrivacyShowRegionChange,
-  onPrivacyShowActivityHistoryChange,
   onSaveAll,
-  onCancelEdits,
   onResolveCurrentRegion,
-  onSignOut,
   reducedMotion,
-  delay = 0.12,
-}: SettingsCardProps) {
+}: EditProfileViewProps) {
+  const regionLabel = dashboard.profile.region.name ?? '미설정';
+
   return (
-    <AnimatedSection className={CARD_CLASS} reducedMotion={reducedMotion} delay={delay}>
-      <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#ffcf98]">개인정보 수정</h2>
+    <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
+      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="MY로 돌아가기"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+        >
+          <ChevronLeft size={24} />
+        </button>
+        <div className="h-11 w-11" aria-hidden />
+      </motion.header>
 
-      <section className={`${PANEL_CLASS} mt-2`} aria-labelledby="account-settings-title">
-        <h3 id="account-settings-title" className="text-[12px] font-semibold text-white/84">
-          기본 정보
-        </h3>
+      <motion.section {...getMotionProps(reducedMotion, 0.02)} className="mb-7">
+        <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-[color:var(--my-text-main)]">
+          프로필 정보를
+          <br />
+          수정할 수 있어요
+        </h1>
+        <p className="mt-2 text-sm text-[color:var(--my-text-muted)]">변경 후 하단의 저장 버튼을 눌러주세요.</p>
+        {notice ? <p className="mt-2 text-xs text-[#ffd7b5]">{notice}</p> : null}
+        {error ? <p className="mt-2 text-xs text-[#ffb4b4]">{error}</p> : null}
+      </motion.section>
 
-        <label htmlFor="my-nickname-input" className="mt-2 block">
-          <span className="mb-1 block text-[11px] text-[color:var(--my-text-muted)]">닉네임</span>
+      <div className="space-y-4">
+        <motion.section
+          {...getMotionProps(reducedMotion, 0.05)}
+          className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
+        >
+          <label htmlFor="my-nickname-input" className="block">
+            <span className="mb-2 block text-sm font-semibold text-[color:var(--my-text-muted)]">닉네임</span>
+          </label>
           <input
             id="my-nickname-input"
             value={nicknameInput}
             onChange={(event) => onNicknameChange(event.target.value)}
             maxLength={20}
-            className={FIELD_CLASS}
             autoComplete="nickname"
+            className="h-14 w-full rounded-xl border border-transparent bg-white/8 px-4 text-lg font-semibold text-[color:var(--my-text-main)] outline-none transition focus:border-[color:var(--my-accent)] focus:bg-white/12 focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+            placeholder="닉네임을 입력하세요"
           />
-        </label>
 
-        <label htmlFor="my-username-input" className="mt-2 block">
-          <span className="mb-1 block text-[11px] text-[color:var(--my-text-muted)]">사용자명</span>
-          <input
-            id="my-username-input"
-            value={usernameInput}
-            onChange={(event) => onUsernameChange(event.target.value)}
-            className={FIELD_CLASS}
-            autoComplete="username"
-            disabled
-            readOnly
-          />
-          <span className="mt-1 block text-[10px] text-[color:var(--my-text-subtle)]">사용자명은 변경할 수 없습니다.</span>
-        </label>
-      </section>
+          <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">사용자명</span>
+              <span className="text-sm font-medium text-white/84">{usernameInput}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-1.5 text-[color:var(--my-text-subtle)]">
+              <AlertCircle size={14} />
+              <p className="text-xs">사용자명은 변경할 수 없어요.</p>
+            </div>
+          </div>
+        </motion.section>
 
-      <section className={`${PANEL_CLASS} mt-2`} aria-labelledby="region-settings-title">
-        <h3 id="region-settings-title" className="text-[12px] font-semibold text-white/84">
-          지역 설정
-        </h3>
-        <p className="mt-2 text-[12px] text-[color:var(--my-text-muted)]">현재 지역: {dashboard.profile.region.name ?? '미설정'}</p>
-        <button
-          type="button"
-          onClick={() => void onResolveCurrentRegion()}
-          disabled={isResolvingRegion || isSavingAny}
-          aria-disabled={isResolvingRegion || isSavingAny}
-          className={`${BUTTON_SECONDARY_CLASS} mt-2 w-full`}
+        <motion.section
+          {...getMotionProps(reducedMotion, 0.08)}
+          className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
         >
-          {isResolvingRegion ? '위치 확인 중...' : '현재 위치로 자동 설정'}
-        </button>
-      </section>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">내 동네</span>
+            <span className="text-sm font-bold text-white/84">{regionLabel}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onResolveCurrentRegion()}
+            disabled={isResolvingRegion || isSavingAny}
+            aria-disabled={isResolvingRegion || isSavingAny}
+            aria-label="현재 위치로 지역 찾기"
+            className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--my-border)] bg-[var(--my-accent-soft)] text-[15px] font-semibold text-[color:var(--my-accent)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <MapPin size={20} />
+            {isResolvingRegion ? '위치 확인 중...' : '현재 위치로 찾기'}
+          </button>
+        </motion.section>
+      </div>
 
-      <section className={`${PANEL_CLASS} mt-2`} aria-labelledby="privacy-settings-title">
-        <h3 id="privacy-settings-title" className="text-[12px] font-semibold text-white/84">
-          공개 범위
-        </h3>
-
-        <label className="mt-2 flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-[color:var(--my-border-soft)] bg-white/[0.03] px-2.5 py-2 text-[12px] text-white/82">
-          <span>
-            <span className="block">리더보드 닉네임 공개</span>
-            <span className="mt-0.5 block text-[10px] text-[color:var(--my-text-subtle)]">다른 사용자가 리더보드에서 닉네임을 볼 수 있습니다.</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={privacyShowLeaderboardName}
-            onChange={(event) => onPrivacyShowLeaderboardNameChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--my-accent)]"
-          />
-        </label>
-
-        <label className="mt-1.5 flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-[color:var(--my-border-soft)] bg-white/[0.03] px-2.5 py-2 text-[12px] text-white/82">
-          <span>
-            <span className="block">내 지역 공개</span>
-            <span className="mt-0.5 block text-[10px] text-[color:var(--my-text-subtle)]">통계 화면에서 내 지역 정보가 노출됩니다.</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={privacyShowRegion}
-            onChange={(event) => onPrivacyShowRegionChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--my-accent)]"
-          />
-        </label>
-
-        <label className="mt-1.5 flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-[color:var(--my-border-soft)] bg-white/[0.03] px-2.5 py-2 text-[12px] text-white/82">
-          <span>
-            <span className="block">활동 히스토리 공개</span>
-            <span className="mt-0.5 block text-[10px] text-[color:var(--my-text-subtle)]">프로필에서 투표/게임 기록이 보일 수 있습니다.</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={privacyShowActivityHistory}
-            onChange={(event) => onPrivacyShowActivityHistoryChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--my-accent)]"
-          />
-        </label>
-      </section>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <motion.div {...getMotionProps(reducedMotion, 0.1)} className="mt-6">
         <button
           type="button"
           onClick={() => void onSaveAll()}
-          disabled={isSavingAny}
-          aria-disabled={isSavingAny}
-          className={`${BUTTON_PRIMARY_CLASS} w-full`}
-        >
-          {isSavingAny ? '저장 중...' : '수정 완료'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancelEdits}
           disabled={!isSaveDirty || isSavingAny}
           aria-disabled={!isSaveDirty || isSavingAny}
-          className={`${BUTTON_SECONDARY_CLASS} w-full`}
+          aria-label="프로필 저장하기"
+          className="inline-flex h-14 w-full items-center justify-center rounded-[18px] border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] text-lg font-bold text-white shadow-[0_10px_28px_rgba(255,107,0,0.28)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          취소
+          {isSavingAny ? '저장 중...' : '저장하기'}
         </button>
-      </div>
-
-      <button
-        type="button"
-        onClick={() => void onSignOut()}
-        className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl border border-[color:var(--my-border)] bg-white/8 text-sm font-semibold text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-      >
-        로그아웃
-      </button>
-    </AnimatedSection>
+      </motion.div>
+    </div>
   );
 }
 
@@ -867,6 +853,7 @@ export default function MyPage() {
   const [pendingRegion, setPendingRegion] = useState<ReverseRegionResponse | null>(null);
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
   const isEditRoute = pathname === '/my/edit';
+  const isHistoryRoute = pathname === '/my/history';
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) {
@@ -981,7 +968,7 @@ export default function MyPage() {
     );
   }, [dashboard, privacyShowActivityHistory, privacyShowLeaderboardName, privacyShowRegion]);
 
-  const isSettingsDirty = isProfileDirty || isPrivacyDirty;
+  const isSettingsDirty = isEditRoute ? isProfileDirty : isProfileDirty || isPrivacyDirty;
   const isSavingAny = isSavingProfile || isSavingPrivacy;
 
   const submitProfilePatch = useCallback(
@@ -1031,7 +1018,7 @@ export default function MyPage() {
     }
 
     setIsSavingProfile(isProfileDirty);
-    setIsSavingPrivacy(isPrivacyDirty);
+    setIsSavingPrivacy(!isEditRoute && isPrivacyDirty);
     try {
       if (isProfileDirty) {
         const profilePayload: Record<string, unknown> = {};
@@ -1057,7 +1044,7 @@ export default function MyPage() {
         }
       }
 
-      if (isPrivacyDirty) {
+      if (!isEditRoute && isPrivacyDirty) {
         const privacyResponse = await fetch('/api/me/privacy', {
           method: 'PATCH',
           headers: {
@@ -1089,6 +1076,7 @@ export default function MyPage() {
     getAccessToken,
     isPrivacyDirty,
     isProfileDirty,
+    isEditRoute,
     isSettingsDirty,
     loadMyData,
     nicknameInput,
@@ -1097,21 +1085,12 @@ export default function MyPage() {
     privacyShowRegion,
   ]);
 
-  const handleCancelEdits = useCallback(() => {
-    if (!dashboard) {
-      return;
-    }
-
-    setNicknameInput(dashboard.profile.nickname ?? '');
-    setUsernameInput(dashboard.profile.username ?? '');
-    setPrivacyShowLeaderboardName(dashboard.privacy.showLeaderboardName);
-    setPrivacyShowRegion(dashboard.privacy.showRegion);
-    setPrivacyShowActivityHistory(dashboard.privacy.showActivityHistory);
-    setNotice('변경사항을 취소했습니다.');
-  }, [dashboard]);
-
   const handleScrollToSettings = useCallback(() => {
     router.push('/my/edit');
+  }, [router]);
+
+  const handleOpenHistory = useCallback(() => {
+    router.push('/my/history');
   }, [router]);
 
   const handleResolveCurrentRegion = useCallback(async () => {
@@ -1327,42 +1306,34 @@ export default function MyPage() {
           ) : dashboard && history ? (
             <>
               {isEditRoute ? (
-                <div className="mt-3 space-y-3">
-                  <Header notice={notice} error={error} reducedMotion={Boolean(reducedMotion)} />
-                  <motion.section
-                    {...getMotionProps(Boolean(reducedMotion), 0.03)}
-                    className="rounded-[18px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] p-3"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => router.push('/my')}
-                      className="inline-flex h-8 items-center justify-center rounded-lg border border-[color:var(--my-border)] bg-white/8 px-2.5 text-[11px] font-semibold text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-                    >
-                      ← MY로 돌아가기
-                    </button>
-                    <p className="mt-2 text-xs text-[color:var(--my-text-muted)]">이 페이지에서 프로필과 공개 범위를 수정합니다.</p>
-                  </motion.section>
-                  <SettingsCard
+                <div className="pt-4" style={MAIN_VIEW_STYLE}>
+                  <EditProfileView
                     dashboard={dashboard}
                     nicknameInput={nicknameInput}
                     usernameInput={usernameInput}
-                    privacyShowLeaderboardName={privacyShowLeaderboardName}
-                    privacyShowRegion={privacyShowRegion}
-                    privacyShowActivityHistory={privacyShowActivityHistory}
-                    isSaveDirty={isSettingsDirty}
+                    isSaveDirty={isProfileDirty}
                     isSavingAny={isSavingAny}
                     isResolvingRegion={isResolvingRegion}
+                    notice={notice}
+                    error={error}
+                    onBack={() => {
+                      router.push('/my');
+                    }}
                     onNicknameChange={setNicknameInput}
-                    onUsernameChange={setUsernameInput}
-                    onPrivacyShowLeaderboardNameChange={setPrivacyShowLeaderboardName}
-                    onPrivacyShowRegionChange={setPrivacyShowRegion}
-                    onPrivacyShowActivityHistoryChange={setPrivacyShowActivityHistory}
                     onSaveAll={handleSaveAll}
-                    onCancelEdits={handleCancelEdits}
                     onResolveCurrentRegion={handleResolveCurrentRegion}
-                    onSignOut={async () => {
-                      await signOut();
-                      router.push('/');
+                    reducedMotion={Boolean(reducedMotion)}
+                  />
+                </div>
+              ) : isHistoryRoute ? (
+                <div className="pt-8" style={MAIN_VIEW_STYLE}>
+                  {notice ? <p className="text-xs text-[#ffd7b5]">{notice}</p> : null}
+                  {error ? <p className="text-xs text-[#ffb4b4]">{error}</p> : null}
+                  <HistoryView
+                    dashboard={dashboard}
+                    history={history}
+                    onBack={() => {
+                      router.push('/my');
                     }}
                     reducedMotion={Boolean(reducedMotion)}
                   />
@@ -1378,7 +1349,7 @@ export default function MyPage() {
                       setPrivacyShowLeaderboardName((prev) => !prev);
                     }}
                     onEditProfile={handleScrollToSettings}
-                    onOpenHistory={handleScrollToSettings}
+                    onOpenHistory={handleOpenHistory}
                     onSignOut={async () => {
                       await signOut();
                       router.push('/');

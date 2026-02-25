@@ -81,7 +81,7 @@ export default function AuthPage() {
             </h1>
 
             <p className="mt-3 text-sm leading-relaxed text-white/70">
-              Google 로그인 후 신규 사용자는 가입 완료(닉네임/프로필/나이/성별) 단계가 한 번 필요합니다.
+              Google 로그인 후 신규 사용자는 가입 완료(닉네임/출생연도/성별) 단계가 한 번 필요합니다.
               가입 완료 전에도 지도와 결과 탐색은 바로 가능합니다.
             </p>
 
@@ -122,9 +122,7 @@ export default function AuthPage() {
               </p>
             ) : null}
 
-            <p className="mt-4 text-center text-xs text-white/55">
-              계속하면 이용약관 및 개인정보처리방침에 동의한 것으로 간주됩니다.
-            </p>
+            <p className="mt-4 text-center text-xs text-white/55">약관 동의는 가입 완료 단계에서 필수로 진행됩니다.</p>
           </article>
         </section>
       </div>

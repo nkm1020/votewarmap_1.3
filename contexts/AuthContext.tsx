@@ -19,7 +19,6 @@ import {
   clearPendingVotes,
   readGuestSessionId,
 } from '@/lib/vote/client-storage';
-import type { Gender } from '@/lib/vote/types';
 
 type UserProfile = {
   id: string;
@@ -51,9 +50,9 @@ type UserSyncPayload = {
 
 type CompleteSignupInput = {
   nickname: string;
-  avatarPreset: string;
   birthYear: number;
-  gender: Gender;
+  gender: 'male' | 'female';
+  agreedToTerms: true;
 };
 
 type OAuthSignInOptions = {

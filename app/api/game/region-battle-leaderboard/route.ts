@@ -12,11 +12,22 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const FALLBACK_FETCH_LIMIT = 5000;
+
+type LeaderboardPeriod = 'daily' | 'weekly' | 'all';
+
 type LeaderboardRpcRow = {
   rank: number | string | null;
   user_id: string | null;
   score: number | string | null;
   achieved_at: string | null;
+};
+
+type LeaderboardRawScoreRow = {
+  user_id: string | null;
+  score: number | string | null;
+  played_at: string | null;
 };
 
 type UserRow = {
@@ -50,6 +61,126 @@ function normalizeTimestamp(value: string | null): string {
     return new Date(0).toISOString();
   }
   return Number.isFinite(Date.parse(value)) ? value : new Date(0).toISOString();
+}
+
+function kstDayStartMs(baseUtcMs: number): number {
+  const kst = new Date(baseUtcMs + KST_OFFSET_MS);
+  return Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate());
+}
+
+function kstWeekStartMs(baseUtcMs: number): number {
+  const kst = new Date(baseUtcMs + KST_OFFSET_MS);
+  const weekday = kst.getUTCDay();
+  const diffToMonday = (weekday + 6) % 7;
+  return Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() - diffToMonday);
+}
+
+function shouldIncludeByPeriod(playedAtIso: string, period: LeaderboardPeriod): boolean {
+  if (period === 'all') {
+    return true;
+  }
+
+  const playedAtMs = Date.parse(playedAtIso);
+  if (!Number.isFinite(playedAtMs)) {
+    return false;
+  }
+
+  const playedAtKstMs = playedAtMs + KST_OFFSET_MS;
+  const nowUtcMs = Date.now();
+  if (period === 'daily') {
+    return playedAtKstMs >= kstDayStartMs(nowUtcMs);
+  }
+  return playedAtKstMs >= kstWeekStartMs(nowUtcMs);
+}
+
+function isMissingFunctionError(code: string | undefined, message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (code === '42883') {
+    return true;
+  }
+  return normalized.includes('get_region_battle_leaderboard') && normalized.includes('does not exist');
+}
+
+function isMissingTableError(code: string | undefined, message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (code === '42p01') {
+    return true;
+  }
+  return normalized.includes('region_battle_game_scores') && normalized.includes('does not exist');
+}
+
+async function loadRowsFallback(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  period: LeaderboardPeriod,
+  limit: number,
+): Promise<{ rows: LeaderboardRpcRow[]; error: { message: string; code?: string } | null }> {
+  const { data, error } = await supabase
+    .from('region_battle_game_scores')
+    .select('user_id, score, played_at')
+    .order('played_at', { ascending: false })
+    .limit(FALLBACK_FETCH_LIMIT);
+
+  if (error) {
+    return { rows: [], error: { message: error.message, code: error.code } };
+  }
+
+  const sourceRows = (Array.isArray(data) ? data : []) as LeaderboardRawScoreRow[];
+  const bestByUser = new Map<string, { score: number; achievedAt: string; achievedAtMs: number }>();
+
+  for (const row of sourceRows) {
+    const userId = String(row.user_id ?? '').trim();
+    if (!userId) {
+      continue;
+    }
+
+    const achievedAt = normalizeTimestamp(row.played_at);
+    if (!shouldIncludeByPeriod(achievedAt, period)) {
+      continue;
+    }
+
+    const achievedAtMs = Date.parse(achievedAt);
+    if (!Number.isFinite(achievedAtMs)) {
+      continue;
+    }
+
+    const score = normalizeInt(row.score);
+    const current = bestByUser.get(userId);
+    if (!current) {
+      bestByUser.set(userId, { score, achievedAt, achievedAtMs });
+      continue;
+    }
+
+    if (score > current.score || (score === current.score && achievedAtMs < current.achievedAtMs)) {
+      bestByUser.set(userId, { score, achievedAt, achievedAtMs });
+    }
+  }
+
+  const rankedRows = Array.from(bestByUser.entries())
+    .map(([userId, value]) => ({
+      user_id: userId,
+      score: value.score,
+      achieved_at: value.achievedAt,
+    }))
+    .sort((a, b) => {
+      const scoreDiff = normalizeInt(b.score) - normalizeInt(a.score);
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
+      const achievedDiff = Date.parse(a.achieved_at ?? '') - Date.parse(b.achieved_at ?? '');
+      if (achievedDiff !== 0) {
+        return achievedDiff;
+      }
+      return String(a.user_id ?? '').localeCompare(String(b.user_id ?? ''));
+    })
+    .slice(0, limit)
+    .map((row, index) => ({
+      rank: index + 1,
+      user_id: row.user_id,
+      score: row.score,
+      achieved_at: row.achieved_at,
+    }));
+
+  return { rows: rankedRows, error: null };
 }
 
 function maskFullName(raw: string): string {
@@ -128,11 +259,26 @@ export async function GET(request: Request) {
       },
     );
 
+    let rows: LeaderboardRpcRow[] = [];
     if (leaderboardError) {
-      return NextResponse.json({ error: leaderboardError.message }, { status: 500 });
+      if (!isMissingFunctionError(leaderboardError.code, leaderboardError.message)) {
+        return NextResponse.json({ error: leaderboardError.message }, { status: 500 });
+      }
+
+      const fallbackResult = await loadRowsFallback(supabase, period, limit);
+      if (fallbackResult.error) {
+        if (isMissingTableError(fallbackResult.error.code, fallbackResult.error.message)) {
+          rows = [];
+        } else {
+          return NextResponse.json({ error: fallbackResult.error.message }, { status: 500 });
+        }
+      } else {
+        rows = fallbackResult.rows;
+      }
+    } else {
+      rows = (Array.isArray(leaderboardRows) ? leaderboardRows : []) as LeaderboardRpcRow[];
     }
 
-    const rows = (Array.isArray(leaderboardRows) ? leaderboardRows : []) as LeaderboardRpcRow[];
     const userIds = Array.from(
       new Set(
         rows

@@ -1,8 +1,8 @@
 'use client';
 
-import { type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { clearPendingGameScore, readPendingGameScore, writePendingGameScore } from '@/lib/vote/client-storage';
@@ -75,6 +75,11 @@ type FrameFeedbackFlash = {
   tone: 'correct' | 'wrong' | 'tie_bonus';
 };
 
+type NewRecordFlash = {
+  key: number;
+  score: number;
+};
+
 const BEST_SCORE_STORAGE_KEY = 'region-battle-best-score';
 const AUTO_NEXT_DELAY_MS = 2000;
 const REVEAL_FILL_DURATION_MS = 700;
@@ -89,6 +94,44 @@ const LEADERBOARD_TABS: ReadonlyArray<{ key: LeaderboardPeriod; label: string }>
   { key: 'weekly', label: '주간' },
   { key: 'all', label: '전체' },
 ];
+
+const NEW_RECORD_PARTICLES = Array.from({ length: 14 }, (_, index) => {
+  const angle = (Math.PI * 2 * index) / 14;
+  const distance = index % 2 === 0 ? 132 : 176;
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance,
+  };
+});
+
+const APP_BG = 'bg-[#070d16]';
+const CARD_BG = 'bg-[rgba(12,18,28,0.86)]';
+const SURFACE_BG = 'bg-[rgba(12,18,28,0.78)]';
+const CARD_BORDER = 'border-transparent';
+const TEXT_PRIMARY = 'text-white';
+const TEXT_SECONDARY = 'text-[#8E8E93]';
+
+function AnimatedSection({
+  children,
+  delay = 0,
+  className = '',
+}: {
+  children: ReactNode;
+  delay?: number;
+  className?: string;
+}) {
+  const reducedMotion = useReducedMotion();
+  return (
+    <motion.section
+      className={`shrink-0 ${className}`}
+      initial={reducedMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.25, 1, 0.5, 1], delay }}
+    >
+      {children}
+    </motion.section>
+  );
+}
 
 function chooseRandomQuestion(
   pool: RegionBattleQuestion[],
@@ -151,6 +194,7 @@ export function HigherLowerGamePage() {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [isGameOver, setIsGameOver] = useState(false);
+  const [gamePhase, setGamePhase] = useState<'intro' | 'playing'>('intro');
   const [bestScore, setBestScore] = useState(0);
   const [currentRunId, setCurrentRunId] = useState<string>(() => createRunId());
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'game' | 'me'>('game');
@@ -159,12 +203,13 @@ export function HigherLowerGamePage() {
   const [leaderboardItems, setLeaderboardItems] = useState<RegionBattleLeaderboardItem[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
-  const [isLeaderboardExpanded, setIsLeaderboardExpanded] = useState(false);
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
 
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [frameFeedbackFlash, setFrameFeedbackFlash] = useState<FrameFeedbackFlash | null>(null);
+  const [newRecordFlash, setNewRecordFlash] = useState<NewRecordFlash | null>(null);
+  const [hasCelebratedRecordInRun, setHasCelebratedRecordInRun] = useState(false);
 
   const savedRunIdsRef = useRef<Set<string>>(new Set());
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
@@ -319,21 +364,22 @@ export function HigherLowerGamePage() {
   }, [drawNextQuestion, items, question]);
 
   useEffect(() => {
-    if (score > bestScore) {
-      setBestScore(score);
-    }
-  }, [bestScore, score]);
-
-  useEffect(() => {
-    if (!isGameOver) {
+    if (score <= bestScore) {
       return;
     }
-    setIsLeaderboardExpanded(true);
-  }, [isGameOver]);
+
+    setBestScore(score);
+    if (!hasCelebratedRecordInRun) {
+      setHasCelebratedRecordInRun(true);
+      setNewRecordFlash((prev) => ({
+        key: (prev?.key ?? 0) + 1,
+        score,
+      }));
+    }
+  }, [bestScore, hasCelebratedRecordInRun, score]);
 
   const handleSelectLeaderboardPeriod = useCallback((period: LeaderboardPeriod) => {
     setLeaderboardPeriod(period);
-    setIsLeaderboardExpanded(true);
   }, []);
 
   const submitScore = useCallback(async (payload: RegionBattleScoreSubmitRequest) => {
@@ -493,10 +539,11 @@ export function HigherLowerGamePage() {
     setScore(0);
     setLives(3);
     setIsGameOver(false);
+    setGamePhase('playing');
+    setHasCelebratedRecordInRun(false);
     setSaveState('idle');
     setShareNotice(null);
     setFrameFeedbackFlash(null);
-    setIsLeaderboardExpanded(false);
     setCurrentRunId(createRunId());
     drawNextQuestion(true);
   }, [drawNextQuestion]);
@@ -687,23 +734,8 @@ export function HigherLowerGamePage() {
     return LEADERBOARD_TABS.find((tab) => tab.key === leaderboardPeriod)?.label ?? '전체';
   }, [leaderboardPeriod]);
 
-  const leaderboardCollapsedSummary = useMemo(() => {
-    if (leaderboardLoading) {
-      return '리더보드 불러오는 중...';
-    }
-    if (leaderboardError) {
-      return leaderboardError;
-    }
-    const topScore = leaderboardItems[0]?.score;
-    if (typeof topScore === 'number') {
-      return `${activePeriodLabel} · 1위 ${topScore}점`;
-    }
-    return `${activePeriodLabel} · 기록 없음`;
-  }, [activePeriodLabel, leaderboardError, leaderboardItems, leaderboardLoading]);
-
   const isWinnerA = isRevealed && question?.winner === 'A';
   const isWinnerB = isRevealed && question?.winner === 'B';
-  const isWinnerTie = isRevealed && question?.winner === 'TIE';
   const shouldShakeA = isRevealed && isCorrect === false && selectedChoice === 'A';
   const shouldShakeB = isRevealed && isCorrect === false && selectedChoice === 'B';
   const shouldShakeTie = isRevealed && isCorrect === false && selectedChoice === 'TIE';
@@ -712,7 +744,7 @@ export function HigherLowerGamePage() {
   const canPlay = items.length > 0;
 
   return (
-    <div className="bg-[#070d16] text-white">
+    <div className={`${APP_BG} ${TEXT_PRIMARY} min-h-screen font-sans selection:bg-[#3182F6] selection:text-white`}>
       {frameFeedbackFlash ? (
         <motion.div
           key={`frame-feedback-${frameFeedbackFlash.key}`}
@@ -759,6 +791,52 @@ export function HigherLowerGamePage() {
               </motion.div>
             </>
           ) : null}
+        </motion.div>
+      ) : null}
+
+      {newRecordFlash ? (
+        <motion.div
+          key={`new-record-${newRecordFlash.key}`}
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-[125]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 1, 0.86, 0] }}
+          transition={{ duration: 1.18, ease: 'easeOut' }}
+        >
+          <motion.div
+            className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,209,102,0.28),rgba(7,13,22,0))]"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: [0.8, 1.06, 1.12], opacity: [0, 0.92, 0] }}
+            transition={{ duration: 1.1, ease: 'easeOut' }}
+          />
+          {NEW_RECORD_PARTICLES.map((particle, index) => (
+            <motion.span
+              key={`new-record-particle-${newRecordFlash.key}-${index}`}
+              className="absolute left-1/2 top-1/2 h-2.5 w-2.5 rounded-full bg-[#ffd166] shadow-[0_0_18px_rgba(255,209,102,0.9)]"
+              initial={{ x: 0, y: 0, scale: 0.42, opacity: 0 }}
+              animate={{
+                x: [0, particle.x],
+                y: [0, particle.y],
+                scale: [0.42, 1.18, 0.76],
+                opacity: [0, 1, 0],
+              }}
+              transition={{ duration: 1.06, ease: 'easeOut', delay: index * 0.012 }}
+            />
+          ))}
+          <motion.div
+            className="absolute left-1/2 top-[42%] -translate-x-1/2 -translate-y-1/2 rounded-[18px] border border-[#ffd166]/80 bg-[rgba(245,158,11,0.24)] px-5 py-2.5 text-center shadow-[0_14px_38px_rgba(245,158,11,0.48)] backdrop-blur-sm"
+            initial={{ opacity: 0, y: 24, scale: 0.7, rotate: -6 }}
+            animate={{
+              opacity: [0, 1, 1, 0],
+              y: [24, -2, -16, -30],
+              scale: [0.7, 1.06, 1, 0.92],
+              rotate: [-6, 0, 0, 3],
+            }}
+            transition={{ duration: 1.02, ease: 'easeOut' }}
+          >
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#fff4ce]">New Record</p>
+            <p className="text-[28px] font-black leading-none text-[#ffd166]">{newRecordFlash.score.toLocaleString()}점</p>
+          </motion.div>
         </motion.div>
       ) : null}
 
@@ -860,105 +938,129 @@ export function HigherLowerGamePage() {
 
       <main className="relative h-screen w-full overflow-hidden">
         <div
-          className="mx-auto flex h-full w-full max-w-[430px] flex-col overflow-y-auto px-4 pb-4 pt-[calc(0.55rem+env(safe-area-inset-top))]"
-          style={{ paddingBottom: `${Math.max(bottomDockHeight + 12, 120)}px` }}
+          className="mx-auto flex h-full w-full max-w-[500px] flex-col overflow-y-auto px-5 pb-10 pt-12 md:px-8 custom-scrollbar"
+          style={{ paddingBottom: `${Math.max(bottomDockHeight + 40, 120)}px` }}
         >
-        <motion.section
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut', delay: 0.04 }}
-          className="mt-2 rounded-[20px] border border-white/12 bg-[rgba(16,21,33,0.72)] p-3 shadow-[0_8px_22px_rgba(0,0,0,0.22)] backdrop-blur-2xl"
-        >
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-[12px] border border-white/12 bg-white/[0.04] px-3 py-2">
-              <p className="text-[11px] text-white/60">점수</p>
-              <p className="text-[18px] font-bold text-white">{score}</p>
-            </div>
-            <div className="rounded-[12px] border border-white/12 bg-white/[0.04] px-3 py-2">
-              <p className="text-[11px] text-white/60">목숨</p>
-              <p className="text-[18px] font-bold text-[#ff9f0a]">{'❤'.repeat(lives) || '0'}</p>
-            </div>
-            <div className="rounded-[12px] border border-white/12 bg-white/[0.04] px-3 py-2">
-              <p className="text-[11px] text-white/60">최고</p>
-              <p className="text-[18px] font-bold text-[#8fb8ff]">{bestScore}</p>
-            </div>
-          </div>
+          <AnimatedSection delay={0.1} className="mb-6 pl-1">
+            <h1 className="mb-5 text-[28px] font-bold tracking-tight">게임</h1>
+            <div className={`flex items-center justify-between rounded-3xl border ${CARD_BORDER} ${CARD_BG} p-5`}>
+              <div className="flex flex-col">
+                <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>현재 점수</span>
+                <span className="text-[22px] font-bold">{score.toLocaleString()}</span>
+              </div>
 
-        </motion.section>
+              <div className="flex flex-col items-center">
+                <span className={`mb-2 text-[12px] font-medium ${TEXT_SECONDARY}`}>남은 목숨</span>
+                <div className="flex gap-1.5 text-[16px]">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <motion.span
+                      key={`life-${index}`}
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: index < lives ? 1 : 0.2 }}
+                      transition={{ duration: 0.3, delay: index * 0.1 }}
+                      className={index < lives ? 'text-[#FF3B30]' : 'text-[#3A3A3C] grayscale'}
+                    >
+                      ❤️
+                    </motion.span>
+                  ))}
+                </div>
+              </div>
 
-        <section className="mt-2 rounded-[22px] border border-white/12 bg-[rgba(16,21,33,0.74)] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.26)] backdrop-blur-2xl">
-          {isLoading ? (
-            <p className="text-[12px] text-white/74">게임 데이터를 불러오는 중...</p>
-          ) : error ? (
-            <div className="space-y-3">
-              <p className="text-[12px] text-[#ffb4b4]">{error}</p>
-              <button
-                type="button"
-                onClick={() => void loadPool()}
-                className="inline-flex h-11 items-center rounded-[12px] border border-white/15 bg-white/8 px-4 text-[13px] font-semibold text-white/90 transition hover:bg-white/12"
+              <div className="flex flex-col text-right">
+                <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>최고 점수</span>
+                <span className="text-[22px] font-bold text-[#3182F6]">{bestScore.toLocaleString()}</span>
+              </div>
+            </div>
+          </AnimatedSection>
+
+          <AnimatedSection delay={0.2} className={`relative mb-6 overflow-hidden rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6 pb-6`}>
+            {gamePhase === 'intro' ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="relative z-10 flex flex-col items-center justify-center px-2 py-8 text-center"
               >
-                다시 시도
-              </button>
-            </div>
-          ) : !canPlay || !question ? (
-            <p className="text-[12px] text-white/74">플레이 가능한 데이터가 부족합니다.</p>
-          ) : (
-            <div className="space-y-3">
+                <div className={`mb-5 flex h-16 w-16 items-center justify-center rounded-full ${SURFACE_BG} text-3xl`}>🎯</div>
+                <h2 className="mb-3 text-[22px] font-bold text-white">지역 민심 맞추기</h2>
+                <p className={`mb-8 break-keep text-[15px] leading-relaxed ${TEXT_SECONDARY}`}>
+                  주어진 논쟁거리에 대해 <span className="font-semibold text-[#3182F6]">특정 지역</span> 사람들이
+                  <br />
+                  어느 쪽을 더 많이 선택했을지 예측해보세요.
+                  <br />
+                  목숨 3개가 소진되기 전까지 최고 점수에 도전하세요!
+                </p>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setGamePhase('playing')}
+                  className="w-full rounded-2xl bg-[#3182F6] py-4 text-[17px] font-bold text-white transition-colors hover:brightness-110 active:scale-95"
+                >
+                  게임 시작
+                </motion.button>
+              </motion.div>
+            ) : isLoading ? (
+              <p className="text-[13px] text-white/74">게임 데이터를 불러오는 중...</p>
+            ) : error ? (
+              <div className="space-y-3">
+                <p className="text-[13px] text-[#ffb4b4]">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadPool()}
+                  className="inline-flex h-11 items-center rounded-[12px] border border-white/15 bg-white/8 px-4 text-[13px] font-semibold text-white/90 transition hover:bg-white/12"
+                >
+                  다시 시도
+                </button>
+              </div>
+            ) : !canPlay || !question ? (
+              <p className="text-[13px] text-white/74">플레이 가능한 데이터가 부족합니다.</p>
+            ) : (
               <motion.div
                 key={question.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
-                className="rounded-[20px] border border-white/12 bg-white/[0.04] px-3 py-3"
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="space-y-5"
               >
-                <p className="text-[12px] font-semibold text-white/72">현재 문제</p>
-                <div className="mt-2 rounded-[14px] border border-white/10 bg-white/[0.02] px-3 py-2">
-                  <p className="text-[11px] font-semibold text-white/62">지역</p>
-                  <p className="mt-0.5 text-[15px] font-bold text-white">{question.regionName}</p>
+                <div className="flex flex-col items-center text-center">
+                  <div className={`mb-5 inline-flex items-center justify-center gap-1.5 rounded-lg ${SURFACE_BG} px-3.5 py-0.5`}>
+                    <span className="text-[14px] leading-none">📍</span>
+                    <span className="text-[16px] font-semibold leading-none tracking-wide text-[#E5E5EA]">{question.regionName}</span>
+                  </div>
+                  <h2 className="line-clamp-2 break-keep px-2 text-[24px] font-bold leading-tight text-white md:text-[28px]">{question.topicTitle}</h2>
                 </div>
 
-                <div className="mt-2 rounded-[14px] border border-white/10 bg-white/[0.02] px-3 py-2">
-                  <p className="text-[11px] font-semibold text-white/62">주제</p>
-                  <p className="mt-0.5 line-clamp-2 break-keep text-[15px] font-bold text-white">{question.topicTitle}</p>
-                </div>
-              </motion.div>
-
-              <div className="relative py-1">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="relative flex h-[156px] items-stretch gap-2.5">
                   <motion.button
                     type="button"
                     onClick={() => handlePick('A')}
                     disabled={isRevealed || isGameOver}
                     animate={shouldShakeA ? { x: [0, -7, 6, -4, 2, 0] } : { x: 0 }}
                     transition={shouldShakeA ? { duration: SHAKE_DURATION_S, ease: 'easeInOut' } : { duration: 0.15 }}
-                    className={`group relative min-h-[176px] overflow-hidden rounded-[26px] border px-3 py-3 text-center shadow-[0_12px_26px_rgba(0,0,0,0.26)] transition ${
+                    className={`relative flex-1 overflow-hidden rounded-[24px] border px-4 py-3 text-center transition ${
                       isRevealed
                         ? selectedChoice === 'A'
                           ? isCorrect
-                            ? 'border-emerald-300/85 bg-[linear-gradient(138deg,rgba(255,107,0,0.92),rgba(255,159,10,0.85))] ring-2 ring-emerald-300'
-                            : 'border-red-300/85 bg-[linear-gradient(138deg,rgba(255,107,0,0.92),rgba(255,159,10,0.85))] ring-2 ring-red-300'
+                            ? 'border-emerald-300 bg-[#FF9500] ring-2 ring-emerald-300'
+                            : 'border-red-300 bg-[#FF9500] ring-2 ring-red-300'
                           : question.winner === 'A'
-                            ? 'border-emerald-300/85 bg-[linear-gradient(138deg,rgba(255,107,0,0.92),rgba(255,159,10,0.85))] ring-2 ring-emerald-300'
-                            : 'border-white/14 bg-[linear-gradient(138deg,rgba(255,107,0,0.82),rgba(255,159,10,0.72))]'
-                        : 'border-[#ff9f0a66] bg-[linear-gradient(138deg,rgba(255,107,0,0.9),rgba(255,159,10,0.8))] hover:brightness-110'
+                            ? 'border-emerald-300 bg-[#FF9500] ring-2 ring-emerald-300'
+                            : 'border-[#FF9500]/35 bg-[#FF9500]/85'
+                        : 'border-[#FF9500]/70 bg-[#FF9500] hover:brightness-110'
                     }`}
                   >
                     <div
-                      className={`pointer-events-none absolute inset-0 z-10 bg-white/28 transition-transform ease-out ${
+                      className={`pointer-events-none absolute inset-0 z-10 bg-white/26 transition-transform ease-out ${
                         isWinnerA ? 'origin-left scale-x-100' : 'origin-left scale-x-0'
                       }`}
                       style={{ transitionDuration: `${REVEAL_FILL_DURATION_MS}ms` }}
                     />
-                    <div className="pointer-events-none absolute inset-0 z-20 bg-[radial-gradient(120%_85%_at_10%_0%,rgba(255,255,255,0.24),transparent_52%)]" />
-                    <div className="relative z-30 flex h-full items-center justify-center pl-2 pr-[44px]">
-                      <p className="line-clamp-3 break-keep text-[clamp(19px,4.6vw,34px)] font-extrabold leading-[1.24] text-white drop-shadow-[0_2px_7px_rgba(0,0,0,0.26)]">
-                        {question.optionA.label}
-                      </p>
-                    </div>
+                    <span className="relative z-20 block break-keep text-[20px] font-extrabold leading-[1.28] text-white">
+                      {question.optionA.label}
+                    </span>
                     {isRevealed ? (
-                      <p className="absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/25 bg-[rgba(12,18,28,0.22)] px-2 py-0.5 text-[12px] font-bold text-white/95 backdrop-blur-sm">
+                      <span className="absolute bottom-2.5 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/30 bg-[rgba(7,13,22,0.26)] px-2 py-0.5 text-[12px] font-bold text-white/95 backdrop-blur-sm">
                         {question.optionA.percent}%
-                      </p>
+                      </span>
                     ) : null}
                   </motion.button>
 
@@ -968,159 +1070,133 @@ export function HigherLowerGamePage() {
                     disabled={isRevealed || isGameOver}
                     animate={shouldShakeB ? { x: [0, -7, 6, -4, 2, 0] } : { x: 0 }}
                     transition={shouldShakeB ? { duration: SHAKE_DURATION_S, ease: 'easeInOut' } : { duration: 0.15 }}
-                    className={`group relative min-h-[176px] overflow-hidden rounded-[26px] border px-3 py-3 text-center shadow-[0_12px_26px_rgba(0,0,0,0.26)] transition ${
+                    className={`relative flex-1 overflow-hidden rounded-[24px] border px-4 py-3 text-center transition ${
                       isRevealed
                         ? selectedChoice === 'B'
                           ? isCorrect
-                            ? 'border-emerald-300/85 bg-[linear-gradient(138deg,rgba(30,120,255,0.92),rgba(111,104,255,0.82))] ring-2 ring-emerald-300'
-                            : 'border-red-300/85 bg-[linear-gradient(138deg,rgba(30,120,255,0.92),rgba(111,104,255,0.82))] ring-2 ring-red-300'
+                            ? 'border-emerald-300 bg-[#3182F6] ring-2 ring-emerald-300'
+                            : 'border-red-300 bg-[#3182F6] ring-2 ring-red-300'
                           : question.winner === 'B'
-                            ? 'border-emerald-300/85 bg-[linear-gradient(138deg,rgba(30,120,255,0.92),rgba(111,104,255,0.82))] ring-2 ring-emerald-300'
-                            : 'border-white/14 bg-[linear-gradient(138deg,rgba(30,120,255,0.82),rgba(111,104,255,0.72))]'
-                        : 'border-[#78a8ff66] bg-[linear-gradient(138deg,rgba(30,120,255,0.9),rgba(111,104,255,0.8))] hover:brightness-110'
+                            ? 'border-emerald-300 bg-[#3182F6] ring-2 ring-emerald-300'
+                            : 'border-[#3182F6]/35 bg-[#3182F6]/85'
+                        : 'border-[#3182F6]/70 bg-[#3182F6] hover:brightness-110'
                     }`}
                   >
                     <div
-                      className={`pointer-events-none absolute inset-0 z-10 bg-white/28 transition-transform ease-out ${
+                      className={`pointer-events-none absolute inset-0 z-10 bg-white/26 transition-transform ease-out ${
                         isWinnerB ? 'origin-right scale-x-100' : 'origin-right scale-x-0'
                       }`}
                       style={{ transitionDuration: `${REVEAL_FILL_DURATION_MS}ms` }}
                     />
-                    <div className="pointer-events-none absolute inset-0 z-20 bg-[radial-gradient(120%_85%_at_10%_0%,rgba(255,255,255,0.2),transparent_52%)]" />
-                    <div className="relative z-30 flex h-full items-center justify-center pl-[44px] pr-2">
-                      <p className="line-clamp-3 break-keep text-[clamp(19px,4.6vw,34px)] font-extrabold leading-[1.24] text-white drop-shadow-[0_2px_7px_rgba(0,0,0,0.26)]">
-                        {question.optionB.label}
-                      </p>
-                    </div>
+                    <span className="relative z-20 block break-keep text-[20px] font-extrabold leading-[1.28] text-white">
+                      {question.optionB.label}
+                    </span>
                     {isRevealed ? (
-                      <p className="absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/25 bg-[rgba(12,18,28,0.22)] px-2 py-0.5 text-[12px] font-bold text-white/95 backdrop-blur-sm">
+                      <span className="absolute bottom-2.5 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/30 bg-[rgba(7,13,22,0.26)] px-2 py-0.5 text-[12px] font-bold text-white/95 backdrop-blur-sm">
                         {question.optionB.percent}%
-                      </p>
+                      </span>
                     ) : null}
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    onClick={() => handlePick('TIE')}
+                    disabled={isRevealed || isGameOver}
+                    animate={shouldShakeTie ? { x: [0, -7, 6, -4, 2, 0] } : { x: 0 }}
+                    transition={shouldShakeTie ? { duration: SHAKE_DURATION_S, ease: 'easeInOut' } : { duration: 0.15 }}
+                    className={`absolute left-1/2 top-1/2 z-20 inline-flex h-[60px] w-[60px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[6px] border-[rgba(12,18,28,0.86)] ${SURFACE_BG} text-[13px] font-semibold text-white transition ${
+                      isRevealed
+                        ? selectedChoice === 'TIE'
+                          ? isCorrect
+                            ? 'ring-4 ring-emerald-300'
+                            : 'ring-4 ring-red-300'
+                          : question.winner === 'TIE'
+                            ? 'ring-4 ring-emerald-300'
+                            : 'opacity-95'
+                        : 'hover:scale-[1.03]'
+                    }`}
+                  >
+                    <span className="relative z-10">동률</span>
                   </motion.button>
                 </div>
 
-                <motion.button
-                  type="button"
-                  onClick={() => handlePick('TIE')}
-                  disabled={isRevealed || isGameOver}
-                  animate={shouldShakeTie ? { x: [0, -7, 6, -4, 2, 0] } : { x: 0 }}
-                  transition={shouldShakeTie ? { duration: SHAKE_DURATION_S, ease: 'easeInOut' } : { duration: 0.15 }}
-                  className={`absolute left-1/2 top-1/2 z-20 inline-flex h-[110px] w-[110px] aspect-square -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#070d16] p-[10px] transition ${
-                    isRevealed
-                      ? selectedChoice === 'TIE'
-                        ? isCorrect
-                          ? 'ring-4 ring-emerald-300'
-                          : 'ring-4 ring-red-300'
-                        : question.winner === 'TIE'
-                          ? 'ring-4 ring-emerald-300'
-                          : 'opacity-95'
-                      : 'hover:scale-[1.03]'
-                  }`}
-                >
-                  <span className="relative inline-flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#9d7cf2] text-[18px] font-extrabold leading-none text-white">
-                    <span
-                      className={`pointer-events-none absolute inset-0 z-10 bg-white/28 transition-transform ease-out ${
-                        isWinnerTie ? 'origin-center scale-100' : 'origin-center scale-0'
+                {isRevealed ? (
+                  <div className="rounded-[18px] border border-white/12 bg-white/[0.04] px-3 py-3">
+                    <p
+                      className={`text-[13px] font-semibold ${
+                        isTieBonusRound ? 'text-[#ffd166]' : isCorrect ? 'text-emerald-300' : 'text-[#ffb4b4]'
                       }`}
-                      style={{ transitionDuration: `${REVEAL_FILL_DURATION_MS}ms` }}
-                    />
-                    <span className="relative z-20">동률</span>
-                  </span>
-                </motion.button>
+                    >
+                      {isTieBonusRound ? `동률 완벽 적중! +${TIE_BONUS_POINTS}점` : isCorrect ? '정답입니다!' : '오답입니다.'}
+                    </p>
+                    <p className="mt-1 text-[12px] text-white/74">
+                      정답: <span className="font-semibold text-white">{winnerLabel}</span> · 비율 {question.optionA.percent}% :{' '}
+                      {question.optionB.percent}%
+                    </p>
+                    {!isGameOver ? <p className="mt-2 text-[12px] text-white/62">잠시 후 다음 문제로 넘어갑니다.</p> : null}
+                  </div>
+                ) : null}
+              </motion.div>
+            )}
+          </AnimatedSection>
+
+          <AnimatedSection delay={0.3} className={`mb-8 rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6`}>
+            <div className="mb-6 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-[18px] font-bold text-white">리더보드</p>
+                <p className="text-[12px] text-white/60">{activePeriodLabel} 기준</p>
               </div>
 
-              {isRevealed ? (
-                <div className="rounded-[20px] border border-white/12 bg-white/[0.04] px-3 py-3">
-                  <p
-                    className={`text-[13px] font-semibold ${
-                      isTieBonusRound ? 'text-[#ffd166]' : isCorrect ? 'text-emerald-300' : 'text-[#ffb4b4]'
-                    }`}
-                  >
-                    {isTieBonusRound ? `동률 완벽 적중! +${TIE_BONUS_POINTS}점` : isCorrect ? '정답입니다!' : '오답입니다.'}
-                  </p>
-                  <p className="mt-1 text-[12px] text-white/74">
-                    정답: <span className="font-semibold text-white">{winnerLabel}</span> · 비율 {question.optionA.percent}% :{' '}
-                    {question.optionB.percent}%
-                  </p>
-                  {!isGameOver ? <p className="mt-2 text-[12px] text-white/62">잠시 후 다음 문제로 넘어갑니다.</p> : null}
-                </div>
-              ) : null}
+              <div className={`flex rounded-[9px] ${SURFACE_BG} p-0.5`}>
+              {LEADERBOARD_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  aria-label={`${tab.label} 리더보드`}
+                  onClick={() => handleSelectLeaderboardPeriod(tab.key)}
+                  className={`rounded-[7px] px-3 py-1 text-[12px] font-medium transition-all duration-200 ${
+                    leaderboardPeriod === tab.key
+                      ? 'bg-[rgba(255,255,255,0.12)] text-white shadow-sm'
+                      : 'text-[#8E8E93] hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              </div>
             </div>
-          )}
-        </section>
 
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut', delay: 0.08 }}
-          className="mt-2 rounded-[20px] border border-white/12 bg-[rgba(16,21,33,0.72)] p-3 shadow-[0_8px_22px_rgba(0,0,0,0.22)] backdrop-blur-2xl"
-        >
-          <div className="flex items-center justify-between gap-2">
             <div>
-              <p className="text-[12px] font-semibold text-white/86">리더보드</p>
-              <p className="text-[11px] text-white/60">{activePeriodLabel} 기준</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsLeaderboardExpanded((prev) => !prev)}
-              aria-label={isLeaderboardExpanded ? '리더보드 접기' : '리더보드 펼치기'}
-              aria-expanded={isLeaderboardExpanded}
-              className="inline-flex h-11 items-center rounded-[12px] border border-white/15 bg-white/8 px-3 text-[12px] font-semibold text-white/84 transition hover:bg-white/12"
-            >
-              {isLeaderboardExpanded ? '접기' : '펼치기'}
-            </button>
-          </div>
-
-          <div className="mt-2 inline-flex rounded-[10px] border border-white/15 bg-white/[0.03] p-0.5">
-            {LEADERBOARD_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                aria-label={`${tab.label} 리더보드`}
-                onClick={() => handleSelectLeaderboardPeriod(tab.key)}
-                className={`h-9 rounded-[8px] px-3 text-[12px] font-semibold transition ${
-                  leaderboardPeriod === tab.key
-                    ? 'bg-white/16 text-white'
-                    : 'text-white/62 hover:bg-white/8 hover:text-white/86'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {!isLeaderboardExpanded ? (
-            <p className="mt-2 text-[12px] text-white/76">{leaderboardCollapsedSummary}</p>
-          ) : (
-            <div className="mt-2">
               {leaderboardLoading ? (
-                <p className="text-[12px] text-white/68">리더보드 불러오는 중...</p>
+                <p className="py-10 text-center text-[14px] text-[#8E8E93]">리더보드 불러오는 중...</p>
               ) : leaderboardError ? (
-                <p className="text-[12px] text-[#ffb4b4]">{leaderboardError}</p>
+                <p className="py-10 text-center text-[14px] text-[#ffb4b4]">{leaderboardError}</p>
               ) : leaderboardItems.length === 0 ? (
-                <p className="text-[12px] text-white/68">아직 기록이 없습니다.</p>
+                <div className="flex flex-col items-center justify-center py-10">
+                  <span className="mb-3 text-[32px] grayscale opacity-50">🏆</span>
+                  <p className="text-[14px] font-medium text-[#8E8E93]">아직 기록이 없습니다.</p>
+                  <p className="mt-1 text-[12px] text-[#8E8E93]/60">첫 기록을 세워보세요!</p>
+                </div>
               ) : (
-                <ol className="space-y-1.5">
+                <ol className="space-y-2">
                   {leaderboardItems.map((item) => (
                     <li
                       key={`${item.rank}-${item.displayName}-${item.achievedAt}`}
-                      className="flex items-center justify-between rounded-[10px] border border-white/10 bg-white/[0.03] px-2.5 py-1.5"
+                      className="flex items-center justify-between rounded-[12px] border border-white/10 bg-white/[0.03] px-3 py-2.5"
                     >
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white/10 px-1.5 text-[11px] font-bold text-[#ffb13c]">
+                        <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-white/10 px-1.5 text-[11px] font-bold text-[#ffb13c]">
                           {item.rank}
                         </span>
-                        <p className="truncate text-[12px] font-semibold text-white/88">{item.displayName}</p>
+                        <p className="truncate text-[13px] font-semibold text-white/88">{item.displayName}</p>
                       </div>
-                      <p className="text-[12px] font-bold text-[#8fb8ff]">{item.score}점</p>
+                      <p className="text-[13px] font-bold text-[#8fb8ff]">{item.score}점</p>
                     </li>
                   ))}
                 </ol>
               )}
             </div>
-          )}
-        </motion.section>
+          </AnimatedSection>
         </div>
 
         <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[130]">

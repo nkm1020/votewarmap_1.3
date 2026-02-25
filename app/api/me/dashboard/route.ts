@@ -1,8 +1,10 @@
+import { randomInt } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { computeBadges, computeLevel } from '@/lib/me/progression';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { AVATAR_PRESETS } from '@/lib/vote/constants';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -123,16 +125,35 @@ async function ensureUserRow(user: Awaited<ReturnType<typeof resolveUserFromAuth
   }
 
   if (existingRow) {
+    const typedRow = existingRow as DashboardUserRow;
+    if (!typedRow.avatar_preset) {
+      const randomAvatarPreset = AVATAR_PRESETS[randomInt(AVATAR_PRESETS.length)] ?? AVATAR_PRESETS[0];
+      const { data: updatedRow, error: updatedError } = await supabase
+        .from('users')
+        .update({ avatar_preset: randomAvatarPreset })
+        .eq('id', user.id)
+        .select(selectFields)
+        .single();
+
+      if (updatedError) {
+        throw new Error(updatedError.message);
+      }
+
+      return updatedRow as DashboardUserRow;
+    }
+
     return existingRow as DashboardUserRow;
   }
 
   const generatedUsername = defaultUsername(user.id);
+  const randomAvatarPreset = AVATAR_PRESETS[randomInt(AVATAR_PRESETS.length)] ?? AVATAR_PRESETS[0];
   const upsertPayload = {
     id: user.id,
     email: user.email ?? null,
     full_name: (user.user_metadata?.full_name as string | undefined) ?? (user.user_metadata?.name as string | undefined) ?? null,
     provider: (user.app_metadata?.provider as string | undefined) ?? null,
     username: generatedUsername,
+    avatar_preset: randomAvatarPreset,
   };
 
   const { error: upsertError } = await supabase.from('users').upsert(upsertPayload, { onConflict: 'id' });
