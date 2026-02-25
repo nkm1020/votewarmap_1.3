@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       })
       .eq('id', user.id)
       .select(
-        'id, email, full_name, nickname, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at',
+        'id, email, full_name, nickname, username, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history',
       )
       .single();
 

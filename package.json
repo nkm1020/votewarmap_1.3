@@ -10,7 +10,9 @@
     "import:universities": "tsx scripts/import-universities.ts",
     "backfill:school-regions": "tsx scripts/backfill-school-regions.ts",
     "backfill:vote-regions": "tsx scripts/backfill-vote-regions.ts",
-    "backfill:school-coordinates": "tsx scripts/backfill-school-coordinates.ts"
+    "backfill:school-coordinates": "tsx scripts/backfill-school-coordinates.ts",
+    "seed:dummy-votes": "tsx scripts/seed-dummy-votes.ts",
+    "seed:dummy-votes:rollback": "tsx scripts/rollback-dummy-votes.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.96.0",

@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
 
 const displayFont = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -16,18 +17,32 @@ export default function AuthPage() {
   const { isAuthenticated, isLoading, requiresSignupCompletion, signInWithGoogle } = useAuth();
   const [pendingProvider, setPendingProvider] = useState<'google' | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const nextPath = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return '/';
+    }
+    const params = new URLSearchParams(window.location.search);
+    return normalizeInternalRedirectPath(params.get('next'));
+  }, []);
+  const signupRedirectPath = useMemo(() => {
+    if (nextPath === '/') {
+      return '/auth/complete-signup';
+    }
+    return `/auth/complete-signup?next=${encodeURIComponent(nextPath)}`;
+  }, [nextPath]);
+  const postAuthRedirectPath = requiresSignupCompletion ? signupRedirectPath : nextPath;
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace(requiresSignupCompletion ? '/auth/complete-signup' : '/');
+      router.replace(postAuthRedirectPath);
     }
-  }, [isAuthenticated, isLoading, requiresSignupCompletion, router]);
+  }, [isAuthenticated, isLoading, postAuthRedirectPath, router]);
 
   const handleSocialLogin = async () => {
     setAuthError(null);
     setPendingProvider('google');
 
-    const { error } = await signInWithGoogle();
+    const { error } = await signInWithGoogle({ redirectPath: nextPath });
     if (error) {
       setAuthError(error);
       setPendingProvider(null);

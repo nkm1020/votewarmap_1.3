@@ -5,9 +5,17 @@ type PendingVotesPayload = {
   topicIds: string[];
 };
 
+type PendingGameScorePayload = {
+  runId: string;
+  score: number;
+  createdAt: string;
+};
+
 type ResultIntroSeenPayload = {
   topicIds: string[];
 };
+
+const PENDING_GAME_SCORE_TTL_MS = 30 * 60 * 1000;
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined';
@@ -206,6 +214,89 @@ export function clearPendingVotes(): void {
   }
 
   sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingVotes);
+}
+
+function parsePendingGameScore(raw: string | null): PendingGameScorePayload | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as PendingGameScorePayload;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    if (typeof parsed.runId !== 'string' || !parsed.runId.trim()) {
+      return null;
+    }
+
+    if (
+      typeof parsed.score !== 'number' ||
+      !Number.isFinite(parsed.score) ||
+      parsed.score < 0 ||
+      parsed.score > 9999
+    ) {
+      return null;
+    }
+
+    if (typeof parsed.createdAt !== 'string' || !Number.isFinite(Date.parse(parsed.createdAt))) {
+      return null;
+    }
+
+    return {
+      runId: parsed.runId,
+      score: Math.trunc(parsed.score),
+      createdAt: parsed.createdAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readPendingGameScore(): PendingGameScorePayload | null {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return null;
+  }
+
+  const parsed = parsePendingGameScore(sessionStorageRef.getItem(LOCAL_STORAGE_KEYS.pendingGameScore));
+  if (!parsed) {
+    sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingGameScore);
+    return null;
+  }
+
+  const createdAtMs = Date.parse(parsed.createdAt);
+  if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs > PENDING_GAME_SCORE_TTL_MS) {
+    sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingGameScore);
+    return null;
+  }
+
+  return parsed;
+}
+
+export function writePendingGameScore(payload: PendingGameScorePayload): void {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return;
+  }
+
+  const normalized: PendingGameScorePayload = {
+    runId: payload.runId,
+    score: Math.min(9999, Math.max(0, Math.trunc(payload.score))),
+    createdAt: payload.createdAt,
+  };
+
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.pendingGameScore, JSON.stringify(normalized));
+}
+
+export function clearPendingGameScore(): void {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return;
+  }
+
+  sessionStorageRef.removeItem(LOCAL_STORAGE_KEYS.pendingGameScore);
 }
 
 export function readResultIntroSeenTopicIds(): string[] {

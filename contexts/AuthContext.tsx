@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   clearGuestSessionId,
@@ -25,6 +26,7 @@ type UserProfile = {
   email: string | null;
   full_name: string | null;
   nickname: string | null;
+  username: string | null;
   avatar_url: string | null;
   avatar_preset: string | null;
   provider: string | null;
@@ -34,6 +36,9 @@ type UserProfile = {
   sido_code: string | null;
   sigungu_code: string | null;
   signup_completed_at: string | null;
+  privacy_show_leaderboard_name: boolean;
+  privacy_show_region: boolean;
+  privacy_show_activity_history: boolean;
 };
 
 type UserSyncPayload = {
@@ -51,6 +56,10 @@ type CompleteSignupInput = {
   gender: Gender;
 };
 
+type OAuthSignInOptions = {
+  redirectPath?: string;
+};
+
 type AuthContextValue = {
   user: User | null;
   profile: UserProfile | null;
@@ -58,7 +67,7 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   isSignupCompleted: boolean;
   requiresSignupCompletion: boolean;
-  signInWithGoogle: () => Promise<{ error: string | null }>;
+  signInWithGoogle: (options?: OAuthSignInOptions) => Promise<{ error: string | null }>;
   completeSignup: (input: CompleteSignupInput) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -71,6 +80,7 @@ function profilePayloadFromUser(user: User): UserProfile {
   return {
     ...synced,
     nickname: null,
+    username: null,
     avatar_preset: null,
     birth_year: null,
     gender: null,
@@ -78,6 +88,9 @@ function profilePayloadFromUser(user: User): UserProfile {
     sido_code: null,
     sigungu_code: null,
     signup_completed_at: null,
+    privacy_show_leaderboard_name: true,
+    privacy_show_region: false,
+    privacy_show_activity_history: false,
   };
 }
 
@@ -115,7 +128,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   }
 
   const fullSelect =
-    'id, email, full_name, nickname, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at';
+    'id, email, full_name, nickname, username, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
 
   const { data, error } = await supabase
     .from('users')
@@ -142,8 +155,12 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     return {
       ...legacyData,
       nickname: null,
+      username: null,
       avatar_preset: null,
       signup_completed_at: null,
+      privacy_show_leaderboard_name: true,
+      privacy_show_region: false,
+      privacy_show_activity_history: false,
     };
   }
 
@@ -263,13 +280,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [applySession, supabase]);
 
-  const signInWithOAuth = useCallback(async (provider: 'google') => {
+  const signInWithOAuth = useCallback(async (provider: 'google', options?: OAuthSignInOptions) => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       return { error: 'Supabase 환경변수(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)가 필요합니다.' };
     }
 
-    const redirectTo = `${window.location.origin}/auth`;
+    const nextPath = normalizeInternalRedirectPath(options?.redirectPath ?? null);
+    const redirectTo =
+      nextPath === '/'
+        ? `${window.location.origin}/auth`
+        : `${window.location.origin}/auth?next=${encodeURIComponent(nextPath)}`;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
@@ -281,8 +303,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null };
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
-    return signInWithOAuth('google');
+  const signInWithGoogle = useCallback(async (options?: OAuthSignInOptions) => {
+    return signInWithOAuth('google', options);
   }, [signInWithOAuth]);
 
   const completeSignup = useCallback(

@@ -18,9 +18,20 @@ function toTopicIds(raw: SearchParamsValue): string[] {
   return Array.from(unique);
 }
 
+function toBooleanFlag(raw: SearchParamsValue): boolean {
+  const source = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof source !== 'string') {
+    return false;
+  }
+
+  const normalized = source.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'open';
+}
+
 export default async function TopicsMapRoute({ searchParams }: TopicsMapRouteProps) {
   const resolvedSearchParams = searchParams instanceof Promise ? await searchParams : searchParams ?? {};
   const initialTopicIds = toTopicIds(resolvedSearchParams.topics);
+  const openTopicEditorOnMount = toBooleanFlag(resolvedSearchParams.openTopicEditor);
 
-  return <TopicsMapPage initialTopicIds={initialTopicIds} />;
+  return <TopicsMapPage initialTopicIds={initialTopicIds} openTopicEditorOnMount={openTopicEditorOnMount} />;
 }

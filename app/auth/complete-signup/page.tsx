@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { useAuth } from '@/contexts/AuthContext';
+import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
 import type { Gender } from '@/lib/vote/types';
 
@@ -40,6 +41,13 @@ export default function CompleteSignupPage() {
   const [gender, setGender] = useState<Gender>('prefer_not_to_say');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const nextPath = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return '/';
+    }
+    const params = new URLSearchParams(window.location.search);
+    return normalizeInternalRedirectPath(params.get('next'));
+  }, []);
 
   const birthYearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -56,14 +64,18 @@ export default function CompleteSignupPage() {
     }
 
     if (!isAuthenticated) {
-      router.replace('/auth');
+      if (nextPath === '/') {
+        router.replace('/auth');
+      } else {
+        router.replace(`/auth?next=${encodeURIComponent(nextPath)}`);
+      }
       return;
     }
 
     if (!requiresSignupCompletion) {
-      router.replace('/');
+      router.replace(nextPath);
     }
-  }, [isAuthenticated, isLoading, requiresSignupCompletion, router]);
+  }, [isAuthenticated, isLoading, nextPath, requiresSignupCompletion, router]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -87,7 +99,7 @@ export default function CompleteSignupPage() {
       return;
     }
 
-    router.replace('/');
+    router.replace(nextPath);
   };
 
   if (isLoading || !isAuthenticated || !requiresSignupCompletion) {

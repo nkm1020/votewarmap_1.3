@@ -33,6 +33,7 @@ const TOPIC_SELECTOR_STACK_GAP_PX = 12;
 
 type TopicsMapPageProps = {
   initialTopicIds: string[];
+  openTopicEditorOnMount?: boolean;
 };
 
 type VoteSummary = {
@@ -140,7 +141,7 @@ function bumpRegionStat(
   return next;
 }
 
-export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
+export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount = false }: TopicsMapPageProps) {
   const router = useRouter();
   const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => initialTopicIds);
@@ -177,11 +178,11 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   const [isLocatingRegion, setIsLocatingRegion] = useState(false);
   const [profileModalMessage, setProfileModalMessage] = useState<string | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
-  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('map');
+  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'game' | 'me'>('map');
   const [bottomAdHeight, setBottomAdHeight] = useState(0);
   const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
   const [topicSelectorHeight, setTopicSelectorHeight] = useState(0);
-  const [isTopicEditorOpen, setIsTopicEditorOpen] = useState(false);
+  const [isTopicEditorOpen, setIsTopicEditorOpen] = useState(openTopicEditorOnMount);
   const [activeTopicTab, setActiveTopicTab] = useState<TopicTab>('all');
   const [topicSearchQuery, setTopicSearchQuery] = useState('');
   const statsRequestRef = useRef(0);
@@ -268,6 +269,15 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
     }
     return mapStats[selectedRegion.code] ?? null;
   }, [mapStats, selectedRegion]);
+
+  useEffect(() => {
+    if (!openTopicEditorOnMount) {
+      return;
+    }
+    setIsTopicEditorOpen(true);
+    setActiveTopicTab('all');
+    setTopicSearchQuery('');
+  }, [openTopicEditorOnMount]);
 
   const loadRegionStats = useCallback(async (topicId: string) => {
     const requestId = ++statsRequestRef.current;
@@ -842,9 +852,28 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
   }, []);
 
   const handleBottomTabClick = useCallback(
-    (tab: 'home' | 'map' | 'rank' | 'me') => {
+    (tab: 'home' | 'map' | 'game' | 'me') => {
       if (tab === 'home') {
         router.push('/');
+        return;
+      }
+      if (tab === 'game') {
+        router.push('/game');
+        return;
+      }
+      if (tab === 'me') {
+        if (typeof window !== 'undefined' && window.location.pathname === '/my') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+        router.push('/my');
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => {
+            if (window.location.pathname !== '/my') {
+              window.location.assign('/my');
+            }
+          }, 120);
+        }
         return;
       }
       setActiveTab(tab);
@@ -1168,7 +1197,7 @@ export default function TopicsMapPage({ initialTopicIds }: TopicsMapPageProps) {
             {[
               { id: 'home' as const, label: '홈' },
               { id: 'map' as const, label: '지도' },
-              { id: 'rank' as const, label: '랭킹' },
+              { id: 'game' as const, label: '게임' },
               { id: 'me' as const, label: 'MY' },
             ].map((tab) => (
               <button

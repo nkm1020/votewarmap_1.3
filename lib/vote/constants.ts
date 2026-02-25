@@ -8,6 +8,7 @@ export const LOCAL_STORAGE_KEYS = {
   pendingRegionInput: 'vwm_pending_region_input',
   legacyPendingProfile: 'vwm_pending_profile',
   pendingVotes: 'vwm_pending_votes',
+  pendingGameScore: 'vwm_pending_game_score',
   cachedRegionStatsPopular: 'vwm_cached_region_stats_popular',
   resultIntroSeenByTopic: 'vwm_result_intro_seen_by_topic',
 } as const;

@@ -218,7 +218,7 @@ function writeCachedRegionState(payload: CachedRegionStatePayload): void {
 
 export default function MainMapHome() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'rank' | 'me'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'game' | 'me'>('home');
   const [mapStats, setMapStats] = useState<RegionVoteMap>({});
   const [topSchoolMarkers, setTopSchoolMarkers] = useState<MapPointMarker[]>([]);
   const [isStatsLoading, setIsStatsLoading] = useState(true);
@@ -1393,7 +1393,7 @@ export default function MainMapHome() {
   }, []);
 
   const handleBottomTabClick = useCallback(
-    (tab: 'home' | 'map' | 'rank' | 'me') => {
+    (tab: 'home' | 'map' | 'game' | 'me') => {
       if (tab === 'map') {
         setActiveTab('map');
         setIsTopicPickerOpen(true);
@@ -1402,10 +1402,29 @@ export default function MainMapHome() {
         setPickerVoteMessage(null);
         return;
       }
+      if (tab === 'game') {
+        router.push('/game');
+        return;
+      }
+      if (tab === 'me') {
+        if (typeof window !== 'undefined' && window.location.pathname === '/my') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+        router.push('/my');
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => {
+            if (window.location.pathname !== '/my') {
+              window.location.assign('/my');
+            }
+          }, 120);
+        }
+        return;
+      }
       setIsTopicPickerOpen(false);
       setActiveTab(tab);
     },
-    [],
+    [router],
   );
 
   const handleBottomDockWheel = useCallback((event: WheelEvent<HTMLElement>) => {
@@ -1679,7 +1698,7 @@ export default function MainMapHome() {
             {[
               { id: 'home' as const, label: '홈' },
               { id: 'map' as const, label: '지도' },
-              { id: 'rank' as const, label: '랭킹' },
+              { id: 'game' as const, label: '게임' },
               { id: 'me' as const, label: 'MY' },
             ].map((tab) => (
               <button
