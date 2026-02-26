@@ -2,8 +2,10 @@
 
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent, type WheelEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TouchEvent, type WheelEvent } from 'react';
 import type { MapPointMarker, RegionVoteMap } from '@/components/KoreaAdminMap';
+import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -33,6 +35,7 @@ const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 8;
 const HOME_MAP_CACHE_KEY = 'all-live-topics';
 const REGION_MODAL_HINT =
   '지역과 결과 비교를 위해 학교를 입력하시거나 정확한 위치 사용을 허용해주세요.';
+const REGION_MODAL_GPS_ONLY_HINT = '학교 미설정 계정은 정확한 위치 사용(GPS)으로만 투표할 수 있어요.';
 const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
 
 type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
@@ -283,9 +286,13 @@ export default function MainMapHome() {
   const dockTouchMovedRef = useRef(false);
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
-  const { isAuthenticated, isLoading, profile, user, signOut, requiresSignupCompletion } = useAuth();
+  const { isAuthenticated, profile, requiresSignupCompletion } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
-  const hasServerRegion = Boolean(profile?.school_id || profile?.sido_code || profile?.sigungu_code);
+  const hasSavedSchool = Boolean(profile?.school_id);
+  const canSkipLocationPrompt = isAuthenticated && hasSavedSchool;
+  const canSelectSchoolInModal = !isAuthenticated;
+  const isGpsOnlyVoteMode = isAuthenticated && !hasSavedSchool;
+  const regionModalHintText = isGpsOnlyVoteMode ? REGION_MODAL_GPS_ONLY_HINT : REGION_MODAL_HINT;
   const featuredOptionA = useMemo(
     () => featuredTopic?.options.find((option) => option.position === 1) ?? null,
     [featuredTopic],
@@ -327,10 +334,10 @@ export default function MainMapHome() {
   const filteredTopics = useMemo(() => {
     return activeTopicTab === 'all' ? sortedTopics : topicsByCategory[activeTopicTab];
   }, [activeTopicTab, sortedTopics, topicsByCategory]);
-  const isSchoolListVisible = Boolean(
-    schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName),
-  );
-  const hasPendingRegionInput = Boolean(selectedSchool || gpsRegionInput);
+  const isSchoolListVisible =
+    canSelectSchoolInModal &&
+    Boolean(schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName));
+  const hasPendingRegionInput = Boolean((canSelectSchoolInModal && selectedSchool) || gpsRegionInput);
   const hintReservePaddingPx = useMemo(() => {
     if (isTopicPickerOpen) {
       return 0;
@@ -338,6 +345,10 @@ export default function MainMapHome() {
     return topicHintHeight > 0 ? topicHintHeight + 8 : 0;
   }, [isTopicPickerOpen, topicHintHeight]);
   const topicListBottomInset = useMemo(() => 'calc(env(safe-area-inset-bottom) + 8px)', []);
+  const mobileOverlayPaddingBottom = useMemo(
+    () => `calc(9.2rem + env(safe-area-inset-bottom) + ${hintReservePaddingPx}px)`,
+    [hintReservePaddingPx],
+  );
   const emptySummary = useMemo(
     () =>
       normalizeSummary({
@@ -612,6 +623,16 @@ export default function MainMapHome() {
       return;
     }
 
+    if (isAuthenticated) {
+      if (hasSavedSchool) {
+        return;
+      }
+      if (storedRegionInput.source === 'gps') {
+        setGpsRegionInput(storedRegionInput);
+      }
+      return;
+    }
+
     if (storedRegionInput.source === 'school') {
       setSelectedSchool(storedRegionInput.school);
       setSchoolQuery(storedRegionInput.school.schoolName);
@@ -620,7 +641,7 @@ export default function MainMapHome() {
     }
 
     setGpsRegionInput(storedRegionInput);
-  }, []);
+  }, [hasSavedSchool, isAuthenticated]);
 
   useEffect(() => {
     const topicId = featuredTopic?.id;
@@ -870,7 +891,7 @@ export default function MainMapHome() {
   }, [bottomAdHeight, bottomMenuHeight, isTopicPickerOpen]);
 
   useEffect(() => {
-    if (!showProfileModal) {
+    if (!showProfileModal || !canSelectSchoolInModal) {
       return;
     }
 
@@ -896,7 +917,7 @@ export default function MainMapHome() {
     }, 260);
 
     return () => clearTimeout(handle);
-  }, [schoolQuery, showProfileModal]);
+  }, [canSelectSchoolInModal, schoolQuery, showProfileModal]);
 
   useEffect(() => {
     if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
@@ -921,16 +942,26 @@ export default function MainMapHome() {
     targetButton?.scrollIntoView({ block: 'nearest' });
   }, [highlightedSchoolIndex, isSchoolListVisible, schoolResults.length]);
 
-  const handleSelectSchool = useCallback((school: SchoolSearchItem) => {
-    setSelectedSchool(school);
-    setSchoolQuery(school.schoolName);
-    setHighlightedSchoolIndex(0);
-    setGpsRegionInput(null);
-    setProfileModalMessage(null);
-  }, []);
+  const handleSelectSchool = useCallback(
+    (school: SchoolSearchItem) => {
+      if (!canSelectSchoolInModal) {
+        return;
+      }
+      setSelectedSchool(school);
+      setSchoolQuery(school.schoolName);
+      setHighlightedSchoolIndex(0);
+      setGpsRegionInput(null);
+      setProfileModalMessage(null);
+    },
+    [canSelectSchoolInModal],
+  );
 
   const buildPendingRegionInput = useCallback((): VoteRegionInput | null => {
-    if (selectedSchool) {
+    if (isAuthenticated && hasSavedSchool) {
+      return null;
+    }
+
+    if (canSelectSchoolInModal && selectedSchool) {
       const payload: VoteRegionInput = {
         source: 'school',
         school: selectedSchool,
@@ -945,7 +976,7 @@ export default function MainMapHome() {
     }
 
     return null;
-  }, [gpsRegionInput, selectedSchool]);
+  }, [canSelectSchoolInModal, gpsRegionInput, hasSavedSchool, isAuthenticated, selectedSchool]);
 
   const resolveOptimisticRegionCodes = useCallback(
     (regionInput: VoteRegionInput | null) => {
@@ -1153,7 +1184,7 @@ export default function MainMapHome() {
       return;
     }
 
-    if (isAuthenticated && hasServerRegion) {
+    if (canSkipLocationPrompt) {
       await submitVote(null);
       return;
     }
@@ -1167,7 +1198,7 @@ export default function MainMapHome() {
     featuredOptionAKey,
     featuredOptionBKey,
     featuredTopic,
-    hasServerRegion,
+    canSkipLocationPrompt,
     isAuthenticated,
     requiresSignupCompletion,
     router,
@@ -1321,7 +1352,7 @@ export default function MainMapHome() {
         return;
       }
 
-      if (isAuthenticated && hasServerRegion) {
+      if (canSkipLocationPrompt) {
         await submitTopicPickerVote(targetVote, null);
         return;
       }
@@ -1333,7 +1364,7 @@ export default function MainMapHome() {
     },
     [
       buildPendingRegionInput,
-      hasServerRegion,
+      canSkipLocationPrompt,
       isAuthenticated,
       pickerSelectedOptionKey,
       requiresSignupCompletion,
@@ -1346,9 +1377,9 @@ export default function MainMapHome() {
     const payload = buildPendingRegionInput();
     if (!payload) {
       if (pendingPickerVote) {
-        setPickerVoteMessage(REGION_MODAL_HINT);
+        setPickerVoteMessage(regionModalHintText);
       } else {
-        setVoteMessage(REGION_MODAL_HINT);
+        setVoteMessage(regionModalHintText);
       }
       return;
     }
@@ -1368,7 +1399,7 @@ export default function MainMapHome() {
     } else {
       setVoteMessage('지역 정보가 저장되었습니다.');
     }
-  }, [buildPendingRegionInput, pendingPickerVote, submitTopicPickerVote, submitVote, voteAfterProfile]);
+  }, [buildPendingRegionInput, pendingPickerVote, regionModalHintText, submitTopicPickerVote, submitVote, voteAfterProfile]);
 
   const handleTopicPickerClose = useCallback(() => {
     setIsTopicPickerOpen(false);
@@ -1501,6 +1532,7 @@ export default function MainMapHome() {
           statsByCode={mergedMapStats}
           pointMarkers={topSchoolMarkers}
           markerEffect="gps"
+          defaultRegionLevel="sigungu"
           fillMode="activity"
           height="100%"
           initialCenter={MAIN_INITIAL_CENTER}
@@ -1531,127 +1563,131 @@ export default function MainMapHome() {
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
       <div
-        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pt-[calc(0.5rem+env(safe-area-inset-top))]"
-        style={{ paddingBottom: `calc(9.2rem + env(safe-area-inset-bottom) + ${hintReservePaddingPx}px)` }}
+        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-4 pb-[var(--home-mobile-overlay-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-0 lg:px-10 lg:pt-0"
+        style={{ '--home-mobile-overlay-padding': mobileOverlayPaddingBottom } as CSSProperties}
       >
-        <LiveVoteCard
-          className="shrink-0"
-          topicId={featuredTopic?.id ?? null}
-          title={featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
-          isExpanded={!isVoteCardCollapsed}
-          onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
-          selectedOptionKey={selectedOption}
-          onSelectOption={setSelectedOption}
-          onSubmitVote={() => void handleVote()}
-          submitDisabled={
-            canOpenFeaturedResult
-              ? false
-              : !selectedOption ||
-                !featuredTopic ||
-                !featuredOptionAKey ||
-                !featuredOptionBKey ||
-                isFeaturedLoading ||
-                isSubmittingVote ||
-                (!isAuthenticated && !guestSessionId)
-          }
-          submitLabel={
-            isSubmittingVote
-              ? '처리 중...'
-              : canOpenFeaturedResult
-                ? '이미 투표완료하셨습니다 · 결과보기'
-              : !selectedOption
-                ? '선택 후 투표하기'
-                : '투표 제출하기'
-          }
-          message={voteMessage}
-          isStatsLoading={isStatsLoading}
-          totalVotes={summary.totalVotes}
-          realtimeVotes={featuredMetrics?.realtimeVotes ?? null}
-          leftOption={{
-            key: featuredOptionAKey,
-            label: featuredOptionALabel,
-            percentage: summary.hasData ? summary.aPercent : null,
-            subtext: getOptionSubtext(featuredTopic?.id, featuredOptionAKey),
-          }}
-          rightOption={{
-            key: featuredOptionBKey,
-            label: featuredOptionBLabel,
-            percentage: summary.hasData ? summary.bPercent : null,
-            subtext: getOptionSubtext(featuredTopic?.id, featuredOptionBKey),
-          }}
-          auth={{
-            isLoading,
-            isAuthenticated,
-            avatarUrl: profile?.avatar_url ?? null,
-            displayInitial: (profile?.nickname ?? profile?.full_name ?? profile?.email ?? user?.email ?? 'U').slice(
-              0,
-              1,
-            ),
-            onSignOut: signOut,
-          }}
+        <DesktopTopHeader
+          className="pointer-events-auto"
+          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+          links={[
+            { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+            { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+            { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+            { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+          ]}
+          rightSlot={<AccountMenuButton />}
         />
 
-        {selectedRegion ? (
-          <section
-            ref={selectedRegionPanelRef}
-            className="pointer-events-auto mt-3 shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
-          >
-            <div className="flex items-center justify-between">
-              <h4 className="truncate text-[15px] font-semibold text-white">
-                {selectedRegion.name || selectedRegion.code}
-              </h4>
-              <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-                {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
-              </span>
-            </div>
+        <div className="flex flex-col gap-3 md:mt-4 md:max-w-[500px]">
+          <LiveVoteCard
+            className="shrink-0"
+            topicId={featuredTopic?.id ?? null}
+            title={featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
+            isExpanded={!isVoteCardCollapsed}
+            onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
+            selectedOptionKey={selectedOption}
+            onSelectOption={setSelectedOption}
+            onSubmitVote={() => void handleVote()}
+            submitDisabled={
+              canOpenFeaturedResult
+                ? false
+                : !selectedOption ||
+                  !featuredTopic ||
+                  !featuredOptionAKey ||
+                  !featuredOptionBKey ||
+                  isFeaturedLoading ||
+                  isSubmittingVote ||
+                  (!isAuthenticated && !guestSessionId)
+            }
+            submitLabel={
+              isSubmittingVote
+                ? '처리 중...'
+                : canOpenFeaturedResult
+                  ? '이미 투표완료하셨습니다 · 결과보기'
+                  : !selectedOption
+                    ? '선택 후 투표하기'
+                    : '투표 제출하기'
+            }
+            message={voteMessage}
+            isStatsLoading={isStatsLoading}
+            totalVotes={summary.totalVotes}
+            realtimeVotes={featuredMetrics?.realtimeVotes ?? null}
+            leftOption={{
+              key: featuredOptionAKey,
+              label: featuredOptionALabel,
+              percentage: summary.hasData ? summary.aPercent : null,
+              subtext: getOptionSubtext(featuredTopic?.id, featuredOptionAKey),
+            }}
+            rightOption={{
+              key: featuredOptionBKey,
+              label: featuredOptionBLabel,
+              percentage: summary.hasData ? summary.bPercent : null,
+              subtext: getOptionSubtext(featuredTopic?.id, featuredOptionBKey),
+            }}
+          />
 
-            <p className="mt-2 text-[12px] text-white/68">
-              누적 투표수{' '}
-              <span className="font-semibold text-white">
-                {((selectedRegionStat?.total ?? 0) || 0).toLocaleString()}표
-              </span>
-            </p>
+          {selectedRegion ? (
+            <section
+              ref={selectedRegionPanelRef}
+              className="pointer-events-auto shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <h4 className="truncate text-[15px] font-semibold text-white">
+                  {selectedRegion.name || selectedRegion.code}
+                </h4>
+                <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                  {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                </span>
+              </div>
 
-            <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
-              <p className="text-[12px] font-semibold text-white/84">이 지역에서 가장 활발한 주제 TOP 3</p>
+              <p className="mt-2 text-[12px] text-white/68">
+                누적 투표수{' '}
+                <span className="font-semibold text-white">
+                  {((selectedRegionStat?.total ?? 0) || 0).toLocaleString()}표
+                </span>
+              </p>
 
-              {isRegionHotTopicsLoading ? (
-                <div className="mt-2.5 space-y-2">
-                  <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                  <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                  <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                </div>
-              ) : regionHotTopics.length > 0 ? (
-                <div className="mt-2 space-y-1.5">
-                  {regionHotTopics.map((topic, index) => (
-                    <button
-                      key={topic.topicId}
-                      type="button"
-                      onClick={() => router.push(`/results/${topic.topicId}`)}
-                      className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08]"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
-                          {index + 1}
+              <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
+                <p className="text-[12px] font-semibold text-white/84">이 지역에서 가장 활발한 주제 TOP 3</p>
+
+                {isRegionHotTopicsLoading ? (
+                  <div className="mt-2.5 space-y-2">
+                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                  </div>
+                ) : regionHotTopics.length > 0 ? (
+                  <div className="mt-2 space-y-1.5">
+                    {regionHotTopics.map((topic, index) => (
+                      <button
+                        key={topic.topicId}
+                        type="button"
+                        onClick={() => router.push(`/results/${topic.topicId}`)}
+                        className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08]"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
+                            {index + 1}
+                          </span>
+                          <span className="truncate text-[12px] font-medium text-white/88">{topic.title}</span>
+                        </div>
+                        <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff]">
+                          {topic.voteCount.toLocaleString()}표
                         </span>
-                        <span className="truncate text-[12px] font-medium text-white/88">{topic.title}</span>
-                      </div>
-                      <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff]">
-                        {topic.voteCount.toLocaleString()}표
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-[12px] text-white/62">
-                  {regionHotTopicsError ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'}
-                </p>
-              )}
-            </div>
-          </section>
-        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[12px] text-white/62">
+                    {regionHotTopicsError ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'}
+                  </p>
+                )}
+              </div>
+            </section>
+          ) : null}
+        </div>
 
-        <div className="h-3" />
+        <div className="h-3 md:hidden" />
       </div>
 
       <div
@@ -1766,14 +1802,14 @@ export default function MainMapHome() {
 
       {isTopicPickerOpen ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/58 p-4 md:hidden"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/58 p-4"
           onClick={handleTopicPickerClose}
         >
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="home-topic-picker-title"
-            className="w-full max-w-[430px] overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.96)] shadow-2xl backdrop-blur-2xl"
+            className="w-full max-w-[860px] overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.96)] shadow-2xl backdrop-blur-2xl"
             style={{ maxHeight: 'calc(100dvh - 2rem)' }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -1957,104 +1993,108 @@ export default function MainMapHome() {
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm leading-relaxed text-white/72">{REGION_MODAL_HINT}</p>
+              <p className="text-sm leading-relaxed text-white/72">{regionModalHintText}</p>
 
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
-                <input
-                  value={schoolQuery}
-                  onKeyDown={(event) => {
-                    if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
-                      return;
-                    }
+              {canSelectSchoolInModal ? (
+                <>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
+                    <input
+                      value={schoolQuery}
+                      onKeyDown={(event) => {
+                        if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+                          return;
+                        }
 
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
-                      return;
-                    }
+                        if (event.key === 'ArrowDown') {
+                          event.preventDefault();
+                          setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
+                          return;
+                        }
 
-                    if (event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
-                      return;
-                    }
+                        if (event.key === 'ArrowUp') {
+                          event.preventDefault();
+                          setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
+                          return;
+                        }
 
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
-                      if (target) {
-                        handleSelectSchool(target);
-                      }
-                    }
-                  }}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setSchoolQuery(nextValue);
-                    setHighlightedSchoolIndex(0);
-                    setProfileModalMessage(null);
-                    if (selectedSchool && nextValue !== selectedSchool.schoolName) {
-                      setSelectedSchool(null);
-                    }
-                  }}
-                  placeholder="학교명을 입력하세요"
-                  autoComplete="off"
-                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
-                />
-                {isSchoolListVisible ? (
-                  <div
-                    ref={schoolResultsListRef}
-                    className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
-                  >
-                    {isSchoolSearching ? (
-                      <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
-                    ) : schoolResults.length === 0 ? (
-                      <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
-                    ) : (
-                      schoolResults.map((school, index) => (
-                        <button
-                          key={`${school.source}:${school.schoolCode}`}
-                          data-school-index={index}
-                          type="button"
-                          onMouseEnter={() => setHighlightedSchoolIndex(index)}
-                          onClick={() => handleSelectSchool(school)}
-                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
-                            index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
-                          }`}
-                        >
-                          <p className="font-semibold">{school.schoolName}</p>
-                          <p className="mt-0.5 text-[11px] text-white/60">
-                            {school.sidoName ?? '-'} · {school.schoolLevel}
-                            {school.campusType ? ` · ${school.campusType}` : ''}
-                          </p>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-                {selectedSchool ? (
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSchool(null);
-                        setSchoolQuery('');
-                        setProfileModalMessage(null);
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
+                          if (target) {
+                            handleSelectSchool(target);
+                          }
+                        }
                       }}
-                      className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                    >
-                      학교 선택 해제
-                    </button>
-                  </div>
-                ) : null}
-              </label>
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setSchoolQuery(nextValue);
+                        setHighlightedSchoolIndex(0);
+                        setProfileModalMessage(null);
+                        if (selectedSchool && nextValue !== selectedSchool.schoolName) {
+                          setSelectedSchool(null);
+                        }
+                      }}
+                      placeholder="학교명을 입력하세요"
+                      autoComplete="off"
+                      className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
+                    />
+                    {isSchoolListVisible ? (
+                      <div
+                        ref={schoolResultsListRef}
+                        className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+                      >
+                        {isSchoolSearching ? (
+                          <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                        ) : schoolResults.length === 0 ? (
+                          <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                        ) : (
+                          schoolResults.map((school, index) => (
+                            <button
+                              key={`${school.source}:${school.schoolCode}`}
+                              data-school-index={index}
+                              type="button"
+                              onMouseEnter={() => setHighlightedSchoolIndex(index)}
+                              onClick={() => handleSelectSchool(school)}
+                              className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
+                                index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                              }`}
+                            >
+                              <p className="font-semibold">{school.schoolName}</p>
+                              <p className="mt-0.5 text-[11px] text-white/60">
+                                {school.sidoName ?? '-'} · {school.schoolLevel}
+                                {school.campusType ? ` · ${school.campusType}` : ''}
+                              </p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                    {selectedSchool ? (
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchool(null);
+                            setSchoolQuery('');
+                            setProfileModalMessage(null);
+                          }}
+                          className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                        >
+                          학교 선택 해제
+                        </button>
+                      </div>
+                    ) : null}
+                  </label>
 
-              <div className="flex items-center gap-2">
-                <div className="h-px flex-1 bg-white/14" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
-                <div className="h-px flex-1 bg-white/14" />
-              </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-white/14" />
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
+                    <div className="h-px flex-1 bg-white/14" />
+                  </div>
+                </>
+              ) : null}
 
               <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
                 <button
@@ -2157,12 +2197,16 @@ export default function MainMapHome() {
 
       <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
         <div
-          className="mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72"
+          className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
         >
-          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-          <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+          <div>
+            <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+            <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+          </div>
+          <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
+            문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
+          </p>
         </div>
       </footer>
     </div>

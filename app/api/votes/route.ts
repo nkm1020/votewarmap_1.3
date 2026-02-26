@@ -62,6 +62,8 @@ type UserRegionRow = {
 
 const REGION_REQUIRED_ERROR = '투표를 위해 학교를 선택하거나 정확한 위치를 설정해 주세요.';
 const SIGNUP_COMPLETION_REQUIRED_ERROR = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
+const SCHOOL_UPDATE_FROM_VOTE_FORBIDDEN_ERROR = '학교 설정/변경은 MY 편집에서만 가능합니다.';
+const GPS_ONLY_FOR_NO_SCHOOL_ERROR = '학교 미설정 계정은 정확한 위치 사용(GPS)으로만 투표할 수 있어요.';
 
 export async function POST(request: Request) {
   try {
@@ -157,64 +159,60 @@ export async function POST(request: Request) {
       genderSnapshot = userRegionRow?.gender ?? null;
     }
 
-    if (body.regionInput) {
+    if (voterUserId) {
+      const existingSchoolId = userRegionRow?.school_id ?? null;
+      if (existingSchoolId) {
+        if (body.regionInput?.source === 'school') {
+          return NextResponse.json({ error: SCHOOL_UPDATE_FROM_VOTE_FORBIDDEN_ERROR }, { status: 400 });
+        }
+
+        const schoolIdentity = await getSchoolIdentityById(existingSchoolId);
+        if (!schoolIdentity) {
+          return NextResponse.json({ error: '저장된 학교 정보를 찾을 수 없습니다.' }, { status: 400 });
+        }
+
+        schoolId = schoolIdentity.schoolId;
+        aggregateSchoolId = schoolIdentity.aggregateSchoolId;
+        sidoCode = userRegionRow?.sido_code ?? schoolIdentity.sidoCode;
+        sigunguCode = userRegionRow?.sigungu_code ?? schoolIdentity.sigunguCode;
+      } else {
+        if (body.regionInput?.source === 'school') {
+          return NextResponse.json({ error: GPS_ONLY_FOR_NO_SCHOOL_ERROR }, { status: 400 });
+        }
+
+        if (body.regionInput?.source !== 'gps') {
+          return NextResponse.json({ error: GPS_ONLY_FOR_NO_SCHOOL_ERROR }, { status: 400 });
+        }
+
+        schoolId = null;
+        aggregateSchoolId = null;
+        sidoCode = body.regionInput.region.sidoCode;
+        sigunguCode = body.regionInput.region.sigunguCode ?? null;
+
+        const { error: updateUserError } = await supabase
+          .from('users')
+          .update({
+            sido_code: sidoCode,
+            sigungu_code: sigunguCode,
+          })
+          .eq('id', voterUserId);
+
+        if (updateUserError) {
+          return NextResponse.json({ error: updateUserError.message }, { status: 500 });
+        }
+      }
+    } else if (body.regionInput) {
       if (body.regionInput.source === 'school') {
         const ensuredSchool = await ensureSchool(body.regionInput.school);
         schoolId = ensuredSchool.schoolId;
         aggregateSchoolId = ensuredSchool.aggregateSchoolId;
         sidoCode = ensuredSchool.schoolRow.sido_code;
         sigunguCode = ensuredSchool.schoolRow.sigungu_code;
-
-        if (voterUserId) {
-          const { error: updateUserError } = await supabase
-            .from('users')
-            .update({
-              school_id: schoolId,
-              sido_code: sidoCode,
-              sigungu_code: sigunguCode,
-            })
-            .eq('id', voterUserId);
-
-          if (updateUserError) {
-            return NextResponse.json({ error: updateUserError.message }, { status: 500 });
-          }
-        }
       } else {
         schoolId = null;
         aggregateSchoolId = null;
         sidoCode = body.regionInput.region.sidoCode;
         sigunguCode = body.regionInput.region.sigunguCode ?? null;
-
-        if (voterUserId) {
-          const { error: updateUserError } = await supabase
-            .from('users')
-            .update({
-              sido_code: sidoCode,
-              sigungu_code: sigunguCode,
-            })
-            .eq('id', voterUserId);
-
-          if (updateUserError) {
-            return NextResponse.json({ error: updateUserError.message }, { status: 500 });
-          }
-        }
-      }
-    } else if (voterUserId) {
-      const existingSchoolId = userRegionRow?.school_id ?? null;
-      if (existingSchoolId) {
-        const schoolIdentity = await getSchoolIdentityById(existingSchoolId);
-        if (!schoolIdentity) {
-          return NextResponse.json({ error: '저장된 학교 정보를 찾을 수 없습니다.' }, { status: 400 });
-        }
-        schoolId = schoolIdentity.schoolId;
-        aggregateSchoolId = schoolIdentity.aggregateSchoolId;
-        sidoCode = userRegionRow?.sido_code ?? schoolIdentity.sidoCode;
-        sigunguCode = userRegionRow?.sigungu_code ?? schoolIdentity.sigunguCode;
-      } else {
-        schoolId = null;
-        aggregateSchoolId = null;
-        sidoCode = userRegionRow?.sido_code ?? null;
-        sigunguCode = userRegionRow?.sigungu_code ?? null;
       }
     } else {
       return NextResponse.json({ error: REGION_REQUIRED_ERROR }, { status: 400 });

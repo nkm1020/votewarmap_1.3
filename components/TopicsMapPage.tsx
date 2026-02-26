@@ -3,7 +3,9 @@
 import dynamic from 'next/dynamic';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -29,6 +31,7 @@ const TOPICS_MAP_COLORS = {
 } as const;
 const REGION_MODAL_HINT =
   '지역과 결과 비교를 위해 학교를 입력하시거나 정확한 위치 사용을 허용해주세요.';
+const REGION_MODAL_GPS_ONLY_HINT = '학교 미설정 계정은 정확한 위치 사용(GPS)으로만 투표할 수 있어요.';
 const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
 const TOPIC_SELECTOR_STACK_GAP_PX = 12;
 
@@ -196,9 +199,13 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
-  const { isAuthenticated, isLoading, profile, signOut, requiresSignupCompletion } = useAuth();
+  const { isAuthenticated, profile, requiresSignupCompletion } = useAuth();
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
-  const hasServerRegion = Boolean(profile?.school_id || profile?.sido_code || profile?.sigungu_code);
+  const hasSavedSchool = Boolean(profile?.school_id);
+  const canSkipLocationPrompt = isAuthenticated && hasSavedSchool;
+  const canSelectSchoolInModal = !isAuthenticated;
+  const isGpsOnlyVoteMode = isAuthenticated && !hasSavedSchool;
+  const regionModalHintText = isGpsOnlyVoteMode ? REGION_MODAL_GPS_ONLY_HINT : REGION_MODAL_HINT;
   const topics = useMemo(() => {
     if (selectedTopicIds.length === 0) {
       return [];
@@ -253,10 +260,14 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
   const optionA = activeTopic?.options.find((option) => option.position === 1) ?? null;
   const optionB = activeTopic?.options.find((option) => option.position === 2) ?? null;
   const selectedOptionLabel = activeTopic?.options.find((option) => option.key === selectedOptionKey)?.label ?? null;
-  const isSchoolListVisible = Boolean(
-    schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName),
+  const isSchoolListVisible =
+    canSelectSchoolInModal &&
+    Boolean(schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName));
+  const hasPendingRegionInput = Boolean((canSelectSchoolInModal && selectedSchool) || gpsRegionInput);
+  const mobileOverlayPaddingBottom = useMemo(
+    () => `${bottomDockHeight + TOPIC_SELECTOR_STACK_GAP_PX}px`,
+    [bottomDockHeight],
   );
-  const hasPendingRegionInput = Boolean(selectedSchool || gpsRegionInput);
   const mapStatsSignature = useMemo(
     () =>
       Object.entries(mapStats)
@@ -497,6 +508,16 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
       return;
     }
 
+    if (isAuthenticated) {
+      if (hasSavedSchool) {
+        return;
+      }
+      if (storedRegionInput.source === 'gps') {
+        setGpsRegionInput(storedRegionInput);
+      }
+      return;
+    }
+
     if (storedRegionInput.source === 'school') {
       setSelectedSchool(storedRegionInput.school);
       setSchoolQuery(storedRegionInput.school.schoolName);
@@ -505,7 +526,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     }
 
     setGpsRegionInput(storedRegionInput);
-  }, []);
+  }, [hasSavedSchool, isAuthenticated]);
 
   useEffect(() => {
     const adNode = bottomDockRef.current;
@@ -567,7 +588,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
   }, [activeTopicId, isAuthenticated]);
 
   useEffect(() => {
-    if (!showProfileModal) {
+    if (!showProfileModal || !canSelectSchoolInModal) {
       return;
     }
 
@@ -593,7 +614,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     }, 260);
 
     return () => clearTimeout(handle);
-  }, [schoolQuery, showProfileModal]);
+  }, [canSelectSchoolInModal, schoolQuery, showProfileModal]);
 
   useEffect(() => {
     if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
@@ -618,16 +639,26 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     targetButton?.scrollIntoView({ block: 'nearest' });
   }, [highlightedSchoolIndex, isSchoolListVisible, schoolResults.length]);
 
-  const handleSelectSchool = useCallback((school: SchoolSearchItem) => {
-    setSelectedSchool(school);
-    setSchoolQuery(school.schoolName);
-    setHighlightedSchoolIndex(0);
-    setGpsRegionInput(null);
-    setProfileModalMessage(null);
-  }, []);
+  const handleSelectSchool = useCallback(
+    (school: SchoolSearchItem) => {
+      if (!canSelectSchoolInModal) {
+        return;
+      }
+      setSelectedSchool(school);
+      setSchoolQuery(school.schoolName);
+      setHighlightedSchoolIndex(0);
+      setGpsRegionInput(null);
+      setProfileModalMessage(null);
+    },
+    [canSelectSchoolInModal],
+  );
 
   const buildPendingRegionInput = useCallback((): VoteRegionInput | null => {
-    if (selectedSchool) {
+    if (isAuthenticated && hasSavedSchool) {
+      return null;
+    }
+
+    if (canSelectSchoolInModal && selectedSchool) {
       const payload: VoteRegionInput = {
         source: 'school',
         school: selectedSchool,
@@ -642,7 +673,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     }
 
     return null;
-  }, [gpsRegionInput, selectedSchool]);
+  }, [canSelectSchoolInModal, gpsRegionInput, hasSavedSchool, isAuthenticated, selectedSchool]);
 
   const resolveOptimisticRegionCodes = useCallback(
     (regionInput: VoteRegionInput | null) => {
@@ -808,7 +839,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
       return;
     }
 
-    if (isAuthenticated && hasServerRegion) {
+    if (canSkipLocationPrompt) {
       await submitVote(null);
       return;
     }
@@ -818,7 +849,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     setShowProfileModal(true);
   }, [
     buildPendingRegionInput,
-    hasServerRegion,
+    canSkipLocationPrompt,
     isAuthenticated,
     requiresSignupCompletion,
     router,
@@ -828,7 +859,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
   const handleSaveRegionOnly = useCallback(async () => {
     const payload = buildPendingRegionInput();
     if (!payload) {
-      setVoteMessage(REGION_MODAL_HINT);
+      setVoteMessage(regionModalHintText);
       return;
     }
 
@@ -839,7 +870,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
     } else {
       setVoteMessage('지역 정보가 저장되었습니다.');
     }
-  }, [buildPendingRegionInput, submitVote, voteAfterProfile]);
+  }, [buildPendingRegionInput, regionModalHintText, submitVote, voteAfterProfile]);
 
   const handleAddTopic = useCallback((topicId: string) => {
     setSelectedTopicIds((prev) => (prev.includes(topicId) ? prev : [...prev, topicId]));
@@ -911,6 +942,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
         <KoreaAdminMap
           key={`${activeTopicId ?? 'topics-map-empty'}-${mapStatsSignature}`}
           statsByCode={mapStats}
+          defaultRegionLevel="sigungu"
           height="100%"
           initialCenter={TOPICS_MAP_INITIAL_CENTER}
           initialZoom={6}
@@ -940,24 +972,36 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
       <div
-        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[430px] flex-col px-4 pt-[calc(0.7rem+env(safe-area-inset-top))]"
-        style={{ paddingBottom: `${bottomDockHeight + TOPIC_SELECTOR_STACK_GAP_PX}px` }}
+        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-4 pb-[var(--topics-mobile-overlay-padding)] pt-[calc(0.7rem+env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-0 lg:px-10 lg:pt-0"
+        style={{ '--topics-mobile-overlay-padding': mobileOverlayPaddingBottom } as CSSProperties}
       >
+        <DesktopTopHeader
+          className="pointer-events-auto"
+          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+          links={[
+            { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+            { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+            { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+            { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+          ]}
+          rightSlot={<AccountMenuButton />}
+        />
+
         {isTopicsLoading ? (
-          <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+          <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:max-w-[560px]">
             주제 목록 불러오는 중...
           </section>
         ) : (
           <>
             {topics.length === 0 ? (
-              <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+              <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:max-w-[560px]">
                 <h2 className="text-lg font-semibold text-white">선택된 주제가 없습니다.</h2>
                 <p className="mt-2 text-sm text-white/70">하단의 주제 선택에서 원하는 LIVE 주제를 담아주세요.</p>
               </section>
             ) : (
               <>
                 <LiveVoteCard
-                  className="mt-3 shrink-0"
+                  className="mt-3 shrink-0 md:max-w-[560px]"
                   topicId={activeTopic?.id ?? null}
                   title={activeTopic?.title ?? '주제 없음'}
                   isExpanded={!isVoteCardCollapsed}
@@ -993,17 +1037,10 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
                     percentage: summary.hasData ? summary.bPercent : null,
                     subtext: getOptionSubtext(activeTopic?.id, optionB?.key ?? null),
                   }}
-                  auth={{
-                    isLoading,
-                    isAuthenticated,
-                    avatarUrl: profile?.avatar_url ?? null,
-                    displayInitial: (profile?.nickname ?? profile?.full_name ?? profile?.email ?? 'U').slice(0, 1),
-                    onSignOut: signOut,
-                  }}
                 />
 
                 {selectedRegion ? (
-                  <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+                  <section className="pointer-events-auto mt-3 shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:max-w-[560px]">
                     <div className="flex items-center justify-between">
                       <h4 className="truncate text-[15px] font-semibold text-white">
                         {selectedRegion.name || selectedRegion.code}
@@ -1049,7 +1086,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
 
             <section
               ref={topicSelectorRef}
-              className="pointer-events-auto mt-3 w-full rounded-t-[32px] border-t border-white/12 bg-[rgba(20,20,24,0.78)] pb-3 shadow-[0_-10px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl"
+              className="pointer-events-auto mt-3 w-full rounded-t-[32px] border-t border-white/12 bg-[rgba(20,20,24,0.78)] pb-3 shadow-[0_-10px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl md:max-w-[560px]"
             >
               <div className="mx-auto mb-2 mt-3.5 h-1.5 w-12 rounded-full bg-white/20" />
 
@@ -1285,7 +1322,7 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
 
       {showProfileModal ? (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 p-4 sm:items-center">
-          <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
+          <div className="w-full max-w-[520px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl md:p-6">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-[20px] font-semibold text-white">최초 투표 지역 입력</h4>
               <button
@@ -1302,104 +1339,108 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm leading-relaxed text-white/72">{REGION_MODAL_HINT}</p>
+              <p className="text-sm leading-relaxed text-white/72">{regionModalHintText}</p>
 
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
-                <input
-                  value={schoolQuery}
-                  onKeyDown={(event) => {
-                    if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
-                      return;
-                    }
+              {canSelectSchoolInModal ? (
+                <>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
+                    <input
+                      value={schoolQuery}
+                      onKeyDown={(event) => {
+                        if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+                          return;
+                        }
 
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
-                      return;
-                    }
+                        if (event.key === 'ArrowDown') {
+                          event.preventDefault();
+                          setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
+                          return;
+                        }
 
-                    if (event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
-                      return;
-                    }
+                        if (event.key === 'ArrowUp') {
+                          event.preventDefault();
+                          setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
+                          return;
+                        }
 
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
-                      if (target) {
-                        handleSelectSchool(target);
-                      }
-                    }
-                  }}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setSchoolQuery(nextValue);
-                    setHighlightedSchoolIndex(0);
-                    setProfileModalMessage(null);
-                    if (selectedSchool && nextValue !== selectedSchool.schoolName) {
-                      setSelectedSchool(null);
-                    }
-                  }}
-                  placeholder="학교명을 입력하세요"
-                  autoComplete="off"
-                  className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
-                />
-                {isSchoolListVisible ? (
-                  <div
-                    ref={schoolResultsListRef}
-                    className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
-                  >
-                    {isSchoolSearching ? (
-                      <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
-                    ) : schoolResults.length === 0 ? (
-                      <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
-                    ) : (
-                      schoolResults.map((school, index) => (
-                        <button
-                          key={`${school.source}:${school.schoolCode}`}
-                          data-school-index={index}
-                          type="button"
-                          onMouseEnter={() => setHighlightedSchoolIndex(index)}
-                          onClick={() => handleSelectSchool(school)}
-                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
-                            index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
-                          }`}
-                        >
-                          <p className="font-semibold">{school.schoolName}</p>
-                          <p className="mt-0.5 text-[11px] text-white/60">
-                            {school.sidoName ?? '-'} · {school.schoolLevel}
-                            {school.campusType ? ` · ${school.campusType}` : ''}
-                          </p>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-                {selectedSchool ? (
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSchool(null);
-                        setSchoolQuery('');
-                        setProfileModalMessage(null);
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
+                          if (target) {
+                            handleSelectSchool(target);
+                          }
+                        }
                       }}
-                      className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                    >
-                      학교 선택 해제
-                    </button>
-                  </div>
-                ) : null}
-              </label>
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setSchoolQuery(nextValue);
+                        setHighlightedSchoolIndex(0);
+                        setProfileModalMessage(null);
+                        if (selectedSchool && nextValue !== selectedSchool.schoolName) {
+                          setSelectedSchool(null);
+                        }
+                      }}
+                      placeholder="학교명을 입력하세요"
+                      autoComplete="off"
+                      className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
+                    />
+                    {isSchoolListVisible ? (
+                      <div
+                        ref={schoolResultsListRef}
+                        className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+                      >
+                        {isSchoolSearching ? (
+                          <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                        ) : schoolResults.length === 0 ? (
+                          <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                        ) : (
+                          schoolResults.map((school, index) => (
+                            <button
+                              key={`${school.source}:${school.schoolCode}`}
+                              data-school-index={index}
+                              type="button"
+                              onMouseEnter={() => setHighlightedSchoolIndex(index)}
+                              onClick={() => handleSelectSchool(school)}
+                              className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
+                                index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                              }`}
+                            >
+                              <p className="font-semibold">{school.schoolName}</p>
+                              <p className="mt-0.5 text-[11px] text-white/60">
+                                {school.sidoName ?? '-'} · {school.schoolLevel}
+                                {school.campusType ? ` · ${school.campusType}` : ''}
+                              </p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                    {selectedSchool ? (
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchool(null);
+                            setSchoolQuery('');
+                            setProfileModalMessage(null);
+                          }}
+                          className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                        >
+                          학교 선택 해제
+                        </button>
+                      </div>
+                    ) : null}
+                  </label>
 
-              <div className="flex items-center gap-2">
-                <div className="h-px flex-1 bg-white/14" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
-                <div className="h-px flex-1 bg-white/14" />
-              </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-white/14" />
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
+                    <div className="h-px flex-1 bg-white/14" />
+                  </div>
+                </>
+              ) : null}
 
               <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
                 <button
@@ -1456,12 +1497,16 @@ export default function TopicsMapPage({ initialTopicIds, openTopicEditorOnMount 
 
       <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
         <div
-          className="mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72"
+          className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
         >
-          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-          <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+          <div>
+            <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+            <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+          </div>
+          <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
+            문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
+          </p>
         </div>
       </footer>
     </div>

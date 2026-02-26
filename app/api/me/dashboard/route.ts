@@ -20,6 +20,9 @@ type DashboardUserRow = {
   avatar_url: string | null;
   avatar_preset: string | null;
   created_at: string;
+  school_id: string | null;
+  main_school_slot: SchoolSlotType | null;
+  school_edit_count: number | null;
   sido_code: string | null;
   sigungu_code: string | null;
   privacy_show_leaderboard_name: boolean | null;
@@ -27,11 +30,24 @@ type DashboardUserRow = {
   privacy_show_activity_history: boolean | null;
 };
 
+type SchoolSlotType = 'middle' | 'high' | 'university' | 'graduate';
+
+type SchoolProfileRow = {
+  id: string;
+  source: 'nais' | 'local_xls';
+  school_code: string;
+  school_name: string;
+  sido_name: string | null;
+  sigungu_name: string | null;
+};
+
 type MetricRpcRow = {
   my_region_match_rate: number | string | null;
+  my_school_match_rate: number | string | null;
   nationwide_match_rate: number | string | null;
   dominance_gap_delta: number | string | null;
   region_national_flow: number | string | null;
+  school_sample_topics: number | string | null;
 };
 
 type RankRpcRow = {
@@ -55,6 +71,34 @@ type RegionBattleRow = {
   score: number | string | null;
 };
 
+type UserSchoolPoolRow = {
+  slot_type: string;
+  school_id: string;
+};
+
+type SchoolPayload = {
+  id: string;
+  source: 'nais' | 'local_xls';
+  schoolCode: string;
+  schoolName: string;
+  sidoName: string | null;
+  sigunguName: string | null;
+  displayLabel: string;
+};
+
+function isSchoolSlotType(value: string): value is SchoolSlotType {
+  return value === 'middle' || value === 'high' || value === 'university' || value === 'graduate';
+}
+
+function createEmptySchoolPool(): Record<SchoolSlotType, SchoolPayload | null> {
+  return {
+    middle: null,
+    high: null,
+    university: null,
+    graduate: null,
+  };
+}
+
 function normalizeInt(value: number | string | null | undefined): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -77,6 +121,19 @@ function normalizeFloat(value: number | string | null | undefined): number {
   return 0;
 }
 
+function normalizeNullableFloat(value: number | string | null | undefined): number | null {
+  if (value === null || typeof value === 'undefined') {
+    return null;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -84,6 +141,42 @@ function roundTwo(value: number): number {
 function defaultUsername(userId: string): string {
   const compact = userId.replace(/-/g, '').slice(0, 8).toLowerCase();
   return `user_${compact}`;
+}
+
+function parseIncludeDummy(request: Request): boolean {
+  const url = new URL(request.url);
+  const includeDummy = url.searchParams.get('includeDummy');
+  if (!includeDummy) {
+    return false;
+  }
+
+  const normalized = includeDummy.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+function buildSchoolDisplayLabel(school: SchoolProfileRow): string {
+  const schoolName = school.school_name?.trim();
+  if (!schoolName) {
+    return '';
+  }
+
+  const regionLabel = school.sigungu_name?.trim() || school.sido_name?.trim() || '';
+  if (!regionLabel) {
+    return schoolName;
+  }
+  return `${schoolName}(${regionLabel})`;
+}
+
+function mapSchoolRowToPayload(school: SchoolProfileRow): SchoolPayload {
+  return {
+    id: school.id,
+    source: school.source,
+    schoolCode: school.school_code,
+    schoolName: school.school_name,
+    sidoName: school.sido_name,
+    sigunguName: school.sigungu_name,
+    displayLabel: buildSchoolDisplayLabel(school),
+  };
 }
 
 function getDisplayName(row: DashboardUserRow): string {
@@ -112,7 +205,7 @@ async function ensureUserRow(user: Awaited<ReturnType<typeof resolveUserFromAuth
 
   const supabase = getSupabaseServiceRoleClient();
   const selectFields =
-    'id, email, full_name, nickname, username, avatar_url, avatar_preset, created_at, sido_code, sigungu_code, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
+    'id, email, full_name, nickname, username, avatar_url, avatar_preset, created_at, school_id, main_school_slot, school_edit_count, sido_code, sigungu_code, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
 
   const { data: existingRow, error: existingError } = await supabase
     .from('users')
@@ -176,6 +269,7 @@ async function ensureUserRow(user: Awaited<ReturnType<typeof resolveUserFromAuth
 
 export async function GET(request: Request) {
   try {
+    const includeDummy = parseIncludeDummy(request);
     const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
     if (!user) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
@@ -189,7 +283,22 @@ export async function GET(request: Request) {
 
     const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
+    const schoolResultPromise = userRow.school_id
+      ? supabase
+          .from('schools')
+          .select('id, source, school_code, school_name, sido_name, sigungu_name')
+          .eq('id', userRow.school_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null } as const);
+
+    const schoolPoolResultPromise = supabase
+      .from('user_school_pool')
+      .select('slot_type, school_id')
+      .eq('user_id', user.id);
+
     const [
+      schoolResult,
+      schoolPoolResult,
       totalVotesResult,
       recentVotesResult,
       modeScoresResult,
@@ -200,7 +309,11 @@ export async function GET(request: Request) {
       recentModeGamesResult,
       recentRegionBattleGamesResult,
       userVoteRegionsResult,
+      dummyVotesResult,
+      dummyRecentVotesResult,
     ] = await Promise.all([
+      schoolResultPromise,
+      schoolPoolResultPromise,
       supabase.from('votes').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase
         .from('votes')
@@ -224,8 +337,9 @@ export async function GET(request: Request) {
         p_user_id: user.id,
         p_period: 'all',
       }),
-      supabase.rpc('get_my_vote_comparison_metrics', {
+      supabase.rpc('get_my_vote_comparison_metrics_segments', {
         p_user_id: user.id,
+        p_include_dummy: includeDummy,
       }),
       supabase
         .from('game_mode_scores')
@@ -242,9 +356,26 @@ export async function GET(request: Request) {
         .select('sido_code, sigungu_code, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false }),
+      includeDummy
+        ? supabase
+            .from('votes')
+            .select('id', { count: 'exact', head: true })
+            .is('user_id', null)
+            .ilike('guest_token', 'dummy_%')
+        : Promise.resolve({ count: 0, error: null } as const),
+      includeDummy
+        ? supabase
+            .from('votes')
+            .select('id', { count: 'exact', head: true })
+            .is('user_id', null)
+            .ilike('guest_token', 'dummy_%')
+            .gte('created_at', sevenDaysAgoIso)
+        : Promise.resolve({ count: 0, error: null } as const),
     ]);
 
     const queryErrors = [
+      schoolResult.error,
+      schoolPoolResult.error,
       totalVotesResult.error,
       recentVotesResult.error,
       modeScoresResult.error,
@@ -255,6 +386,8 @@ export async function GET(request: Request) {
       recentModeGamesResult.error,
       recentRegionBattleGamesResult.error,
       userVoteRegionsResult.error,
+      includeDummy ? dummyVotesResult.error : null,
+      includeDummy ? dummyRecentVotesResult.error : null,
     ].filter((item) => Boolean(item));
 
     if (queryErrors.length > 0) {
@@ -262,8 +395,38 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: firstError?.message ?? '대시보드 조회에 실패했습니다.' }, { status: 500 });
     }
 
-    const totalVotes = totalVotesResult.count ?? 0;
-    const recentVotes = recentVotesResult.count ?? 0;
+    const schoolPoolRows = (schoolPoolResult.data ?? []) as UserSchoolPoolRow[];
+    const schoolPoolIds = Array.from(
+      new Set(
+        schoolPoolRows
+          .map((row) => String(row.school_id ?? '').trim())
+          .filter((value) => value.length > 0),
+      ),
+    );
+
+    const poolSchoolsResult =
+      schoolPoolIds.length > 0
+        ? await supabase
+            .from('schools')
+            .select('id, source, school_code, school_name, sido_name, sigungu_name')
+            .in('id', schoolPoolIds)
+        : ({ data: [], error: null } as const);
+
+    if (poolSchoolsResult.error) {
+      return NextResponse.json({ error: poolSchoolsResult.error.message }, { status: 500 });
+    }
+
+    const schoolRowsById = new Map<string, SchoolProfileRow>();
+    ((poolSchoolsResult.data ?? []) as SchoolProfileRow[]).forEach((row) => {
+      schoolRowsById.set(row.id, row);
+    });
+
+    const userVotes = totalVotesResult.count ?? 0;
+    const userRecentVotes = recentVotesResult.count ?? 0;
+    const dummyVotes = includeDummy ? (dummyVotesResult.count ?? 0) : 0;
+    const dummyRecentVotes = includeDummy ? (dummyRecentVotesResult.count ?? 0) : 0;
+    const totalVotes = userVotes + dummyVotes;
+    const recentVotes = userRecentVotes + dummyRecentVotes;
     const recentModeGames = recentModeGamesResult.count ?? 0;
     const recentRegionBattleGames = recentRegionBattleGamesResult.count ?? 0;
     const recentGames = recentModeGames + recentRegionBattleGames;
@@ -297,16 +460,25 @@ export async function GET(request: Request) {
       : []) as MetricRpcRow[];
     const northstar = northstarRows[0] ?? {
       my_region_match_rate: 0,
+      my_school_match_rate: null,
       nationwide_match_rate: 0,
       dominance_gap_delta: 0,
       region_national_flow: 0,
+      school_sample_topics: 0,
     };
 
+    const schoolMinimumSample = 1;
+    const mySchoolMatchRate = normalizeNullableFloat(northstar.my_school_match_rate);
+    const schoolSampleTopics = normalizeInt(northstar.school_sample_topics);
     const northstarMetrics = {
       myRegionMatchRate: roundTwo(normalizeFloat(northstar.my_region_match_rate)),
+      mySchoolMatchRate: mySchoolMatchRate === null ? null : roundTwo(mySchoolMatchRate),
       nationwideMatchRate: roundTwo(normalizeFloat(northstar.nationwide_match_rate)),
       dominanceGapDelta: roundTwo(normalizeFloat(northstar.dominance_gap_delta)),
       regionNationalFlow: roundTwo(normalizeFloat(northstar.region_national_flow)),
+      schoolSampleTopics,
+      schoolEligible: Boolean(userRow.school_id) && schoolSampleTopics >= schoolMinimumSample,
+      schoolMinimumSample,
     };
 
     const voteRegionRows = (userVoteRegionsResult.data ?? []) as UserVoteRegionRow[];
@@ -381,6 +553,26 @@ export async function GET(request: Request) {
       sidoCode: userRow.sido_code,
       sigunguCode: userRow.sigungu_code,
     });
+    const schoolRow = (schoolResult.data as SchoolProfileRow | null) ?? null;
+    const schoolPayload = schoolRow ? mapSchoolRowToPayload(schoolRow) : null;
+    const schoolPoolPayload = createEmptySchoolPool();
+    schoolPoolRows.forEach((row) => {
+      const slotType = String(row.slot_type ?? '').trim();
+      if (!isSchoolSlotType(slotType)) {
+        return;
+      }
+      const schoolId = String(row.school_id ?? '').trim();
+      if (!schoolId) {
+        return;
+      }
+      const poolSchoolRow = schoolRowsById.get(schoolId);
+      if (!poolSchoolRow) {
+        return;
+      }
+      schoolPoolPayload[slotType] = mapSchoolRowToPayload(poolSchoolRow);
+    });
+    const schoolEditUsed = Math.max(0, normalizeInt(userRow.school_edit_count));
+    const schoolEditLimit = 2;
 
     return NextResponse.json({
       profile: {
@@ -395,6 +587,14 @@ export async function GET(request: Request) {
           sidoCode: userRow.sido_code,
           sigunguCode: userRow.sigungu_code,
           name: profileRegionName,
+        },
+        school: schoolPayload,
+        schoolPool: schoolPoolPayload,
+        mainSchoolSlot: userRow.main_school_slot,
+        schoolEdit: {
+          used: schoolEditUsed,
+          limit: schoolEditLimit,
+          remaining: Math.max(0, schoolEditLimit - schoolEditUsed),
         },
       },
       northstar: northstarMetrics,

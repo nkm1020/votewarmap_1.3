@@ -1,8 +1,19 @@
 'use client';
 
-import { type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  type TouchEvent,
+  type WheelEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { clearPendingGameScore, readPendingGameScore, writePendingGameScore } from '@/lib/vote/client-storage';
@@ -706,6 +717,7 @@ export function HigherLowerGamePage() {
   const handleBottomDockTouchEnd = useCallback(() => {
     resetBottomDockTouchState();
   }, [resetBottomDockTouchState]);
+  const mobileBottomDockPadding = useMemo(() => `${Math.max(bottomDockHeight + 40, 120)}px`, [bottomDockHeight]);
 
   const winnerLabel = useMemo(() => {
     if (!question) {
@@ -938,9 +950,21 @@ export function HigherLowerGamePage() {
 
       <main className="relative h-screen w-full overflow-hidden">
         <div
-          className="mx-auto flex h-full w-full max-w-[500px] flex-col overflow-y-auto px-5 pb-10 pt-12 md:px-8 custom-scrollbar"
-          style={{ paddingBottom: `${Math.max(bottomDockHeight + 40, 120)}px` }}
+          className="mx-auto flex h-full w-full max-w-[1280px] flex-col overflow-y-auto px-5 pb-[var(--game-mobile-dock-padding)] pt-12 md:px-8 md:pb-10 md:pt-0 lg:px-10 custom-scrollbar"
+          style={{ '--game-mobile-dock-padding': mobileBottomDockPadding } as CSSProperties}
         >
+          <DesktopTopHeader
+            containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+            links={[
+              { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+              { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+              { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+              { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+            ]}
+            actions={[{ key: 'restart-game', label: '게임 리셋', onClick: handleRestart, variant: 'outline' }]}
+          />
+
+          <div className="md:mx-auto md:mt-4 md:w-full md:max-w-[960px]">
           <AnimatedSection delay={0.1} className="mb-6 pl-1">
             <h1 className="mb-5 text-[28px] font-bold tracking-tight">게임</h1>
             <div className={`flex items-center justify-between rounded-3xl border ${CARD_BORDER} ${CARD_BG} p-5`}>
@@ -1197,9 +1221,10 @@ export function HigherLowerGamePage() {
               )}
             </div>
           </AnimatedSection>
+          </div>
         </div>
 
-        <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[130]">
+        <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[130] md:hidden">
           <div
             onWheel={handleBottomDockWheel}
             onTouchStart={handleBottomDockTouchStart}
@@ -1262,12 +1287,16 @@ export function HigherLowerGamePage() {
 
       <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
         <div
-          className="jsx-2df9a19167547992 mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72"
+          className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
         >
-          <p className="jsx-2df9a19167547992 text-sm font-semibold text-white/88">Vote War Map</p>
-          <p className="jsx-2df9a19167547992 mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-          <p className="jsx-2df9a19167547992 mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+          <div>
+            <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+            <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+          </div>
+          <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
+            문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
+          </p>
         </div>
       </footer>
     </div>

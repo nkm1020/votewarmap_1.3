@@ -13,17 +13,39 @@ function toAccuracy(accuracy: number | null | undefined): number | null {
   return typeof accuracy === 'number' && Number.isFinite(accuracy) ? accuracy : null;
 }
 
+function normalizeGeolocationError(error: GeolocationPositionError | Error): Error {
+  if ('code' in error) {
+    if (error.code === 1) {
+      return new Error('위치 권한이 거부되었습니다. 브라우저에서 위치 권한을 허용해 주세요.');
+    }
+    if (error.code === 2) {
+      return new Error('현재 위치를 확인하지 못했습니다. GPS 또는 네트워크 상태를 확인해 주세요.');
+    }
+    if (error.code === 3) {
+      return new Error('위치 확인 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
+    }
+  }
+
+  return new Error('위치 정보를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+}
+
 function getCurrentPosition(): Promise<GeolocationPosition> {
   if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
     throw new Error('위치 기능을 사용할 수 없는 환경입니다.');
   }
 
   return new Promise<GeolocationPosition>((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 0,
-    });
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      (error) => {
+        reject(normalizeGeolocationError(error));
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0,
+      },
+    );
   });
 }
 

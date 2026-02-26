@@ -47,18 +47,61 @@ function getSigunguByCodeMap(): Map<string, string> {
   return sigunguByCodeCache;
 }
 
-export function getSidoNameByCode(code: string | null | undefined): string | null {
-  if (!code) {
-    return null;
+function buildCodeCandidates(code: string | null | undefined, expectedLength: 2 | 5): string[] {
+  const raw = String(code ?? '').trim();
+  if (!raw) {
+    return [];
   }
-  return getSidoByCodeMap().get(code) ?? null;
+
+  const digits = raw.replace(/\D/g, '');
+  const candidates = new Set<string>();
+
+  const push = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) {
+      return;
+    }
+    candidates.add(normalized);
+    if (normalized.length > expectedLength) {
+      candidates.add(normalized.slice(0, expectedLength));
+    }
+  };
+
+  push(raw);
+  push(digits);
+
+  if (expectedLength === 2 && digits.length >= 5) {
+    candidates.add(digits.slice(0, 2));
+  }
+  if (expectedLength === 5 && digits.length >= 2) {
+    candidates.add(digits.slice(0, 5));
+  }
+
+  return Array.from(candidates);
+}
+
+export function getSidoNameByCode(code: string | null | undefined): string | null {
+  const map = getSidoByCodeMap();
+  const candidates = buildCodeCandidates(code, 2);
+  for (const candidate of candidates) {
+    const name = map.get(candidate);
+    if (name) {
+      return name;
+    }
+  }
+  return null;
 }
 
 export function getSigunguNameByCode(code: string | null | undefined): string | null {
-  if (!code) {
-    return null;
+  const map = getSigunguByCodeMap();
+  const candidates = buildCodeCandidates(code, 5);
+  for (const candidate of candidates) {
+    const name = map.get(candidate);
+    if (name) {
+      return name;
+    }
   }
-  return getSigunguByCodeMap().get(code) ?? null;
+  return null;
 }
 
 export function getRegionNameByCodes(args: {

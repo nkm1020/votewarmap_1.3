@@ -184,6 +184,7 @@ export default function VoteMapSection() {
 
       <KoreaAdminMap
         statsByCode={statsByCode}
+        defaultRegionLevel="sigungu"
         onRegionClick={(region) =>
           setSelectedRegion((prev) =>
             prev && prev.code === region.code && prev.level === region.level ? null : region,

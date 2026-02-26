@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus_Jakarta_Sans } from 'next/font/google';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
 
@@ -116,10 +117,50 @@ export default function CompleteSignupPage() {
   return (
     <main className={`${displayFont.className} relative min-h-screen overflow-hidden bg-[#181410] text-white`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_70%_at_20%_15%,rgba(47,116,255,0.24),rgba(47,116,255,0)_60%),radial-gradient(80%_60%_at_80%_90%,rgba(255,103,0,0.18),rgba(255,103,0,0)_65%),linear-gradient(to_bottom,rgba(19,15,12,0.95),rgba(19,15,12,0.82))]" />
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-xl items-center px-4 py-8 sm:px-6">
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1240px] flex-col px-4 py-6 sm:px-6 lg:px-10">
+        <DesktopTopHeader
+          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+          links={[
+            { key: 'home', label: '홈', href: '/' },
+            { key: 'map', label: '지도', href: '/topics-map' },
+            { key: 'game', label: '게임', href: '/game' },
+            { key: 'my', label: 'MY', href: '/my' },
+          ]}
+          actions={[{ key: 'go-home', label: '홈으로', onClick: () => router.push('/'), variant: 'outline' }]}
+        />
+
+        <header className="mb-6 flex items-center justify-between md:hidden">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#ff8e3b]">Signup Completion</p>
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+          >
+            홈으로
+          </button>
+        </header>
+
+        <div className="grid flex-1 items-center gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
+          <aside className="hidden rounded-[30px] border border-white/12 bg-[rgba(22,18,14,0.48)] p-7 shadow-2xl backdrop-blur-md lg:block">
+            <h2 className="text-3xl font-extrabold leading-tight text-white">
+              마지막 가입 정보를 입력하면
+              <br />
+              개인화 기능이 활성화됩니다
+            </h2>
+            <p className="mt-4 max-w-[480px] text-sm leading-relaxed text-white/70">
+              닉네임과 기본 프로필 정보는 MY 페이지/리더보드/지역 분석 표시 기준으로 사용됩니다.
+              완료 즉시 원래 보려던 페이지로 이동됩니다.
+            </p>
+            <ul className="mt-6 space-y-2 text-sm text-white/78">
+              <li>1. 닉네임 입력</li>
+              <li>2. 출생연도 및 성별 선택</li>
+              <li>3. 약관 동의 후 가입 완료</li>
+            </ul>
+          </aside>
+
         <form
           onSubmit={(event) => void handleSubmit(event)}
-          className="w-full rounded-[30px] border border-white/12 bg-[rgba(24,20,16,0.82)] px-6 py-7 shadow-2xl backdrop-blur-md sm:px-7"
+          className="mx-auto w-full max-w-[560px] rounded-[30px] border border-white/12 bg-[rgba(24,20,16,0.82)] px-6 py-7 shadow-2xl backdrop-blur-md sm:px-7"
         >
           <h1 className="text-2xl font-extrabold leading-tight text-white sm:text-[1.75rem]">
             가입을 완료하고
@@ -226,6 +267,7 @@ export default function CompleteSignupPage() {
             {isSubmitting ? '처리 중...' : '가입 완료'}
           </button>
         </form>
+        </div>
       </div>
     </main>
   );

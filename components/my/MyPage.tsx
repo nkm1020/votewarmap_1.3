@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { AlertCircle, ChevronLeft, MapPin } from 'lucide-react';
 import {
   type CSSProperties,
+  type KeyboardEvent,
   type ReactNode,
   type TouchEvent,
   type WheelEvent,
@@ -14,14 +15,30 @@ import {
   useState,
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
+import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
+import type { SchoolSearchItem } from '@/lib/vote/types';
 
 type RegionPayload = {
   sidoCode: string | null;
   sigunguCode: string | null;
   name: string | null;
+};
+
+type SchoolSlotType = 'middle' | 'high' | 'university' | 'graduate';
+
+type DashboardSchoolPayload = {
+  id: string;
+  source: 'nais' | 'local_xls';
+  schoolCode: string;
+  schoolName: string;
+  sidoName: string | null;
+  sigunguName: string | null;
+  displayLabel: string;
 };
 
 type DashboardResponse = {
@@ -34,12 +51,24 @@ type DashboardResponse = {
     avatarPreset: string | null;
     joinedAt: string;
     region: RegionPayload;
+    school: DashboardSchoolPayload | null;
+    schoolPool: Record<SchoolSlotType, DashboardSchoolPayload | null>;
+    mainSchoolSlot: SchoolSlotType | null;
+    schoolEdit: {
+      used: number;
+      limit: number;
+      remaining: number;
+    };
   };
   northstar: {
     myRegionMatchRate: number;
+    mySchoolMatchRate: number | null;
     nationwideMatchRate: number;
     dominanceGapDelta: number;
     regionNationalFlow: number;
+    schoolSampleTopics: number;
+    schoolEligible: boolean;
+    schoolMinimumSample: number;
   };
   stats: {
     totalVotes: number;
@@ -121,13 +150,22 @@ type ReverseRegionResponse = {
   sigunguCode: string | null;
   sidoName: string | null;
   sigunguName: string | null;
-  provider: string;
+  provider: string | null;
   error?: string;
+};
+
+type ApiErrorPayload = {
+  error?: string;
+  details?: {
+    formErrors?: string[];
+    fieldErrors?: Record<string, string[] | undefined>;
+  };
 };
 
 type RegionPolicy = 'keep' | 'clear';
 
 const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 6;
+const UNSAVED_CHANGES_CONFIRM_MESSAGE = '변경사항이 저장되지 않습니다. 페이지를 벗어나시겠어요?';
 const APP_BG = 'bg-[var(--my-bg)]';
 const CARD_BG = 'bg-[var(--my-surface-strong)]';
 const TEXT_PRIMARY = 'text-white';
@@ -170,6 +208,17 @@ const AVATAR_EMOJI: Record<(typeof AVATAR_PRESETS)[number], string> = {
   cloud: '☁️',
   spark: '✨',
 };
+
+const SCHOOL_SLOT_META: Array<{ slot: SchoolSlotType; label: string }> = [
+  { slot: 'middle', label: '중학교' },
+  { slot: 'high', label: '고등학교' },
+  { slot: 'university', label: '대학교' },
+  { slot: 'graduate', label: '대학원' },
+];
+
+function getSchoolSlotLabel(slot: SchoolSlotType): string {
+  return SCHOOL_SLOT_META.find((item) => item.slot === slot)?.label ?? slot;
+}
 
 function formatNumber(value: number): string {
   return Number.isFinite(value) ? value.toLocaleString() : '0';
@@ -222,6 +271,70 @@ function getAvatarEmoji(value: string | null): string {
     return AVATAR_EMOJI[value];
   }
   return AVATAR_EMOJI.sun;
+}
+
+function getSchoolDisplayLabel(school: DashboardSchoolPayload | null | undefined): string | null {
+  if (!school) {
+    return null;
+  }
+
+  const schoolName = school.schoolName?.trim();
+  if (!schoolName) {
+    return null;
+  }
+
+  const providedLabel = school.displayLabel?.trim();
+  if (providedLabel) {
+    return providedLabel;
+  }
+
+  const regionLabel = school.sigunguName?.trim() || school.sidoName?.trim() || '';
+  if (!regionLabel) {
+    return schoolName;
+  }
+
+  return `${schoolName}(${regionLabel})`;
+}
+
+function getProfileLocationLabel(profile: DashboardResponse['profile']): string {
+  return getSchoolDisplayLabel(profile.school) ?? profile.region.name ?? '지역 미설정';
+}
+
+function getApiErrorMessage(payload: ApiErrorPayload | null | undefined, fallback: string): string {
+  if (!payload) {
+    return fallback;
+  }
+
+  const formError = payload.details?.formErrors?.find((item) => typeof item === 'string' && item.trim().length > 0);
+  if (formError) {
+    return formError;
+  }
+
+  const fieldError = Object.values(payload.details?.fieldErrors ?? {})
+    .flatMap((items) => items ?? [])
+    .find((item) => typeof item === 'string' && item.trim().length > 0);
+  if (fieldError) {
+    return fieldError;
+  }
+
+  if (payload.error && payload.error.trim().length > 0) {
+    return payload.error;
+  }
+
+  return fallback;
+}
+
+function isSameSchoolSelection(
+  candidate: SchoolSearchItem | null,
+  currentSchool: DashboardSchoolPayload | null,
+): boolean {
+  if (!candidate && !currentSchool) {
+    return true;
+  }
+  if (!candidate || !currentSchool) {
+    return false;
+  }
+  return candidate.source === currentSchool.source && candidate.schoolCode === currentSchool.schoolCode;
 }
 
 function getMotionProps(reducedMotion: boolean, delay = 0) {
@@ -325,168 +438,231 @@ type MainDashboardProps = {
 function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderboardName, onEditProfile, onOpenHistory, onSignOut }: MainDashboardProps) {
   const reducedMotion = useReducedMotion();
   const myRegionMatchRate = normalizePercent(dashboard.northstar.myRegionMatchRate);
+  const mySchoolMatchRate = normalizePercent(dashboard.northstar.mySchoolMatchRate ?? 0);
   const nationwideMatchRate = normalizePercent(dashboard.northstar.nationwideMatchRate);
   const remainXp = Math.max(dashboard.level.nextXp - dashboard.level.xp, 0);
+  const schoolLabel = getSchoolDisplayLabel(dashboard.profile.school);
   const regionLabel = dashboard.profile.region.name ?? '지역 미설정';
-  const regionParts = regionLabel.split(' ').filter(Boolean);
-  const regionShort = regionParts.length > 0 ? regionParts[regionParts.length - 1] : '내 지역';
+  const profileLocationLabel = getProfileLocationLabel(dashboard.profile);
+  const regionShort = dashboard.profile.school
+    ? regionLabel
+    : (() => {
+        const regionParts = regionLabel.split(' ').filter(Boolean);
+        return regionParts.length > 0 ? regionParts[regionParts.length - 1] : '내 지역';
+      })();
+  const schoolSampleTopics = Math.max(0, dashboard.northstar.schoolSampleTopics);
+  const schoolMinimumSample = Math.max(1, dashboard.northstar.schoolMinimumSample);
+  const schoolEligible = Boolean(dashboard.profile.school) && dashboard.northstar.schoolEligible;
+  const [activeMatchTab, setActiveMatchTab] = useState<'school' | 'region'>(schoolEligible ? 'school' : 'region');
+  const effectiveMatchTab: 'school' | 'region' = schoolEligible ? activeMatchTab : 'region';
+  const activeTargetLabel = effectiveMatchTab === 'school' ? schoolLabel ?? '내 학교' : regionShort;
+  const activeMatchRate = effectiveMatchTab === 'school' ? mySchoolMatchRate : myRegionMatchRate;
 
   return (
     <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
-      <header className="mb-8 pl-1">
-        <h1 className="text-3xl font-bold tracking-tight">마이페이지</h1>
+      <header className="mb-8 pl-1 lg:mb-10 lg:flex lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight lg:text-[40px]">마이페이지</h1>
+          <p className="mt-2 hidden text-sm text-white/58 lg:block">활동 기록, 일치율, 프로필 설정을 한 번에 관리할 수 있어요.</p>
+        </div>
+        <p className="hidden rounded-full border border-white/12 bg-white/5 px-4 py-2 text-xs font-semibold text-white/66 lg:inline-flex">
+          가입일 {formatKoreanDateTime(dashboard.profile.joinedAt)}
+        </p>
       </header>
 
-      <MainAnimatedSection delay={0.1}>
-        <div className="mb-10 flex flex-col items-center">
-          <div className="relative mb-4">
-            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#1C1C1E] text-[40px] shadow-lg">
-              {dashboard.profile.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={dashboard.profile.avatarUrl} alt="프로필" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                getAvatarEmoji(dashboard.profile.avatarPreset)
-              )}
-            </div>
-            <div className="absolute -bottom-2 -right-2 rounded-full border-2 border-black bg-[#FF5C00] px-3 py-1 text-[11px] font-bold text-white shadow-md">
-              {tierLabel(dashboard.level.tier)}
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold">{dashboard.profile.name}</h2>
-          <p className={`mt-1 text-sm ${TEXT_SECONDARY}`}>
-            @{dashboard.profile.username} · {regionLabel}
-          </p>
+      <div className="space-y-8 lg:space-y-10">
+        <div className="space-y-8 lg:grid lg:grid-cols-[minmax(0,330px)_minmax(0,1fr)] lg:gap-6 lg:space-y-0">
+          <MainAnimatedSection delay={0.1}>
+            <section className={`${CARD_BG} rounded-[32px] p-6 shadow-[0_12px_28px_rgba(0,0,0,0.26)] lg:sticky lg:top-6`}>
+              <div className="flex flex-col items-center">
+                <div className="relative mb-4">
+                  <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#1C1C1E] text-[40px] shadow-lg">
+                    {dashboard.profile.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={dashboard.profile.avatarUrl} alt="프로필" className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      getAvatarEmoji(dashboard.profile.avatarPreset)
+                    )}
+                  </div>
+                  <div className="absolute -bottom-2 -right-2 rounded-full border-2 border-black bg-[#FF5C00] px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                    {tierLabel(dashboard.level.tier)}
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold">{dashboard.profile.name}</h2>
+                <p className={`mt-1 text-sm ${TEXT_SECONDARY}`}>
+                  @{dashboard.profile.username} · {profileLocationLabel}
+                </p>
 
-          <button
-            type="button"
-            onClick={onEditProfile}
-            className="mt-3.5 rounded-full bg-[#2C2C2E] px-4 py-1.5 text-[13px] font-medium text-white transition-colors active:scale-95 hover:bg-[#3A3A3C]"
-          >
-            프로필 편집
-          </button>
+                <button
+                  type="button"
+                  onClick={onEditProfile}
+                  className="mt-3.5 rounded-full bg-[#2C2C2E] px-4 py-1.5 text-[13px] font-medium text-white transition-colors active:scale-95 hover:bg-[#3A3A3C]"
+                >
+                  프로필 편집
+                </button>
 
-          <div className="mt-6 w-full max-w-[240px]">
-            <div className="mb-1.5 flex justify-between text-[11px] font-semibold text-[#8E8E93]">
-              <span>{formatNumber(dashboard.level.xp)} XP</span>
-              <span>{formatNumber(dashboard.level.nextXp)} XP</span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#2C2C2E]">
-              <motion.div
-                className="h-full rounded-full bg-[#FF5C00]"
-                initial={{ width: 0 }}
-                animate={{ width: `${dashboard.level.progressPercent}%` }}
-                transition={{ duration: reducedMotion ? 0 : 1, delay: reducedMotion ? 0 : 0.3 }}
-              />
-            </div>
-            <p className="mt-2 text-center text-[11px] text-[#8E8E93]">다음 티어까지 {formatNumber(remainXp)} XP</p>
-          </div>
-        </div>
-      </MainAnimatedSection>
-
-      <MainAnimatedSection delay={0.2}>
-        <div className="mb-10 flex items-center justify-between px-2">
-          <div className="flex-1 text-center">
-            <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>총 투표수</p>
-            <p className="text-xl font-bold">{formatNumber(dashboard.stats.totalVotes)}</p>
-          </div>
-          <div className="h-8 w-px bg-[#2C2C2E]" />
-          <div className="flex-1 text-center">
-            <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>게임점수</p>
-            <p className="text-xl font-bold">{formatNumber(dashboard.stats.totalGameScore)}</p>
-          </div>
-          <div className="h-8 w-px bg-[#2C2C2E]" />
-          <div className="flex-1 text-center">
-            <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>지역 순위</p>
-            <p className="text-xl font-bold text-[#FF5C00]">{dashboard.stats.gameRankRegionBattle}위</p>
-          </div>
-        </div>
-      </MainAnimatedSection>
-
-      <MainAnimatedSection delay={0.3}>
-        <div className={`${CARD_BG} mb-8 rounded-[32px] p-7 shadow-sm`}>
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-bold">동네 대세 지수</h3>
-            <span className="rounded-full bg-[#FF5C00]/10 px-2.5 py-1 text-[11px] font-semibold text-[#FF5C00]">일치율 분석</span>
-          </div>
-
-          <p className={`${TEXT_SECONDARY} mb-6 text-sm leading-relaxed`}>
-            나의 선택이 사람들과 얼마나 비슷할까요?
-            <br />
-            우리 동네 사람들과의 일치율을 확인해보세요.
-          </p>
-
-          <MatchRateGauge value={myRegionMatchRate} label={`${regionShort} 일치율`} />
-
-          <div className="my-8 h-px w-full bg-[#2C2C2E]" />
-
-          <div className="space-y-7">
-            <h4 className="mb-2 text-center text-[13px] font-bold text-white/90">100명 중 몇 명이 나와 같을까?</h4>
-
-            <div>
-              <div className="mb-2 flex items-end justify-between">
-                <span className="text-xs font-medium text-[#8E8E93]">전국 평균</span>
-                <span className="text-xs font-bold text-[#8E8E93]">{Math.round(nationwideMatchRate)}명</span>
+                <div className="mt-6 w-full">
+                  <div className="mb-1.5 flex justify-between text-[11px] font-semibold text-[#8E8E93]">
+                    <span>{formatNumber(dashboard.level.xp)} XP</span>
+                    <span>{formatNumber(dashboard.level.nextXp)} XP</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#2C2C2E]">
+                    <motion.div
+                      className="h-full rounded-full bg-[#FF5C00]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${dashboard.level.progressPercent}%` }}
+                      transition={{ duration: reducedMotion ? 0 : 1, delay: reducedMotion ? 0 : 0.3 }}
+                    />
+                  </div>
+                  <p className="mt-2 text-center text-[11px] text-[#8E8E93]">다음 티어까지 {formatNumber(remainXp)} XP</p>
+                </div>
               </div>
-              <WaffleChart value={nationwideMatchRate} colorClass="bg-white/20" />
-            </div>
+            </section>
+          </MainAnimatedSection>
 
-            <div>
-              <div className="mb-2 flex items-end justify-between">
-                <span className="text-xs font-medium text-[#FF5C00]">{regionLabel}</span>
-                <span className="text-xs font-bold text-[#FF5C00]">{Math.round(myRegionMatchRate)}명</span>
+          <div className="space-y-8">
+            <MainAnimatedSection delay={0.2}>
+              <section className={`${CARD_BG} rounded-[28px] px-4 py-5 md:px-6`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex-1 text-center">
+                    <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>총 투표수</p>
+                    <p className="text-xl font-bold lg:text-2xl">{formatNumber(dashboard.stats.totalVotes)}</p>
+                  </div>
+                  <div className="h-8 w-px bg-[#2C2C2E]" />
+                  <div className="flex-1 text-center">
+                    <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>게임점수</p>
+                    <p className="text-xl font-bold lg:text-2xl">{formatNumber(dashboard.stats.totalGameScore)}</p>
+                  </div>
+                  <div className="h-8 w-px bg-[#2C2C2E]" />
+                  <div className="flex-1 text-center">
+                    <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>지역 순위</p>
+                    <p className="text-xl font-bold text-[#FF5C00] lg:text-2xl">{dashboard.stats.gameRankRegionBattle}위</p>
+                  </div>
+                </div>
+              </section>
+            </MainAnimatedSection>
+
+            <MainAnimatedSection delay={0.3}>
+              <section className={`${CARD_BG} rounded-[32px] p-7 shadow-sm`}>
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">동네 대세 지수</h3>
+                  <span className="rounded-full bg-[#FF5C00]/10 px-2.5 py-1 text-[11px] font-semibold text-[#FF5C00]">일치율 분석</span>
+                </div>
+
+                <p className={`${TEXT_SECONDARY} mb-6 text-sm leading-relaxed`}>
+                  나의 선택이 사람들과 얼마나 비슷할까요?
+                  <br />
+                  우리 동네 사람들과의 일치율을 확인해보세요.
+                </p>
+
+                {dashboard.profile.school ? (
+                  <div className="mb-3">
+                    {schoolEligible ? (
+                      <div className="inline-flex rounded-full border border-white/12 bg-white/5 p-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveMatchTab('school')}
+                          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                            activeMatchTab === 'school' ? 'bg-[#FF5C00] text-white' : 'text-white/72 hover:text-white'
+                          }`}
+                        >
+                          학교
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveMatchTab('region')}
+                          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                            activeMatchTab === 'region' ? 'bg-[#FF5C00] text-white' : 'text-white/72 hover:text-white'
+                          }`}
+                        >
+                          지역
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-[#ffcc99]">
+                        학교 표본(비교 가능 주제) {schoolMinimumSample}개 미만으로 학교 그래프는 표시되지 않습니다. (현재 {schoolSampleTopics}개)
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+
+                <MatchRateGauge value={activeMatchRate} label={`${activeTargetLabel} 일치율`} />
+
+                <div className="my-8 h-px w-full bg-[#2C2C2E]" />
+
+                <div className="space-y-7 lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0">
+                  <div>
+                    <h4 className="mb-2 text-center text-[13px] font-bold text-white/90">전국 평균</h4>
+                    <div className="mb-2 flex items-end justify-between">
+                      <span className="text-xs font-medium text-[#8E8E93]">100명 기준</span>
+                      <span className="text-xs font-bold text-[#8E8E93]">{Math.round(nationwideMatchRate)}명</span>
+                    </div>
+                    <WaffleChart value={nationwideMatchRate} colorClass="bg-white/20" />
+                  </div>
+
+                  <div>
+                    <h4 className="mb-2 text-center text-[13px] font-bold text-white/90">{activeTargetLabel}</h4>
+                    <div className="mb-2 flex items-end justify-between">
+                      <span className="text-xs font-medium text-[#FF5C00]">{effectiveMatchTab === 'school' ? schoolLabel ?? '내 학교' : regionLabel}</span>
+                      <span className="text-xs font-bold text-[#FF5C00]">{Math.round(activeMatchRate)}명</span>
+                    </div>
+                    <WaffleChart value={activeMatchRate} colorClass="bg-[#FF5C00] shadow-[0_0_10px_rgba(255,92,0,0.4)]" />
+                  </div>
+                </div>
+              </section>
+            </MainAnimatedSection>
+          </div>
+        </div>
+
+        <MainAnimatedSection delay={0.4}>
+          <section>
+            <h3 className="mb-2 ml-4 text-[13px] font-semibold uppercase tracking-wider text-[#8E8E93]">설정 및 기록</h3>
+            <div className={`${CARD_BG} overflow-hidden rounded-3xl`}>
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="flex w-full cursor-pointer items-center justify-between border-b border-[#2C2C2E] p-4 px-5 text-left transition-colors hover:bg-white/5"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">📜</div>
+                  <span className="text-[15px] font-medium">투표 히스토리</span>
+                </div>
+                <span className="text-lg text-[#8E8E93]">›</span>
+              </button>
+
+              <div className="flex items-center justify-between border-b border-[#2C2C2E] p-4 px-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">👁️</div>
+                  <span className="text-[15px] font-medium">리더보드 이름 공개</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleLeaderboardName}
+                  aria-pressed={privacyShowLeaderboardName}
+                  className={`relative h-7 w-12 rounded-full transition-colors ${privacyShowLeaderboardName ? 'bg-[#FF5C00]' : 'bg-[#2C2C2E]'}`}
+                >
+                  <motion.div
+                    className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm"
+                    animate={{ left: privacyShowLeaderboardName ? '24px' : '4px' }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  />
+                </button>
               </div>
-              <WaffleChart value={myRegionMatchRate} colorClass="bg-[#FF5C00] shadow-[0_0_10px_rgba(255,92,0,0.4)]" />
-            </div>
-          </div>
-        </div>
-      </MainAnimatedSection>
 
-      <MainAnimatedSection delay={0.4}>
-        <h3 className="mb-2 ml-4 text-[13px] font-semibold uppercase tracking-wider text-[#8E8E93]">설정 및 기록</h3>
-        <div className={`${CARD_BG} overflow-hidden rounded-3xl`}>
-          <button
-            type="button"
-            onClick={onOpenHistory}
-            className="flex w-full cursor-pointer items-center justify-between border-b border-[#2C2C2E] p-4 px-5 text-left transition-colors hover:bg-white/5"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">📜</div>
-              <span className="text-[15px] font-medium">투표 히스토리</span>
+              <button
+                type="button"
+                onClick={() => void onSignOut()}
+                className="flex w-full cursor-pointer items-center justify-between p-4 px-5 text-left text-[#FF3B30] transition-colors hover:bg-white/5"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF3B30]/10 text-sm">👋</div>
+                  <span className="text-[15px] font-medium">로그아웃</span>
+                </div>
+              </button>
             </div>
-            <span className="text-lg text-[#8E8E93]">›</span>
-          </button>
-
-          <div className="flex items-center justify-between border-b border-[#2C2C2E] p-4 px-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">👁️</div>
-              <span className="text-[15px] font-medium">리더보드 이름 공개</span>
-            </div>
-            <button
-              type="button"
-              onClick={onToggleLeaderboardName}
-              aria-pressed={privacyShowLeaderboardName}
-              className={`relative h-7 w-12 rounded-full transition-colors ${privacyShowLeaderboardName ? 'bg-[#FF5C00]' : 'bg-[#2C2C2E]'}`}
-            >
-              <motion.div
-                className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm"
-                animate={{ left: privacyShowLeaderboardName ? '24px' : '4px' }}
-                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-              />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void onSignOut()}
-            className="flex w-full cursor-pointer items-center justify-between p-4 px-5 text-left text-[#FF3B30] transition-colors hover:bg-white/5"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF3B30]/10 text-sm">👋</div>
-              <span className="text-[15px] font-medium">로그아웃</span>
-            </div>
-          </button>
-        </div>
-      </MainAnimatedSection>
+          </section>
+        </MainAnimatedSection>
+      </div>
     </div>
   );
 }
@@ -503,10 +679,11 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
     () => [...history.votes].sort((a, b) => Date.parse(b.votedAt) - Date.parse(a.votedAt)),
     [history.votes],
   );
+  const fallbackLocationLabel = getProfileLocationLabel(dashboard.profile);
 
   return (
-    <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
-      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between">
+    <div className={`${APP_BG} ${TEXT_PRIMARY} mx-auto w-full max-w-[960px]`}>
+      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBack}
@@ -515,6 +692,9 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
         >
           <ChevronLeft size={24} />
         </button>
+        <div className="min-w-0 flex-1 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">History</p>
+        </div>
         <div className="h-11 w-11" aria-hidden />
       </motion.header>
 
@@ -527,14 +707,14 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
         <p className="mt-2 text-sm text-[color:var(--my-text-muted)]">내 최근 투표 기록입니다.</p>
       </motion.section>
 
-      <section className="space-y-3" aria-label="투표 히스토리 목록">
+      <section className="grid gap-3 xl:grid-cols-2" aria-label="투표 히스토리 목록">
         {sortedVotes.length === 0 ? (
-          <div className="rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-5 text-sm text-[color:var(--my-text-muted)]">
+          <div className="rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-5 text-sm text-[color:var(--my-text-muted)] xl:col-span-2">
             아직 투표 기록이 없습니다.
           </div>
         ) : (
           sortedVotes.map((vote, index) => {
-            const regionLabel = vote.region?.name ?? dashboard.profile.region.name ?? '지역 미설정';
+            const regionLabel = vote.region?.name ?? fallbackLocationLabel;
             const motionProps = getMotionProps(reducedMotion, reducedMotion ? 0 : Math.min(index, 6) * 0.04);
 
             return (
@@ -566,6 +746,15 @@ type EditProfileViewProps = {
   dashboard: DashboardResponse;
   nicknameInput: string;
   usernameInput: string;
+  schoolQuery: string;
+  schoolResults: SchoolSearchItem[];
+  isSchoolSearching: boolean;
+  highlightedSchoolIndex: number;
+  isSchoolListVisible: boolean;
+  selectedSchoolCandidate: SchoolSearchItem | null;
+  selectedSchoolSlot: SchoolSlotType;
+  mainSchoolSlotDraft: SchoolSlotType | null;
+  schoolResultsListRef: React.RefObject<HTMLDivElement | null>;
   isSaveDirty: boolean;
   isSavingAny: boolean;
   isResolvingRegion: boolean;
@@ -573,6 +762,13 @@ type EditProfileViewProps = {
   error: string | null;
   onBack: () => void;
   onNicknameChange: (value: string) => void;
+  onSchoolQueryChange: (value: string) => void;
+  onSchoolInputKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  onSelectSchoolCandidate: (school: SchoolSearchItem) => void;
+  onSchoolResultHover: (index: number) => void;
+  onClearSchoolCandidate: () => void;
+  onSelectSchoolSlot: (slot: SchoolSlotType) => void;
+  onSelectMainSchoolSlot: (slot: SchoolSlotType) => void;
   onSaveAll: () => Promise<void>;
   onResolveCurrentRegion: () => Promise<void>;
   reducedMotion: boolean;
@@ -582,6 +778,15 @@ function EditProfileView({
   dashboard,
   nicknameInput,
   usernameInput,
+  schoolQuery,
+  schoolResults,
+  isSchoolSearching,
+  highlightedSchoolIndex,
+  isSchoolListVisible,
+  selectedSchoolCandidate,
+  selectedSchoolSlot,
+  mainSchoolSlotDraft,
+  schoolResultsListRef,
   isSaveDirty,
   isSavingAny,
   isResolvingRegion,
@@ -589,15 +794,30 @@ function EditProfileView({
   error,
   onBack,
   onNicknameChange,
+  onSchoolQueryChange,
+  onSchoolInputKeyDown,
+  onSelectSchoolCandidate,
+  onSchoolResultHover,
+  onClearSchoolCandidate,
+  onSelectSchoolSlot,
+  onSelectMainSchoolSlot,
   onSaveAll,
   onResolveCurrentRegion,
   reducedMotion,
 }: EditProfileViewProps) {
-  const regionLabel = dashboard.profile.region.name ?? '미설정';
+  const currentLocationLabel = getProfileLocationLabel(dashboard.profile);
+  const currentSlotSchool = dashboard.profile.schoolPool[selectedSchoolSlot];
+  const currentSlotSchoolLabel = getSchoolDisplayLabel(currentSlotSchool) ?? '미설정';
+  const availableMainSlots = SCHOOL_SLOT_META.filter(({ slot }) => {
+    if (slot === selectedSchoolSlot && selectedSchoolCandidate) {
+      return true;
+    }
+    return Boolean(dashboard.profile.schoolPool[slot]);
+  });
 
   return (
-    <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
-      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between">
+    <div className={`${APP_BG} ${TEXT_PRIMARY} mx-auto w-full max-w-[940px]`}>
+      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBack}
@@ -606,10 +826,13 @@ function EditProfileView({
         >
           <ChevronLeft size={24} />
         </button>
+        <div className="min-w-0 flex-1 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">Profile Edit</p>
+        </div>
         <div className="h-11 w-11" aria-hidden />
       </motion.header>
 
-      <motion.section {...getMotionProps(reducedMotion, 0.02)} className="mb-7">
+      <motion.section {...getMotionProps(reducedMotion, 0.02)} className="mb-7 lg:mb-8">
         <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-[color:var(--my-text-main)]">
           프로필 정보를
           <br />
@@ -620,7 +843,7 @@ function EditProfileView({
         {error ? <p className="mt-2 text-xs text-[#ffb4b4]">{error}</p> : null}
       </motion.section>
 
-      <div className="space-y-4">
+      <div className="space-y-4 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
         <motion.section
           {...getMotionProps(reducedMotion, 0.05)}
           className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
@@ -655,8 +878,8 @@ function EditProfileView({
           className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
         >
           <div className="mb-4 flex items-center justify-between gap-3">
-            <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">내 동네</span>
-            <span className="text-sm font-bold text-white/84">{regionLabel}</span>
+            <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">현재 지역/학교</span>
+            <span className="text-sm font-bold text-white/84">{currentLocationLabel}</span>
           </div>
           <button
             type="button"
@@ -669,17 +892,150 @@ function EditProfileView({
             <MapPin size={20} />
             {isResolvingRegion ? '위치 확인 중...' : '현재 위치로 찾기'}
           </button>
+
+          <div className="mt-3 rounded-xl border border-white/12 bg-white/6 px-3 py-2">
+            <p className="text-xs text-[color:var(--my-text-subtle)]">학교 수정 횟수</p>
+            <p className="mt-1 text-sm font-semibold text-white/90">
+              {dashboard.profile.schoolEdit.used}/{dashboard.profile.schoolEdit.limit}
+              <span className="ml-2 text-xs font-medium text-[#ffcc99]">남은 {dashboard.profile.schoolEdit.remaining}회</span>
+            </p>
+          </div>
+
+          <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
+            <p className="mb-2 text-sm font-semibold text-[color:var(--my-text-muted)]">학교 슬롯</p>
+            <div className="grid grid-cols-2 gap-2">
+              {SCHOOL_SLOT_META.map((item) => {
+                const isActive = selectedSchoolSlot === item.slot;
+                const slotSchool = dashboard.profile.schoolPool[item.slot];
+                return (
+                  <button
+                    key={item.slot}
+                    type="button"
+                    onClick={() => onSelectSchoolSlot(item.slot)}
+                    className={`inline-flex h-11 items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
+                      isActive
+                        ? 'border-[#ff9f0a88] bg-[#ff6b0024] text-[#ffd5ab]'
+                        : 'border-white/14 bg-white/8 text-white/76 hover:bg-white/12'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span className={`h-2 w-2 rounded-full ${slotSchool ? 'bg-[#ff9f0a]' : 'bg-white/25'}`} />
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/12 bg-white/5 px-3 py-2">
+              <p className="text-[11px] text-[color:var(--my-text-subtle)]">{getSchoolSlotLabel(selectedSchoolSlot)} 현재 학교</p>
+              <p className="mt-1 truncate text-sm font-semibold text-white/88">{currentSlotSchoolLabel}</p>
+            </div>
+
+            <label htmlFor="my-school-search-input" className="block">
+              <span className="mb-2 mt-3 block text-sm font-semibold text-[color:var(--my-text-muted)]">
+                {getSchoolSlotLabel(selectedSchoolSlot)} 검색
+              </span>
+              <input
+                id="my-school-search-input"
+                value={schoolQuery}
+                onKeyDown={onSchoolInputKeyDown}
+                onChange={(event) => onSchoolQueryChange(event.target.value)}
+                placeholder="학교명을 입력하세요"
+                autoComplete="off"
+                className="h-12 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66] focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+              />
+            </label>
+
+            {isSchoolListVisible ? (
+              <div
+                ref={schoolResultsListRef}
+                className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+              >
+                {isSchoolSearching ? (
+                  <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                ) : schoolResults.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                ) : (
+                  schoolResults.map((school, index) => (
+                    <button
+                      key={`${school.source}:${school.schoolCode}`}
+                      data-school-index={index}
+                      type="button"
+                      onMouseEnter={() => onSchoolResultHover(index)}
+                      onClick={() => onSelectSchoolCandidate(school)}
+                      className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
+                        index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <p className="font-semibold">{school.schoolName}</p>
+                      <p className="mt-0.5 text-[11px] text-white/60">
+                        {school.sigunguName ?? school.sidoName ?? '-'}
+                        {school.schoolLevel ? ` · ${school.schoolLevel}` : ''}
+                        {school.campusType ? ` · ${school.campusType}` : ''}
+                      </p>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+
+            {selectedSchoolCandidate ? (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-medium text-[#ffcc99]">
+                  선택됨({getSchoolSlotLabel(selectedSchoolSlot)}): {selectedSchoolCandidate.schoolName}
+                </p>
+                <button
+                  type="button"
+                  onClick={onClearSchoolCandidate}
+                  className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                >
+                  학교 선택 해제
+                </button>
+              </div>
+            ) : null}
+
+            <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
+              <p className="mb-2 text-sm font-semibold text-[color:var(--my-text-muted)]">메인 활동학교</p>
+              {availableMainSlots.length > 0 ? (
+                <div className="space-y-2">
+                  {availableMainSlots.map(({ slot, label }) => {
+                    const isActive = mainSchoolSlotDraft === slot;
+                    const slotSchool =
+                      slot === selectedSchoolSlot && selectedSchoolCandidate
+                        ? selectedSchoolCandidate.schoolName
+                        : getSchoolDisplayLabel(dashboard.profile.schoolPool[slot]) ?? '미설정';
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => onSelectMainSchoolSlot(slot)}
+                        className={`flex h-11 w-full items-center justify-between rounded-xl border px-3 text-sm transition ${
+                          isActive
+                            ? 'border-[#ff9f0a88] bg-[#ff6b0024] text-[#ffd5ab]'
+                            : 'border-white/14 bg-white/8 text-white/80 hover:bg-white/12'
+                        }`}
+                      >
+                        <span className="font-semibold">{label}</span>
+                        <span className="truncate pl-3 text-xs text-white/70">{slotSchool}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-white/60">먼저 슬롯에 학교를 등록해 주세요.</p>
+              )}
+            </div>
+          </div>
         </motion.section>
       </div>
 
-      <motion.div {...getMotionProps(reducedMotion, 0.1)} className="mt-6">
+      <motion.div {...getMotionProps(reducedMotion, 0.1)} className="mt-6 lg:flex lg:justify-end">
         <button
           type="button"
           onClick={() => void onSaveAll()}
           disabled={!isSaveDirty || isSavingAny}
           aria-disabled={!isSaveDirty || isSavingAny}
           aria-label="프로필 저장하기"
-          className="inline-flex h-14 w-full items-center justify-center rounded-[18px] border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] text-lg font-bold text-white shadow-[0_10px_28px_rgba(255,107,0,0.28)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-14 w-full items-center justify-center rounded-[18px] border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] text-lg font-bold text-white shadow-[0_10px_28px_rgba(255,107,0,0.28)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60 lg:w-[240px]"
         >
           {isSavingAny ? '저장 중...' : '저장하기'}
         </button>
@@ -758,10 +1114,17 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
 function Footer() {
   return (
     <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
-      <div className="mx-auto w-full max-w-[430px] px-4 pb-4 pt-6 text-white/72" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}>
-        <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-        <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-        <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+      <div
+        className="mx-auto w-full max-w-[1180px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+      >
+        <div>
+          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+        </div>
+        <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
+          문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
+        </p>
       </div>
     </footer>
   );
@@ -782,7 +1145,7 @@ function PolicyModal({ isOpen, pendingRegion, onKeepSchool, onClearSchool, onClo
 
   return (
     <div className="fixed inset-0 z-[160] flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="region-policy-title">
-      <div className="w-full max-w-[420px] rounded-[24px] border border-[color:var(--my-border)] bg-[rgba(14,20,30,0.94)] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
+      <div className="w-full max-w-[520px] rounded-[24px] border border-[color:var(--my-border)] bg-[rgba(14,20,30,0.94)] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.38)] backdrop-blur-2xl md:p-5">
         <h3 id="region-policy-title" className="text-[17px] font-bold text-white">
           지역 업데이트 방식 선택
         </h3>
@@ -828,6 +1191,7 @@ export default function MyPage() {
   const reducedMotion = useReducedMotion();
 
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
+  const schoolResultsListRef = useRef<HTMLDivElement | null>(null);
   const dockTouchStartYRef = useRef<number | null>(null);
   const dockTouchLastYRef = useRef<number | null>(null);
   const dockTouchMovedRef = useRef(false);
@@ -840,6 +1204,13 @@ export default function MyPage() {
 
   const [nicknameInput, setNicknameInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
+  const [schoolQuery, setSchoolQuery] = useState('');
+  const [schoolResults, setSchoolResults] = useState<SchoolSearchItem[]>([]);
+  const [isSchoolSearching, setIsSchoolSearching] = useState(false);
+  const [highlightedSchoolIndex, setHighlightedSchoolIndex] = useState(0);
+  const [selectedSchoolCandidate, setSelectedSchoolCandidate] = useState<SchoolSearchItem | null>(null);
+  const [selectedSchoolSlot, setSelectedSchoolSlot] = useState<SchoolSlotType>('middle');
+  const [mainSchoolSlotDraft, setMainSchoolSlotDraft] = useState<SchoolSlotType | null>(null);
 
   const [privacyShowLeaderboardName, setPrivacyShowLeaderboardName] = useState(true);
   const [privacyShowRegion, setPrivacyShowRegion] = useState(false);
@@ -882,7 +1253,7 @@ export default function MyPage() {
 
     try {
       const [dashboardRes, historyRes] = await Promise.all([
-        fetch('/api/me/dashboard', {
+        fetch('/api/me/dashboard?includeDummy=1', {
           cache: 'no-store',
           headers: { Authorization: `Bearer ${token}` },
         }),
@@ -946,6 +1317,22 @@ export default function MyPage() {
     setPrivacyShowLeaderboardName(dashboard.privacy.showLeaderboardName);
     setPrivacyShowRegion(dashboard.privacy.showRegion);
     setPrivacyShowActivityHistory(dashboard.privacy.showActivityHistory);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setIsSchoolSearching(false);
+    setHighlightedSchoolIndex(0);
+    setSelectedSchoolCandidate(null);
+    const fallbackMainSlot =
+      dashboard.profile.mainSchoolSlot ??
+      SCHOOL_SLOT_META.find(({ slot }) => Boolean(dashboard.profile.schoolPool[slot]))?.slot ??
+      null;
+    setMainSchoolSlotDraft(fallbackMainSlot);
+    setSelectedSchoolSlot((prev) => {
+      if (dashboard.profile.schoolPool[prev]) {
+        return prev;
+      }
+      return fallbackMainSlot ?? 'middle';
+    });
   }, [dashboard]);
 
   const isProfileDirty = useMemo(() => {
@@ -953,8 +1340,14 @@ export default function MyPage() {
       return false;
     }
 
-    return nicknameInput.trim() !== (dashboard.profile.nickname ?? '');
-  }, [dashboard, nicknameInput]);
+    const isNicknameDirty = nicknameInput.trim() !== (dashboard.profile.nickname ?? '');
+    const currentSlotSchool = dashboard.profile.schoolPool[selectedSchoolSlot];
+    const isSchoolDirty = selectedSchoolCandidate
+      ? !isSameSchoolSelection(selectedSchoolCandidate, currentSlotSchool)
+      : false;
+    const isMainSchoolSlotDirty = (mainSchoolSlotDraft ?? null) !== (dashboard.profile.mainSchoolSlot ?? null);
+    return isNicknameDirty || isSchoolDirty || isMainSchoolSlotDirty;
+  }, [dashboard, mainSchoolSlotDraft, nicknameInput, selectedSchoolCandidate, selectedSchoolSlot]);
 
   const isPrivacyDirty = useMemo(() => {
     if (!dashboard) {
@@ -970,6 +1363,209 @@ export default function MyPage() {
 
   const isSettingsDirty = isEditRoute ? isProfileDirty : isProfileDirty || isPrivacyDirty;
   const isSavingAny = isSavingProfile || isSavingPrivacy;
+
+  const confirmLeaveWithUnsavedChanges = useCallback(() => {
+    if (!isSettingsDirty) {
+      return true;
+    }
+    if (typeof window === 'undefined') {
+      return true;
+    }
+    return window.confirm(UNSAVED_CHANGES_CONFIRM_MESSAGE);
+  }, [isSettingsDirty]);
+
+  const runWithLeaveConfirmation = useCallback(
+    (action: () => void) => {
+      if (!confirmLeaveWithUnsavedChanges()) {
+        return;
+      }
+      action();
+    },
+    [confirmLeaveWithUnsavedChanges],
+  );
+
+  useEffect(() => {
+    if (!isSettingsDirty) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isSettingsDirty]);
+  const isSchoolListVisible = useMemo(() => {
+    if (!isEditRoute) {
+      return false;
+    }
+
+    const trimmedQuery = schoolQuery.trim();
+    if (!trimmedQuery) {
+      return false;
+    }
+
+    if (selectedSchoolCandidate && trimmedQuery === selectedSchoolCandidate.schoolName) {
+      return false;
+    }
+
+    return true;
+  }, [isEditRoute, schoolQuery, selectedSchoolCandidate]);
+
+  useEffect(() => {
+    if (!isEditRoute || !isSchoolListVisible) {
+      setSchoolResults([]);
+      setIsSchoolSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setIsSchoolSearching(true);
+      try {
+        const response = await fetch(
+          `/api/schools/search?q=${encodeURIComponent(schoolQuery.trim())}&level=all&limit=12`,
+          {
+            cache: 'no-store',
+            signal: controller.signal,
+          },
+        );
+        const json = (await response.json()) as { items?: SchoolSearchItem[] };
+        if (!response.ok) {
+          setSchoolResults([]);
+          return;
+        }
+        setSchoolResults(json.items ?? []);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        setSchoolResults([]);
+      } finally {
+        setIsSchoolSearching(false);
+      }
+    }, 260);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [isEditRoute, isSchoolListVisible, schoolQuery]);
+
+  useEffect(() => {
+    if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+      setHighlightedSchoolIndex(0);
+      return;
+    }
+
+    setHighlightedSchoolIndex((prev) => Math.min(Math.max(prev, 0), schoolResults.length - 1));
+  }, [isSchoolListVisible, isSchoolSearching, schoolResults.length]);
+
+  useEffect(() => {
+    if (!isSchoolListVisible || schoolResults.length === 0) {
+      return;
+    }
+
+    const listNode = schoolResultsListRef.current;
+    if (!listNode) {
+      return;
+    }
+
+    const targetButton = listNode.querySelector<HTMLButtonElement>(`[data-school-index="${highlightedSchoolIndex}"]`);
+    targetButton?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedSchoolIndex, isSchoolListVisible, schoolResults.length]);
+
+  const handleSchoolQueryChange = useCallback(
+    (value: string) => {
+      setSchoolQuery(value);
+      setHighlightedSchoolIndex(0);
+      setNotice(null);
+      if (selectedSchoolCandidate && value !== selectedSchoolCandidate.schoolName) {
+        setSelectedSchoolCandidate(null);
+      }
+    },
+    [selectedSchoolCandidate],
+  );
+
+  const handleSchoolInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
+        if (target) {
+          setSelectedSchoolCandidate(target);
+          setSchoolQuery(target.schoolName);
+          setSchoolResults([]);
+          setHighlightedSchoolIndex(0);
+          if (!mainSchoolSlotDraft) {
+            setMainSchoolSlotDraft(selectedSchoolSlot);
+          }
+          setNotice(null);
+        }
+      }
+    },
+    [highlightedSchoolIndex, isSchoolListVisible, isSchoolSearching, mainSchoolSlotDraft, schoolResults, selectedSchoolSlot],
+  );
+
+  const handleSelectSchoolCandidate = useCallback(
+    (school: SchoolSearchItem) => {
+      setSelectedSchoolCandidate(school);
+      setSchoolQuery(school.schoolName);
+      setSchoolResults([]);
+      setHighlightedSchoolIndex(0);
+      if (!mainSchoolSlotDraft) {
+        setMainSchoolSlotDraft(selectedSchoolSlot);
+      }
+      setNotice(null);
+    },
+    [mainSchoolSlotDraft, selectedSchoolSlot],
+  );
+
+  const handleSchoolResultHover = useCallback((index: number) => {
+    setHighlightedSchoolIndex(index);
+  }, []);
+
+  const handleSelectSchoolSlot = useCallback((slot: SchoolSlotType) => {
+    setSelectedSchoolSlot(slot);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setHighlightedSchoolIndex(0);
+    setSelectedSchoolCandidate(null);
+    setNotice(null);
+  }, []);
+
+  const handleSelectMainSchoolSlot = useCallback((slot: SchoolSlotType) => {
+    setMainSchoolSlotDraft(slot);
+    setNotice(null);
+  }, []);
+
+  const handleClearSchoolCandidate = useCallback(() => {
+    setSelectedSchoolCandidate(null);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setHighlightedSchoolIndex(0);
+    setNotice(null);
+  }, []);
 
   const submitProfilePatch = useCallback(
     async (payload: Record<string, unknown>, successMessage: string) => {
@@ -988,9 +1584,9 @@ export default function MyPage() {
         body: JSON.stringify(payload),
       });
 
-      const json = (await response.json()) as { error?: string };
+      const json = (await response.json()) as ApiErrorPayload;
       if (!response.ok) {
-        setNotice(json.error ?? '프로필 저장에 실패했습니다.');
+        setNotice(getApiErrorMessage(json, '프로필 저장에 실패했습니다.'));
         return false;
       }
 
@@ -1025,6 +1621,25 @@ export default function MyPage() {
         if (nicknameInput.trim() !== (dashboard.profile.nickname ?? '')) {
           profilePayload.nickname = nicknameInput.trim();
         }
+        const currentSlotSchool = dashboard.profile.schoolPool[selectedSchoolSlot];
+        if (selectedSchoolCandidate && !isSameSchoolSelection(selectedSchoolCandidate, currentSlotSchool)) {
+          profilePayload.schoolSlotUpdate = {
+            slotType: selectedSchoolSlot,
+            school: selectedSchoolCandidate,
+          };
+        }
+
+        const canUseMainSlot =
+          mainSchoolSlotDraft &&
+          (Boolean(dashboard.profile.schoolPool[mainSchoolSlotDraft]) ||
+            (mainSchoolSlotDraft === selectedSchoolSlot && Boolean(selectedSchoolCandidate)));
+        if (mainSchoolSlotDraft && mainSchoolSlotDraft !== dashboard.profile.mainSchoolSlot) {
+          if (!canUseMainSlot) {
+            setNotice('메인 활동학교로 지정할 슬롯에 학교를 먼저 등록해 주세요.');
+            return;
+          }
+          profilePayload.mainSchoolSlot = mainSchoolSlotDraft;
+        }
 
         if (Object.keys(profilePayload).length > 0) {
           const profileResponse = await fetch('/api/me/profile', {
@@ -1036,9 +1651,9 @@ export default function MyPage() {
             body: JSON.stringify(profilePayload),
           });
 
-          const profileJson = (await profileResponse.json()) as { error?: string };
+          const profileJson = (await profileResponse.json()) as ApiErrorPayload;
           if (!profileResponse.ok) {
-            setNotice(profileJson.error ?? '기본 정보 저장에 실패했습니다.');
+            setNotice(getApiErrorMessage(profileJson, '기본 정보 저장에 실패했습니다.'));
             return;
           }
         }
@@ -1058,9 +1673,9 @@ export default function MyPage() {
           }),
         });
 
-        const privacyJson = (await privacyResponse.json()) as { error?: string };
+        const privacyJson = (await privacyResponse.json()) as ApiErrorPayload;
         if (!privacyResponse.ok) {
-          setNotice(privacyJson.error ?? '공개 범위 저장에 실패했습니다.');
+          setNotice(getApiErrorMessage(privacyJson, '공개 범위 저장에 실패했습니다.'));
           return;
         }
       }
@@ -1079,66 +1694,47 @@ export default function MyPage() {
     isEditRoute,
     isSettingsDirty,
     loadMyData,
+    mainSchoolSlotDraft,
     nicknameInput,
     privacyShowActivityHistory,
     privacyShowLeaderboardName,
     privacyShowRegion,
+    selectedSchoolCandidate,
+    selectedSchoolSlot,
   ]);
 
   const handleScrollToSettings = useCallback(() => {
-    router.push('/my/edit');
-  }, [router]);
+    runWithLeaveConfirmation(() => {
+      router.push('/my/edit');
+    });
+  }, [router, runWithLeaveConfirmation]);
 
   const handleOpenHistory = useCallback(() => {
-    router.push('/my/history');
-  }, [router]);
+    runWithLeaveConfirmation(() => {
+      router.push('/my/history');
+    });
+  }, [router, runWithLeaveConfirmation]);
 
   const handleResolveCurrentRegion = useCallback(async () => {
-    if (typeof window === 'undefined' || !navigator.geolocation) {
-      setNotice('현재 위치를 사용할 수 없는 환경입니다.');
-      return;
-    }
-
     setIsResolvingRegion(true);
     setNotice(null);
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const response = await fetch('/api/location/reverse-region', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            }),
-          });
-
-          const json = (await response.json()) as ReverseRegionResponse;
-          if (!response.ok) {
-            setNotice(json.error ?? '현재 위치에서 지역을 찾지 못했습니다.');
-            setIsResolvingRegion(false);
-            return;
-          }
-
-          setPendingRegion(json);
-          setIsPolicyModalOpen(true);
-        } catch {
-          setNotice('현재 위치에서 지역을 찾지 못했습니다.');
-        } finally {
-          setIsResolvingRegion(false);
-        }
-      },
-      () => {
-        setNotice('위치 권한이 없거나 위치를 확인할 수 없습니다.');
-        setIsResolvingRegion(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12000,
-        maximumAge: 30000,
-      },
-    );
+    try {
+      const gpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
+      setPendingRegion({
+        sidoCode: gpsRegionInput.region.sidoCode,
+        sigunguCode: gpsRegionInput.region.sigunguCode,
+        sidoName: gpsRegionInput.region.sidoName,
+        sigunguName: gpsRegionInput.region.sigunguName,
+        provider: gpsRegionInput.region.provider,
+      });
+      setIsPolicyModalOpen(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '현재 위치에서 지역을 찾지 못했습니다.';
+      setNotice(message);
+    } finally {
+      setIsResolvingRegion(false);
+    }
   }, []);
 
   const handleApplyRegionPolicy = useCallback(
@@ -1171,31 +1767,39 @@ export default function MyPage() {
   const handleBottomTabClick = useCallback(
     (tab: 'home' | 'map' | 'game' | 'my') => {
       if (tab === 'home') {
-        router.push('/');
+        runWithLeaveConfirmation(() => {
+          router.push('/');
+        });
         return;
       }
       if (tab === 'map') {
-        router.push('/topics-map?openTopicEditor=1');
+        runWithLeaveConfirmation(() => {
+          router.push('/topics-map?openTopicEditor=1');
+        });
         return;
       }
       if (tab === 'game') {
-        router.push('/game');
+        runWithLeaveConfirmation(() => {
+          router.push('/game');
+        });
         return;
       }
       if (typeof window !== 'undefined' && window.location.pathname === '/my') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
-      router.push('/my');
-      if (typeof window !== 'undefined') {
-        window.setTimeout(() => {
-          if (window.location.pathname !== '/my') {
-            window.location.assign('/my');
-          }
-        }, 120);
-      }
+      runWithLeaveConfirmation(() => {
+        router.push('/my');
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => {
+            if (window.location.pathname !== '/my') {
+              window.location.assign('/my');
+            }
+          }, 120);
+        }
+      });
     },
-    [router],
+    [router, runWithLeaveConfirmation],
   );
 
   const handleBottomDockWheel = useCallback((event: WheelEvent<HTMLElement>) => {
@@ -1272,7 +1876,7 @@ export default function MyPage() {
     return () => observer.disconnect();
   }, []);
 
-  const bottomDockPaddingStyle = useMemo(() => ({ paddingBottom: `${Math.max(bottomDockHeight + 12, 120)}px` }), [bottomDockHeight]);
+  const mobileBottomDockPadding = useMemo(() => `${Math.max(bottomDockHeight + 12, 120)}px`, [bottomDockHeight]);
 
   if (isAuthLoading) {
     return (
@@ -1294,11 +1898,22 @@ export default function MyPage() {
     <div className="bg-[var(--my-bg)] text-white" style={PAGE_THEME_VARS}>
       <main className="relative h-screen w-full overflow-hidden bg-[var(--my-bg)] text-white">
         <div
-          className="mx-auto flex h-full w-full max-w-[430px] flex-col overflow-y-auto px-4 pb-4 pt-[calc(0.5rem+env(safe-area-inset-top))] md:max-w-[680px] md:px-6"
-          style={bottomDockPaddingStyle}
+          className="mx-auto flex h-full w-full max-w-[1280px] flex-col overflow-y-auto px-4 pb-[var(--my-mobile-dock-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:pb-8 md:pt-0 lg:px-10 lg:pt-0"
+          style={{ '--my-mobile-dock-padding': mobileBottomDockPadding } as CSSProperties}
         >
+          <DesktopTopHeader
+            containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+            links={[
+              { key: 'home', label: '홈', onClick: () => handleBottomTabClick('home') },
+              { key: 'map', label: '지도', onClick: () => handleBottomTabClick('map') },
+              { key: 'game', label: '게임', onClick: () => handleBottomTabClick('game') },
+              { key: 'my', label: 'MY', onClick: () => handleBottomTabClick('my'), active: true },
+            ]}
+            rightSlot={<AccountMenuButton />}
+          />
+
           {isLoading ? (
-            <section className="mt-3 space-y-3" aria-label="로딩 상태">
+            <section className="mt-3 space-y-3 md:mx-auto md:w-full md:max-w-[960px]" aria-label="로딩 상태">
               <div className="h-28 animate-pulse rounded-[22px] bg-white/10" />
               <div className="h-36 animate-pulse rounded-[22px] bg-white/10" />
               <div className="h-40 animate-pulse rounded-[22px] bg-white/10" />
@@ -1306,40 +1921,60 @@ export default function MyPage() {
           ) : dashboard && history ? (
             <>
               {isEditRoute ? (
-                <div className="pt-4" style={MAIN_VIEW_STYLE}>
+                <div className="pt-4 md:pt-2" style={MAIN_VIEW_STYLE}>
                   <EditProfileView
                     dashboard={dashboard}
                     nicknameInput={nicknameInput}
                     usernameInput={usernameInput}
+                    schoolQuery={schoolQuery}
+                    schoolResults={schoolResults}
+                    isSchoolSearching={isSchoolSearching}
+                    highlightedSchoolIndex={highlightedSchoolIndex}
+                    isSchoolListVisible={isSchoolListVisible}
+                    selectedSchoolCandidate={selectedSchoolCandidate}
+                    selectedSchoolSlot={selectedSchoolSlot}
+                    mainSchoolSlotDraft={mainSchoolSlotDraft}
+                    schoolResultsListRef={schoolResultsListRef}
                     isSaveDirty={isProfileDirty}
                     isSavingAny={isSavingAny}
                     isResolvingRegion={isResolvingRegion}
                     notice={notice}
                     error={error}
                     onBack={() => {
-                      router.push('/my');
+                      runWithLeaveConfirmation(() => {
+                        router.push('/my');
+                      });
                     }}
                     onNicknameChange={setNicknameInput}
+                    onSchoolQueryChange={handleSchoolQueryChange}
+                    onSchoolInputKeyDown={handleSchoolInputKeyDown}
+                    onSelectSchoolCandidate={handleSelectSchoolCandidate}
+                    onSchoolResultHover={handleSchoolResultHover}
+                    onClearSchoolCandidate={handleClearSchoolCandidate}
+                    onSelectSchoolSlot={handleSelectSchoolSlot}
+                    onSelectMainSchoolSlot={handleSelectMainSchoolSlot}
                     onSaveAll={handleSaveAll}
                     onResolveCurrentRegion={handleResolveCurrentRegion}
                     reducedMotion={Boolean(reducedMotion)}
                   />
                 </div>
               ) : isHistoryRoute ? (
-                <div className="pt-8" style={MAIN_VIEW_STYLE}>
+                <div className="pt-8 md:pt-3" style={MAIN_VIEW_STYLE}>
                   {notice ? <p className="text-xs text-[#ffd7b5]">{notice}</p> : null}
                   {error ? <p className="text-xs text-[#ffb4b4]">{error}</p> : null}
                   <HistoryView
                     dashboard={dashboard}
                     history={history}
                     onBack={() => {
-                      router.push('/my');
+                      runWithLeaveConfirmation(() => {
+                        router.push('/my');
+                      });
                     }}
                     reducedMotion={Boolean(reducedMotion)}
                   />
                 </div>
               ) : (
-                <div className="pt-8" style={MAIN_VIEW_STYLE}>
+                <div className="pt-8 md:pt-3" style={MAIN_VIEW_STYLE}>
                   {notice ? <p className="text-xs text-[#ffd7b5]">{notice}</p> : null}
                   {error ? <p className="text-xs text-[#ffb4b4]">{error}</p> : null}
                   <MainDashboard
@@ -1351,6 +1986,9 @@ export default function MyPage() {
                     onEditProfile={handleScrollToSettings}
                     onOpenHistory={handleOpenHistory}
                     onSignOut={async () => {
+                      if (!confirmLeaveWithUnsavedChanges()) {
+                        return;
+                      }
                       await signOut();
                       router.push('/');
                     }}

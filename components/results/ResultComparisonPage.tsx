@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, useReducedMotion } from 'framer-motion';
+import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { readGuestSessionId } from '@/lib/vote/client-storage';
@@ -712,6 +713,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
           <KoreaAdminMap
             key={`${topicId}-${Object.keys(mapStats).length}`}
             statsByCode={mapStats}
+            defaultRegionLevel="sigungu"
             height="100%"
             initialCenter={DEFAULT_MAP_CENTER}
             initialZoom={DEFAULT_MAP_ZOOM}
@@ -731,9 +733,21 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.36),_rgba(4,10,18,0.12)_40%,_rgba(4,10,18,0.52))]" />
         <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
-        <div className="pointer-events-none relative z-20 h-full w-full pt-[calc(0.6rem+env(safe-area-inset-top))] pb-[calc(0.65rem+env(safe-area-inset-bottom))]">
+        <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-2 pt-[calc(0.6rem+env(safe-area-inset-top))] pb-[calc(0.65rem+env(safe-area-inset-bottom))] md:px-6 md:pt-0 lg:px-10">
+          <DesktopTopHeader
+            className="pointer-events-auto"
+            containerClassName="max-w-[980px] px-0 sm:px-0 lg:px-0"
+            links={[
+              { key: 'home', label: '홈', onClick: () => router.push('/') },
+              { key: 'map', label: '지도', onClick: () => router.push('/topics-map') },
+              { key: 'game', label: '게임', onClick: () => router.push('/game') },
+              { key: 'my', label: 'MY', onClick: () => router.push('/my') },
+            ]}
+            actions={[{ key: 'open-intro', label: '결과 분석 보기', onClick: () => setIsIntroSheetOpen(true), variant: 'solid' }]}
+          />
+
           {data && !isIntroSheetOpen ? (
-            <section className="pointer-events-auto absolute inset-x-3 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+            <section className="pointer-events-auto absolute left-1/2 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:top-[5.2rem]">
               <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
               <div className="pointer-events-none absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-[#2f74ff2e] blur-2xl" />
 
@@ -792,7 +806,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         {data && selectedRegion && !isIntroSheetOpen ? (
           <section
             ref={selectedRegionPanelRef}
-            className="pointer-events-auto absolute inset-x-3 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
+            className="pointer-events-auto absolute left-1/2 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:top-[13rem]"
           >
             <div className="flex items-center justify-between">
               <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{selectedRegion.name || selectedRegion.code}</h4>
@@ -826,20 +840,20 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         ) : null}
 
         {noticeMessage && !isIntroSheetOpen ? (
-          <div className="pointer-events-none absolute inset-x-3 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl">
+          <div className="pointer-events-none absolute left-1/2 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl md:top-[16.4rem]">
             {noticeMessage}
           </div>
         ) : null}
 
         {isLoading ? (
-          <section className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+          <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
             <div className="h-5 w-44 animate-pulse rounded bg-white/14" />
             <div className="h-4 w-64 animate-pulse rounded bg-white/12" />
             <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
             <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
           </section>
         ) : error ? (
-          <section className="pointer-events-auto absolute inset-x-3 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+          <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
             <p className="text-sm font-semibold text-[#ffb4b4]">{error}</p>
             <button
               type="button"
@@ -862,7 +876,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
           initial={false}
           animate={{ y: bottomSheetY }}
           transition={bottomSheetTransition}
-          className={`pointer-events-auto fixed inset-x-3 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] z-30 h-[min(76dvh,620px)] rounded-t-[24px] rounded-b-[20px] border border-white/8 bg-[rgba(12,18,28,0.84)] shadow-[0_6px_16px_rgba(0,0,0,0.2)] backdrop-blur-2xl ${
+          className={`pointer-events-auto fixed bottom-[calc(0.65rem+env(safe-area-inset-bottom))] left-1/2 z-30 h-[min(76dvh,620px)] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-t-[24px] rounded-b-[20px] border border-white/8 bg-[rgba(12,18,28,0.84)] shadow-[0_6px_16px_rgba(0,0,0,0.2)] backdrop-blur-2xl ${
             isBottomSheetExpanded ? 'overflow-y-auto' : 'overflow-hidden'
           }`}
           style={{
@@ -1051,10 +1065,17 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
 
       {data && !isIntroSheetOpen ? (
         <footer className="relative z-50 border-t border-white/8 bg-[rgba(10,14,22,0.985)]">
-          <div className="w-full px-3 pb-4 pt-6 text-white/72" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}>
-            <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-            <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-            <p className="mt-2 text-xs text-white/55">문의/정책 안내 페이지는 추후 업데이트될 예정입니다.</p>
+          <div
+            className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+          >
+            <div>
+              <p className="text-sm font-semibold text-white/88">Vote War Map</p>
+              <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
+            </div>
+            <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
+              문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
+            </p>
           </div>
         </footer>
       ) : null}

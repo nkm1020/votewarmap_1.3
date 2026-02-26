@@ -63,6 +63,7 @@ export interface KoreaAdminMapProps {
   statsByCode?: RegionVoteMap;
   pointMarkers?: MapPointMarker[];
   markerEffect?: 'gps' | 'static';
+  defaultRegionLevel?: RegionLevel;
   className?: string;
   height?: number | string;
   initialCenter?: [number, number];
@@ -263,6 +264,7 @@ export default function KoreaAdminMap({
   statsByCode = {},
   pointMarkers = [],
   markerEffect = 'gps',
+  defaultRegionLevel = 'sido',
   className,
   height = 640,
   initialCenter,
@@ -291,7 +293,7 @@ export default function KoreaAdminMap({
   const markerPulseIntervalRef = useRef<number | null>(null);
   const sigunguLoadedRef = useRef(false);
   const sigunguCodesRef = useRef<string[]>([]);
-  const activeLevelRef = useRef<RegionLevel>('sido');
+  const activeLevelRef = useRef<RegionLevel>(defaultRegionLevel);
   const hoverRef = useRef<{ source: RegionLevel; id: string | number } | null>(null);
   const statsRef = useRef<RegionVoteMap>(statsByCode);
   const pointMarkersRef = useRef<MapPointMarker[]>(pointMarkers);
@@ -306,9 +308,9 @@ export default function KoreaAdminMap({
   const requestMarkerEffectSyncRef = useRef<(() => void) | null>(null);
   const lastAppliedViewRequestIdRef = useRef<string | null>(null);
   const suppressAutoLevelSyncRef = useRef(false);
-  const selectedLevelRef = useRef<RegionLevel>('sido');
+  const selectedLevelRef = useRef<RegionLevel>(defaultRegionLevel);
   const [hovered, setHovered] = useState<HoveredRegion | null>(null);
-  const [selectedLevel, setSelectedLevel] = useState<RegionLevel>('sido');
+  const [selectedLevel, setSelectedLevel] = useState<RegionLevel>(defaultRegionLevel);
 
   useEffect(() => {
     onRegionClickRef.current = onRegionClick;
@@ -325,6 +327,11 @@ export default function KoreaAdminMap({
   useEffect(() => {
     selectedLevelRef.current = selectedLevel;
   }, [selectedLevel]);
+
+  useEffect(() => {
+    activeLevelRef.current = defaultRegionLevel;
+    requestLevelSwitchRef.current?.(defaultRegionLevel);
+  }, [defaultRegionLevel]);
 
   useEffect(() => {
     pointMarkersRef.current = pointMarkers;
@@ -886,7 +893,7 @@ export default function KoreaAdminMap({
       registerHoverAndClick('sido-fills', 'sido');
       registerHoverAndClick('sigungu-fills', 'sigungu');
       void ensureSigunguLoaded();
-      requestLevelSwitchRef.current?.();
+      requestLevelSwitchRef.current?.(defaultRegionLevel);
     });
 
     let lastZoom = map.getZoom();
@@ -925,7 +932,7 @@ export default function KoreaAdminMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [zoomThreshold, theme, showNavigationControl, showTooltip, initialCenter, initialZoom, fillMode]);
+  }, [zoomThreshold, theme, showNavigationControl, showTooltip, initialCenter, initialZoom, fillMode, defaultRegionLevel]);
 
   useEffect(() => {
     statsRef.current = statsByCode;
