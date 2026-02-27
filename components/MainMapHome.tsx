@@ -2436,7 +2436,39 @@ export default function MainMapHome() {
               { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
               { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
             ]}
-            rightSlot={<AccountMenuButton />}
+            rightSlot={(
+              <>
+                <button
+                  type="button"
+                  onClick={() => router.push('/uk-map')}
+                  className="inline-flex h-9 items-center rounded-full border border-white/24 bg-white/10 px-3 text-[12px] font-semibold text-white/90 transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                >
+                  UK 테스트
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/us')}
+                  className="inline-flex h-9 items-center rounded-full border border-white/24 bg-white/10 px-3 text-[12px] font-semibold text-white/90 transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                >
+                  US 테스트
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/jp')}
+                  className="inline-flex h-9 items-center rounded-full border border-white/24 bg-white/10 px-3 text-[12px] font-semibold text-white/90 transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                >
+                  JP 테스트
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/cn')}
+                  className="inline-flex h-9 items-center rounded-full border border-white/24 bg-white/10 px-3 text-[12px] font-semibold text-white/90 transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                >
+                  CN 테스트
+                </button>
+                <AccountMenuButton />
+              </>
+            )}
           />
 
           <div className="flex flex-col gap-3 md:mt-4 md:max-w-[500px] lg:max-w-[560px] lg:gap-4">
@@ -2622,6 +2654,34 @@ export default function MainMapHome() {
                       }`}
                   >
                     결과 분석
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/uk-map')}
+                    className="inline-flex h-10 items-center rounded-xl border border-white/20 bg-white/6 px-4 text-sm font-semibold text-white/88 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                  >
+                    UK 테스트
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/us')}
+                    className="inline-flex h-10 items-center rounded-xl border border-white/20 bg-white/6 px-4 text-sm font-semibold text-white/88 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                  >
+                    US 테스트
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/jp')}
+                    className="inline-flex h-10 items-center rounded-xl border border-white/20 bg-white/6 px-4 text-sm font-semibold text-white/88 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                  >
+                    JP 테스트
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/cn')}
+                    className="inline-flex h-10 items-center rounded-xl border border-white/20 bg-white/6 px-4 text-sm font-semibold text-white/88 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                  >
+                    CN 테스트
                   </button>
                   <AccountMenuButton />
                 </>
