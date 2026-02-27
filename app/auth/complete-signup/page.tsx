@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus_Jakarta_Sans } from 'next/font/google';
+import Link from 'next/link';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
@@ -249,7 +250,19 @@ export default function CompleteSignupPage() {
               }}
               className="mt-0.5 h-4 w-4 accent-[#ff9f0a]"
             />
-            <span className="text-xs leading-relaxed text-white/72">이용약관 및 개인정보처리방침 내용을 확인했고 동의합니다.</span>
+            <span className="text-xs leading-relaxed text-white/72">
+              <Link href="/terms" className="underline underline-offset-2 transition hover:text-white">
+                이용약관
+              </Link>
+              {' '}
+              및
+              {' '}
+              <Link href="/privacy" className="underline underline-offset-2 transition hover:text-white">
+                개인정보처리방침
+              </Link>
+              {' '}
+              내용을 확인했고 동의합니다.
+            </span>
           </label>
 
           {errorMessage ? (

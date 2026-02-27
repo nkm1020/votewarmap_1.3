@@ -16,6 +16,7 @@ import {
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -776,6 +777,8 @@ type EditProfileViewProps = {
   schoolResultsListRef: React.RefObject<HTMLDivElement | null>;
   isSaveDirty: boolean;
   isSavingAny: boolean;
+  isDeletingAccount: boolean;
+  deleteConfirmInput: string;
   isResolvingRegion: boolean;
   notice: string | null;
   error: string | null;
@@ -789,6 +792,8 @@ type EditProfileViewProps = {
   onSelectSchoolSlot: (slot: SchoolSlotType) => void;
   onSelectMainRegionSource: (source: MainRegionSourceDraft) => void;
   onSaveAll: () => Promise<void>;
+  onDeleteConfirmInputChange: (value: string) => void;
+  onDeleteAccount: () => Promise<void>;
   reducedMotion: boolean;
 };
 
@@ -808,6 +813,8 @@ function EditProfileView({
   schoolResultsListRef,
   isSaveDirty,
   isSavingAny,
+  isDeletingAccount,
+  deleteConfirmInput,
   isResolvingRegion,
   notice,
   error,
@@ -821,6 +828,8 @@ function EditProfileView({
   onSelectSchoolSlot,
   onSelectMainRegionSource,
   onSaveAll,
+  onDeleteConfirmInputChange,
+  onDeleteAccount,
   reducedMotion,
 }: EditProfileViewProps) {
   const GROUP_BG = 'bg-[var(--my-surface-strong)]';
@@ -1141,8 +1150,8 @@ function EditProfileView({
             whileTap={reducedMotion ? undefined : { scale: 0.985 }}
             type="button"
             onClick={() => void onSaveAll()}
-            disabled={!isSaveDirty || isSavingAny}
-            aria-disabled={!isSaveDirty || isSavingAny}
+            disabled={!isSaveDirty || isSavingAny || isDeletingAccount}
+            aria-disabled={!isSaveDirty || isSavingAny || isDeletingAccount}
             aria-label="변경사항 저장하기"
             className="inline-flex h-14 w-full min-w-[200px] items-center justify-center rounded-2xl bg-[var(--my-accent-strong)] px-8 text-[17px] font-bold text-white shadow-[0_4px_20px_rgba(255,92,0,0.34)] transition-colors hover:bg-[var(--my-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
           >
@@ -1153,6 +1162,41 @@ function EditProfileView({
             : '변경사항 저장하기'}
         </motion.button>
       </motion.div>
+
+      <motion.section {...getMotionProps(reducedMotion, 0.11)} className="mt-8">
+        <h2 className="mb-2 ml-4 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#ffb4b4]">Danger Zone</h2>
+        <div className="overflow-hidden rounded-[24px] border border-red-400/30 bg-[rgba(140,24,24,0.18)] shadow-2xl shadow-black/40">
+          <div className="border-b border-red-400/25 bg-[rgba(255,80,80,0.08)] px-5 py-4">
+            <p className="text-[16px] font-semibold text-[#ffd3d3]">회원 탈퇴</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-[#ffc7c7]">
+              탈퇴 시 계정은 즉시 삭제되며 복구할 수 없습니다.
+              <br />
+              게임 점수 기록은 삭제되고, 투표 데이터는 익명 통계로만 유지됩니다.
+            </p>
+          </div>
+          <div className="space-y-3 px-5 py-4">
+            <label className="block">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#ffd3d3]">확인 문구 입력</span>
+              <input
+                value={deleteConfirmInput}
+                onChange={(event) => onDeleteConfirmInputChange(event.target.value)}
+                disabled={isDeletingAccount}
+                placeholder="탈퇴"
+                className="mt-2 h-11 w-full rounded-xl border border-red-300/35 bg-black/25 px-3 text-sm text-white outline-none placeholder:text-red-100/55 focus:border-red-300/65 focus:ring-2 focus:ring-red-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void onDeleteAccount()}
+              disabled={isDeletingAccount || deleteConfirmInput.trim() !== '탈퇴'}
+              aria-disabled={isDeletingAccount || deleteConfirmInput.trim() !== '탈퇴'}
+              className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-red-300/35 bg-red-500/20 text-sm font-bold text-[#ffd3d3] transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDeletingAccount ? '탈퇴 처리 중...' : '회원 탈퇴'}
+            </button>
+          </div>
+        </div>
+      </motion.section>
     </div>
   );
 }
@@ -1225,22 +1269,7 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
 }
 
 function Footer() {
-  return (
-    <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
-      <div
-        className="mx-auto w-full max-w-[min(100vw-2.5rem,1760px)] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
-      >
-        <div>
-          <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-          <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-        </div>
-        <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
-          문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
-        </p>
-      </div>
-    </footer>
-  );
+  return <SiteLegalFooter containerMaxWidthClassName="max-w-[min(100vw-2.5rem,1760px)]" />;
 }
 
 export default function MyPage() {
@@ -1280,6 +1309,8 @@ export default function MyPage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
   const [isResolvingRegion, setIsResolvingRegion] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
   const isEditRoute = pathname === '/my/edit';
@@ -1382,6 +1413,7 @@ export default function MyPage() {
     setHighlightedSchoolIndex(0);
     setSelectedSchoolCandidate(null);
     setGpsResolvedLabel(null);
+    setDeleteConfirmInput('');
     const fallbackMainSlot =
       dashboard.profile.mainSchoolSlot ??
       SCHOOL_SLOT_META.find(({ slot }) => Boolean(dashboard.profile.schoolPool[slot]))?.slot ??
@@ -1424,7 +1456,7 @@ export default function MyPage() {
   }, [dashboard, privacyShowActivityHistory, privacyShowLeaderboardName, privacyShowRegion]);
 
   const isSettingsDirty = isEditRoute ? isProfileDirty : isProfileDirty || isPrivacyDirty;
-  const isSavingAny = isSavingProfile || isSavingPrivacy;
+  const isSavingAny = isSavingProfile || isSavingPrivacy || isDeletingAccount;
 
   const confirmLeaveWithUnsavedChanges = useCallback(() => {
     if (!isSettingsDirty) {
@@ -1787,6 +1819,69 @@ export default function MyPage() {
     selectedSchoolSlot,
   ]);
 
+  const handleDeleteAccount = useCallback(async () => {
+    if (isDeletingAccount) {
+      return;
+    }
+
+    if (deleteConfirmInput.trim() !== '탈퇴') {
+      setNotice('확인 문구로 "탈퇴"를 입력해 주세요.');
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const approved = window.confirm('정말 탈퇴하시겠습니까? 계정은 즉시 삭제되며 복구할 수 없습니다.');
+      if (!approved) {
+        return;
+      }
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
+      setNotice('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setNotice(null);
+    try {
+      const response = await fetch('/api/me/account', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ confirmationText: '탈퇴' }),
+      });
+
+      const json = (await response.json()) as ApiErrorPayload;
+      if (!response.ok) {
+        setNotice(getApiErrorMessage(json, '회원 탈퇴 처리에 실패했습니다.'));
+        return;
+      }
+
+      setDeleteConfirmInput('');
+      setNotice('회원 탈퇴가 완료되었습니다. 홈으로 이동합니다.');
+
+      try {
+        await signOut();
+      } catch {
+        // no-op: fallback redirect still runs
+      }
+
+      router.replace('/');
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          if (window.location.pathname !== '/') {
+            window.location.assign('/');
+          }
+        }, 120);
+      }
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  }, [deleteConfirmInput, getAccessToken, isDeletingAccount, router, signOut]);
+
   const handleScrollToSettings = useCallback(() => {
     runWithLeaveConfirmation(() => {
       router.push('/my/edit');
@@ -1981,6 +2076,8 @@ export default function MyPage() {
                     schoolResultsListRef={schoolResultsListRef}
                     isSaveDirty={isProfileDirty}
                     isSavingAny={isSavingAny}
+                    isDeletingAccount={isDeletingAccount}
+                    deleteConfirmInput={deleteConfirmInput}
                     isResolvingRegion={isResolvingRegion}
                     notice={notice}
                     error={error}
@@ -1998,6 +2095,8 @@ export default function MyPage() {
                     onSelectSchoolSlot={handleSelectSchoolSlot}
                     onSelectMainRegionSource={handleSelectMainRegionSource}
                     onSaveAll={handleSaveAll}
+                    onDeleteConfirmInputChange={setDeleteConfirmInput}
+                    onDeleteAccount={handleDeleteAccount}
                     reducedMotion={Boolean(reducedMotion)}
                   />
                 </div>

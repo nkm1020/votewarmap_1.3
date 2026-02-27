@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -1288,20 +1289,7 @@ export function HigherLowerGamePage() {
         </div>
       </main>
 
-      <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
-        <div
-          className="mx-auto w-full max-w-[min(100vw-2.5rem,1760px)] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
-          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
-        >
-          <div>
-            <p className="text-sm font-semibold text-white/88">Vote War Map</p>
-            <p className="mt-2 text-xs text-white/60">© 2026 Vote War Map. All rights reserved.</p>
-          </div>
-          <p className="mt-2 text-xs text-white/55 md:mt-0 md:max-w-[360px] md:text-right">
-            문의/정책 안내 페이지는 추후 업데이트될 예정입니다.
-          </p>
-        </div>
-      </footer>
+      <SiteLegalFooter containerMaxWidthClassName="max-w-[min(100vw-2.5rem,1760px)]" />
     </div>
   );
 }
