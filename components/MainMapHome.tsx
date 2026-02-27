@@ -9,9 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize2,
-  Minus,
   Minimize2,
-  Plus,
   Search,
   Users,
   Zap,
@@ -707,8 +705,6 @@ export default function MainMapHome() {
     },
     [desktopRegionHotTopicsCache, router],
   );
-  const mapLevelToggleBottomPx = useMemo(() => Math.max(120, bottomDockHeight + 18), [bottomDockHeight]);
-  const mapZoomControlBottomPx = useMemo(() => mapLevelToggleBottomPx + 60, [mapLevelToggleBottomPx]);
   const ageDistributionRows = useMemo(() => {
     if (!homeAnalytics) {
       return [] as Array<{ label: string; count: number; percent: number }>;
@@ -2378,7 +2374,7 @@ export default function MainMapHome() {
       return;
     }
 
-    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
     setIsDesktopViewport(mediaQuery.matches);
 
     const handleViewportChange = (event: MediaQueryListEvent) => {
@@ -2427,1075 +2423,1048 @@ export default function MainMapHome() {
           ) : null}
         </div>
 
-      <div
-        className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-4 pb-[var(--home-mobile-overlay-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-0 lg:hidden"
-        style={{ '--home-mobile-overlay-padding': mobileOverlayPaddingBottom } as CSSProperties}
-      >
-        <DesktopTopHeader
-          className="pointer-events-auto"
-          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
-          links={[
-            { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
-            { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
-            { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
-            { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
-          ]}
-          rightSlot={<AccountMenuButton />}
-        />
+        <div
+          className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-4 pb-[var(--home-mobile-overlay-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-0 md:hidden"
+          style={{ '--home-mobile-overlay-padding': mobileOverlayPaddingBottom } as CSSProperties}
+        >
+          <DesktopTopHeader
+            className="pointer-events-auto"
+            containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
+            links={[
+              { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+              { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+              { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+              { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+            ]}
+            rightSlot={<AccountMenuButton />}
+          />
 
-        <div className="flex flex-col gap-3 md:mt-4 md:max-w-[500px] lg:max-w-[560px] lg:gap-4">
-          {isVoteCardCollapsed ? (
-            <button
-              type="button"
-              onClick={() => setIsVoteCardCollapsed(false)}
-              aria-label="투표 섹션 열기"
-              className="pointer-events-auto hidden lg:flex lg:min-h-[116px] lg:w-[68px] lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:rounded-2xl lg:border lg:border-white/18 lg:bg-[rgba(10,18,30,0.86)] lg:text-white/86 lg:shadow-[0_16px_34px_rgba(0,0,0,0.38)] lg:transition-all lg:duration-200 lg:hover:border-[#ff9f0a]/45 lg:hover:bg-[rgba(13,20,34,0.95)] lg:hover:text-white lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#ff9f0a]/60"
-            >
-              <span className="text-center text-[12px] font-semibold leading-tight">
-                투표
-                <br />
-                열기
-              </span>
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          ) : null}
+          <div className="flex flex-col gap-3 md:mt-4 md:max-w-[500px] lg:max-w-[560px] lg:gap-4">
+            {isVoteCardCollapsed ? (
+              <button
+                type="button"
+                onClick={() => setIsVoteCardCollapsed(false)}
+                aria-label="투표 섹션 열기"
+                className="pointer-events-auto hidden lg:flex lg:min-h-[116px] lg:w-[68px] lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:rounded-2xl lg:border lg:border-white/18 lg:bg-[rgba(10,18,30,0.86)] lg:text-white/86 lg:shadow-[0_16px_34px_rgba(0,0,0,0.38)] lg:transition-all lg:duration-200 lg:hover:border-[#ff9f0a]/45 lg:hover:bg-[rgba(13,20,34,0.95)] lg:hover:text-white lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#ff9f0a]/60"
+              >
+                <span className="text-center text-[12px] font-semibold leading-tight">
+                  투표
+                  <br />
+                  열기
+                </span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            ) : null}
 
-          <LiveVoteCard
-            className={`shrink-0 ${isVoteCardCollapsed ? 'lg:hidden' : ''}`}
-            topicId={featuredTopic?.id ?? null}
-            title={featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
-            variant="desktop_refined"
-            resultVisibility={featuredResultVisibility}
-            lockedGapPercent={summary.gapPercent}
-            lockedTotalVotes={summary.totalVotes}
-            isExpanded={!isVoteCardCollapsed}
-            onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
-            selectedOptionKey={selectedOption}
-            onSelectOption={setSelectedOption}
-            onSubmitVote={() => void handleVote()}
-            submitDisabled={
-              canOpenFeaturedResult
-                ? false
-                : !selectedOption ||
+            <LiveVoteCard
+              className={`shrink-0 ${isVoteCardCollapsed ? 'lg:hidden' : ''}`}
+              topicId={featuredTopic?.id ?? null}
+              title={featuredTopic?.title ?? '진행중인 주제를 준비 중입니다.'}
+              variant="desktop_refined"
+              resultVisibility={featuredResultVisibility}
+              lockedGapPercent={summary.gapPercent}
+              lockedTotalVotes={summary.totalVotes}
+              isExpanded={!isVoteCardCollapsed}
+              onToggleExpanded={() => setIsVoteCardCollapsed((prev) => !prev)}
+              selectedOptionKey={selectedOption}
+              onSelectOption={setSelectedOption}
+              onSubmitVote={() => void handleVote()}
+              submitDisabled={
+                canOpenFeaturedResult
+                  ? false
+                  : !selectedOption ||
                   !featuredTopic ||
                   !featuredOptionAKey ||
                   !featuredOptionBKey ||
                   isFeaturedLoading ||
                   isSubmittingVote ||
                   (!isAuthenticated && !guestSessionId)
-            }
-            submitLabel={
-              isSubmittingVote
-                ? '처리 중...'
-                : canOpenFeaturedResult
-                  ? '이미 투표완료하셨습니다 · 결과보기'
-                  : !selectedOption
-                    ? '선택 후 투표하기'
-                    : '투표 제출하기'
-            }
-            message={voteMessage}
-            isStatsLoading={isStatsLoading}
-            totalVotes={summary.totalVotes}
-            realtimeVotes={featuredMetrics?.realtimeVotes ?? null}
-            leftOption={{
-              key: featuredOptionAKey,
-              label: featuredOptionALabel,
-              percentage: featuredResultVisibility === 'unlocked' && summary.hasData ? summary.aPercent : null,
-              subtext: getOptionSubtext(featuredTopic?.id, featuredOptionAKey),
-            }}
-            rightOption={{
-              key: featuredOptionBKey,
-              label: featuredOptionBLabel,
-              percentage: featuredResultVisibility === 'unlocked' && summary.hasData ? summary.bPercent : null,
-              subtext: getOptionSubtext(featuredTopic?.id, featuredOptionBKey),
-            }}
-          />
+              }
+              submitLabel={
+                isSubmittingVote
+                  ? '처리 중...'
+                  : canOpenFeaturedResult
+                    ? '이미 투표완료하셨습니다 · 결과보기'
+                    : !selectedOption
+                      ? '선택 후 투표하기'
+                      : '투표 제출하기'
+              }
+              message={voteMessage}
+              isStatsLoading={isStatsLoading}
+              totalVotes={summary.totalVotes}
+              realtimeVotes={featuredMetrics?.realtimeVotes ?? null}
+              leftOption={{
+                key: featuredOptionAKey,
+                label: featuredOptionALabel,
+                percentage: featuredResultVisibility === 'unlocked' && summary.hasData ? summary.aPercent : null,
+                subtext: getOptionSubtext(featuredTopic?.id, featuredOptionAKey),
+              }}
+              rightOption={{
+                key: featuredOptionBKey,
+                label: featuredOptionBLabel,
+                percentage: featuredResultVisibility === 'unlocked' && summary.hasData ? summary.bPercent : null,
+                subtext: getOptionSubtext(featuredTopic?.id, featuredOptionBKey),
+              }}
+            />
 
-          {selectedRegion ? (
-            <section
-              ref={selectedRegionPanelRef}
-              className={`pointer-events-auto shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl lg:rounded-[24px] lg:border-white/20 lg:bg-[linear-gradient(150deg,rgba(11,18,29,0.86),rgba(8,13,22,0.94))] lg:p-4 lg:shadow-[0_20px_42px_rgba(0,0,0,0.4)] ${
-                isVoteCardCollapsed ? 'lg:hidden' : ''
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <h4 className="truncate text-[15px] font-semibold text-white lg:text-[17px]">
-                  {selectedRegion.name || selectedRegion.code}
-                </h4>
-                <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75 lg:border-white/22 lg:bg-white/[0.1] lg:px-3 lg:text-xs">
-                  {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
-                </span>
-              </div>
+            {selectedRegion ? (
+              <section
+                ref={selectedRegionPanelRef}
+                className={`pointer-events-auto shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl lg:rounded-[24px] lg:border-white/20 lg:bg-[linear-gradient(150deg,rgba(11,18,29,0.86),rgba(8,13,22,0.94))] lg:p-4 lg:shadow-[0_20px_42px_rgba(0,0,0,0.4)] ${isVoteCardCollapsed ? 'lg:hidden' : ''
+                  }`}
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="truncate text-[15px] font-semibold text-white lg:text-[17px]">
+                    {selectedRegion.name || selectedRegion.code}
+                  </h4>
+                  <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75 lg:border-white/22 lg:bg-white/[0.1] lg:px-3 lg:text-xs">
+                    {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                  </span>
+                </div>
 
-              <p className="mt-2 text-[12px] text-white/68 lg:mt-2.5 lg:text-[13px]">
-                현재 격차{' '}
-                <span className="font-semibold text-white">
-                  {Math.max(0, Math.round(selectedRegionStat?.gapPercent ?? 0))}%p
-                </span>{' '}
-                · 총{' '}
-                <span className="font-semibold text-white">
-                  {((selectedRegionStat?.total ?? 0) || 0).toLocaleString()}표
-                </span>
-              </p>
+                <p className="mt-2 text-[12px] text-white/68 lg:mt-2.5 lg:text-[13px]">
+                  현재 격차{' '}
+                  <span className="font-semibold text-white">
+                    {Math.max(0, Math.round(selectedRegionStat?.gapPercent ?? 0))}%p
+                  </span>{' '}
+                  · 총{' '}
+                  <span className="font-semibold text-white">
+                    {((selectedRegionStat?.total ?? 0) || 0).toLocaleString()}표
+                  </span>
+                </p>
 
-              <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
-                <p className="text-[12px] font-semibold text-white/84 lg:text-[13px]">이 지역에서 가장 활발한 주제 TOP 3</p>
+                <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
+                  <p className="text-[12px] font-semibold text-white/84 lg:text-[13px]">이 지역에서 가장 활발한 주제 TOP 3</p>
 
-                {isRegionHotTopicsLoading ? (
-                  <div className="mt-2.5 space-y-2">
-                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                    <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                  </div>
-                ) : regionHotTopics.length > 0 ? (
-                  <div className="mt-2 space-y-1.5">
-                    {regionHotTopics.map((topic, index) => (
-                      <button
-                        key={topic.topicId}
-                        type="button"
-                        onClick={() => router.push(`/results/${topic.topicId}`)}
-                        className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55 lg:h-12 lg:rounded-xl lg:border-white/16 lg:bg-white/[0.05] lg:hover:bg-white/[0.11]"
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
-                            {index + 1}
+                  {isRegionHotTopicsLoading ? (
+                    <div className="mt-2.5 space-y-2">
+                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                    </div>
+                  ) : regionHotTopics.length > 0 ? (
+                    <div className="mt-2 space-y-1.5">
+                      {regionHotTopics.map((topic, index) => (
+                        <button
+                          key={topic.topicId}
+                          type="button"
+                          onClick={() => router.push(`/results/${topic.topicId}`)}
+                          className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55 lg:h-12 lg:rounded-xl lg:border-white/16 lg:bg-white/[0.05] lg:hover:bg-white/[0.11]"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
+                              {index + 1}
+                            </span>
+                            <span className="truncate text-[12px] font-medium text-white/88 lg:text-[13px]">{topic.title}</span>
+                          </div>
+                          <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff] lg:text-xs">
+                            {topic.voteCount.toLocaleString()}표
                           </span>
-                          <span className="truncate text-[12px] font-medium text-white/88 lg:text-[13px]">{topic.title}</span>
-                        </div>
-                        <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff] lg:text-xs">
-                          {topic.voteCount.toLocaleString()}표
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-[12px] text-white/62">
-                    {regionHotTopicsError ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'}
-                  </p>
-                )}
-              </div>
-            </section>
-          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[12px] text-white/62">
+                      {regionHotTopicsError ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'}
+                    </p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+          </div>
+
+          <div className="h-3 md:hidden" />
         </div>
 
-        <div className="h-3 md:hidden" />
-      </div>
+        <div
+          className="pointer-events-none absolute inset-0 z-30 hidden md:flex md:flex-col"
+          style={{ backgroundColor: desktopColors.bg }}
+        >
+          {isDesktopViewport ? (
+            <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden">
+              <KoreaAdminMap
+                {...sharedMainMapProps}
+                showTooltip
+                tooltipPinOnClick
+                renderTooltipContent={renderDesktopRegionTooltip}
+                onTooltipRegionChange={setDesktopTooltipRegion}
+                onRegionClick={undefined}
+                className="h-full w-full !rounded-none !border-0"
+              />
+            </div>
+          ) : null}
 
-      <div
-        className="pointer-events-none absolute inset-0 z-30 hidden lg:flex lg:flex-col"
-        style={{ backgroundColor: desktopColors.bg }}
-      >
-        {isDesktopViewport ? (
-          <div className="pointer-events-auto absolute inset-0 z-0 overflow-hidden">
-            <KoreaAdminMap
-              {...sharedMainMapProps}
-              showTooltip
-              tooltipPinOnClick
-              renderTooltipContent={renderDesktopRegionTooltip}
-              onTooltipRegionChange={setDesktopTooltipRegion}
-              onRegionClick={undefined}
-              className="h-full w-full !rounded-none !border-0"
-            />
-          </div>
-        ) : null}
-
-        {!isMapLayoutFullscreen ? (
-          <DesktopTopHeader
-            className="pointer-events-auto relative z-20"
-            links={[
-              { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
-              { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
-              { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
-              { key: 'my', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
-            ]}
-            rightSlot={(
-              <>
-                <button
-                  type="button"
-                  disabled
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/72 opacity-80"
-                  aria-label="검색"
-                >
-                  <Search className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsDesktopRightPanelOpen((prev) => !prev)}
-                  className={`inline-flex h-10 items-center rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] ${
-                    isDesktopRightPanelOpen
-                      ? 'border border-[#ff9f0a88] bg-[#ff6b00] text-white hover:bg-[#ff7a1f]'
-                      : 'border border-white/20 bg-white/6 text-white/88 hover:bg-white/12 hover:text-white'
-                  }`}
-                >
-                  결과 분석
-                </button>
-                <AccountMenuButton />
-              </>
-            )}
-          />
-        ) : null}
-
-        <div className="relative z-10 flex-1">
-          <div className="mx-auto flex h-full min-h-0 w-full">
-            {!isMapLayoutFullscreen ? (
-              isDesktopLeftPanelOpen ? (
-                <aside
-                  className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border shadow-[4px_0_24px_rgba(0,0,0,0.08)]"
-                  style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border }}
-                >
+          {!isMapLayoutFullscreen ? (
+            <DesktopTopHeader
+              className="pointer-events-auto relative z-20"
+              links={[
+                { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+                { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+                { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+                { key: 'my', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+              ]}
+              rightSlot={(
+                <>
                   <button
                     type="button"
-                    onClick={() => setIsDesktopLeftPanelOpen(false)}
-                    className="absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition"
-                    style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+                    disabled
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/72 opacity-80"
+                    aria-label="검색"
                   >
-                    <ChevronLeft className="h-5 w-5" />
+                    <Search className="h-5 w-5" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDesktopRightPanelOpen((prev) => !prev)}
+                    className={`inline-flex h-10 items-center rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] ${isDesktopRightPanelOpen
+                        ? 'border border-[#ff9f0a88] bg-[#ff6b00] text-white hover:bg-[#ff7a1f]'
+                        : 'border border-white/20 bg-white/6 text-white/88 hover:bg-white/12 hover:text-white'
+                      }`}
+                  >
+                    결과 분석
+                  </button>
+                  <AccountMenuButton />
+                </>
+              )}
+            />
+          ) : null}
 
-                  <div className="relative shrink-0 border-b px-7 pb-6 pt-10" style={{ borderColor: desktopColors.border }}>
-                    <div className="mb-3 flex items-center gap-2">
-                      <div className="inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-1" style={{ backgroundColor: desktopColors.redSoft }}>
-                        <span className="h-1.5 w-1.5 rounded-full animate-ping" style={{ backgroundColor: desktopColors.red }} />
-                        <span className="text-[11px] font-bold tracking-wider" style={{ color: desktopColors.red }}>
-                          LIVE
+          <div className="relative z-10 flex-1">
+            <div className="mx-auto flex h-full min-h-0 w-full">
+              {!isMapLayoutFullscreen ? (
+                isDesktopLeftPanelOpen ? (
+                  <aside
+                    className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border shadow-[4px_0_24px_rgba(0,0,0,0.08)]"
+                    style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setIsDesktopLeftPanelOpen(false)}
+                      className="absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition"
+                      style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+
+                    <div className="relative shrink-0 border-b px-7 pb-6 pt-10" style={{ borderColor: desktopColors.border }}>
+                      <div className="mb-3 flex items-center gap-2">
+                        <div className="inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-1" style={{ backgroundColor: desktopColors.redSoft }}>
+                          <span className="h-1.5 w-1.5 rounded-full animate-ping" style={{ backgroundColor: desktopColors.red }} />
+                          <span className="text-[11px] font-bold tracking-wider" style={{ color: desktopColors.red }}>
+                            LIVE
+                          </span>
+                        </div>
+                        <span className="flex items-center gap-1 text-[14px] font-bold" style={{ color: desktopColors.textSecondary }}>
+                          실시간 누적 투표수
                         </span>
                       </div>
-                      <span className="flex items-center gap-1 text-[14px] font-bold" style={{ color: desktopColors.textSecondary }}>
-                        실시간 누적 투표수
-                      </span>
-                    </div>
 
-                    <div className="flex flex-col gap-1">
-                      <span className="desktop-home-burn text-[42px] font-extrabold leading-none tracking-tight">
-                        {animatedPlatformTotalVotes}
-                      </span>
-                      <span className="text-[20px] font-bold" style={{ color: desktopColors.textPrimary }}>
-                        명이 참여했어요
-                      </span>
-                    </div>
-
-                    <p className="mt-4 text-[14px] font-medium leading-relaxed" style={{ color: desktopColors.textSecondary }}>
-                      지금 이 순간에도 전국 방방곡곡에서
-                      <br />
-                      새로운 의견들이 모이고 있습니다.
-                    </p>
-                  </div>
-
-                  <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ backgroundColor: desktopColors.surfaceAlt }}>
-                    <div className="space-y-4 p-7">
-                      <div className="mb-2 flex items-center justify-between">
-                        <h2 className="inline-flex items-center gap-2 text-[18px] font-bold" style={{ color: desktopColors.textPrimary }}>
-                          지금 가장 뜨거운 투표
-                          <Zap className="h-5 w-5 text-yellow-500" />
-                        </h2>
+                      <div className="flex flex-col gap-1">
+                        <span className="desktop-home-burn text-[42px] font-extrabold leading-none tracking-tight">
+                          {animatedPlatformTotalVotes}
+                        </span>
+                        <span className="text-[20px] font-bold" style={{ color: desktopColors.textPrimary }}>
+                          명이 참여했어요
+                        </span>
                       </div>
 
-                      <div className="space-y-4">
-                        {isScoreboardLoading ? (
-                          <div className="space-y-3">
-                            <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
-                            <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
-                            <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
+                      <p className="mt-4 text-[14px] font-medium leading-relaxed" style={{ color: desktopColors.textSecondary }}>
+                        지금 이 순간에도 전국 방방곡곡에서
+                        <br />
+                        새로운 의견들이 모이고 있습니다.
+                      </p>
+                    </div>
+
+                    <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ backgroundColor: desktopColors.surfaceAlt }}>
+                      <div className="flex min-h-full flex-col">
+                        <div className="flex min-h-full flex-col p-7">
+                          <div className="mb-2 flex items-center justify-between">
+                            <h2 className="inline-flex items-center gap-2 text-[18px] font-bold" style={{ color: desktopColors.textPrimary }}>
+                              지금 가장 뜨거운 투표
+                              <Zap className="h-5 w-5 text-yellow-500" />
+                            </h2>
                           </div>
-                        ) : popularTopics.length === 0 ? (
-                          <div
-                            className="rounded-[16px] border border-dashed px-4 py-5 text-sm"
-                            style={{ borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+
+                          <div className="space-y-4 pb-4">
+                            {isScoreboardLoading ? (
+                              <div className="space-y-3">
+                                <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
+                                <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
+                                <div className="h-32 animate-pulse rounded-[20px]" style={{ backgroundColor: desktopColors.surface }} />
+                              </div>
+                            ) : popularTopics.length === 0 ? (
+                              <div
+                                className="rounded-[16px] border border-dashed px-4 py-5 text-sm"
+                                style={{ borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+                              >
+                                {scoreboardError ?? '인기 투표 데이터가 아직 없습니다.'}
+                              </div>
+                            ) : (
+                              popularTopics.map((topic) => {
+                                const isExpanded = expandedHotTopicId === topic.topicId;
+                                const hasVoted = Boolean(hotTopicVotedById[topic.topicId]);
+                                const canShowDetailedDistribution = hasVoted && topic.hasDistribution;
+                                const topicMeta = topicById.get(topic.topicId);
+                                const optionA = topicMeta?.options.find((option) => option.position === 1) ?? null;
+                                const optionB = topicMeta?.options.find((option) => option.position === 2) ?? null;
+
+                                return (
+                                  <div
+                                    key={topic.topicId}
+                                    className="group w-full rounded-[20px] border p-5 text-left shadow-[0_2px_10px_rgba(0,0,0,0.25)] transition-all duration-300 hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)]"
+                                    style={{
+                                      borderColor: isExpanded ? desktopColors.blue : desktopColors.border,
+                                      backgroundColor: desktopColors.surface,
+                                      boxShadow: isExpanded ? '0 0 0 1px rgba(47,116,255,0.45), 0 16px 34px rgba(0,0,0,0.38)' : undefined,
+                                    }}
+                                  >
+                                    <div className="mb-3 flex items-start justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-bold"
+                                          style={{ backgroundColor: desktopColors.divider, color: desktopColors.textSecondary }}
+                                        >
+                                          {topic.rank}
+                                        </span>
+                                        {topic.isHot ? (
+                                          <span
+                                            className="inline-flex items-center rounded-[6px] border px-2 py-0.5 text-[11px] font-bold"
+                                            style={{ borderColor: desktopColors.redSoft, color: desktopColors.red, backgroundColor: desktopColors.redSoft }}
+                                          >
+                                            HOT
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <span className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: desktopColors.textSecondary }}>
+                                        <Users className="h-3 w-3" /> {topic.totalVotes.toLocaleString()}명
+                                      </span>
+                                    </div>
+
+                                    <p className="mb-4 line-clamp-2 text-[16px] font-bold leading-snug transition-colors group-hover:text-[#8dbdff]" style={{ color: desktopColors.textPrimary }}>
+                                      {topic.title}
+                                    </p>
+
+                                    <div className="space-y-1.5">
+                                      {canShowDetailedDistribution ? (
+                                        <>
+                                          <div className="flex items-center justify-between px-1 text-[11px] font-bold" style={{ color: desktopColors.textSecondary }}>
+                                            <span>{topic.leftLabel}</span>
+                                            <span>{topic.rightLabel}</span>
+                                          </div>
+                                          <div className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
+                                            <div className="h-full bg-[#ff6b00]" style={{ width: `${topic.leftPercent}%` }} />
+                                            <div className="h-full bg-[#2f74ff]" style={{ width: `${topic.rightPercent}%` }} />
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <div className="flex items-center justify-between px-1 text-[11px] font-bold" style={{ color: desktopColors.textSecondary }}>
+                                            <span>투표 전 결과 비공개</span>
+                                            <span>격차 {topic.gapPercent}%p · 총 {topic.previewTotalVotes.toLocaleString()}표</span>
+                                          </div>
+                                          <div className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
+                                            <div className="h-full w-full bg-gray-500" />
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+
+                                    <div className="mt-4">
+                                      {!isExpanded && !hasVoted ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDesktopHotTopicToggle(topic.topicId)}
+                                          className="w-full rounded-[12px] py-2.5 text-[13px] font-bold transition-colors"
+                                          style={{ backgroundColor: desktopColors.buttonBg, color: desktopColors.textPrimary }}
+                                        >
+                                          투표하기
+                                        </button>
+                                      ) : null}
+
+                                      {isExpanded && !hasVoted ? (
+                                        <div className="mt-1 border-t pt-4" style={{ borderColor: desktopColors.border }}>
+                                          {optionA && optionB ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  void handleHotTopicImmediateVote({
+                                                    topicId: topic.topicId,
+                                                    optionKey: optionA.key,
+                                                    optionAKey: optionA.key,
+                                                    optionBKey: optionB.key,
+                                                  })
+                                                }
+                                                disabled={isHotTopicSubmittingVote}
+                                                className="rounded-[12px] bg-[#ff6b00]/10 py-3 text-[14px] font-bold text-[#ffad63] transition-colors hover:bg-[#ff6b00]/22 disabled:cursor-not-allowed disabled:opacity-60"
+                                              >
+                                                {optionA.label}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  void handleHotTopicImmediateVote({
+                                                    topicId: topic.topicId,
+                                                    optionKey: optionB.key,
+                                                    optionAKey: optionA.key,
+                                                    optionBKey: optionB.key,
+                                                  })
+                                                }
+                                                disabled={isHotTopicSubmittingVote}
+                                                className="rounded-[12px] bg-[#2f74ff]/10 py-3 text-[14px] font-bold text-[#8dbdff] transition-colors hover:bg-[#2f74ff]/22 disabled:cursor-not-allowed disabled:opacity-60"
+                                              >
+                                                {optionB.label}
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <p className="text-xs" style={{ color: desktopColors.red }}>
+                                              선택지 정보를 불러오지 못했습니다.
+                                            </p>
+                                          )}
+
+                                          {hotTopicVoteMessage ? (
+                                            <p className="mt-2 text-xs" style={{ color: desktopColors.red }}>
+                                              {hotTopicVoteMessage}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
+
+                                      {hasVoted ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => router.push(`/results/${topic.topicId}`)}
+                                          className="mt-3 w-full rounded-[12px] border py-2.5 text-center text-[13px] font-bold transition-colors"
+                                          style={{
+                                            borderColor: 'rgba(47,116,255,0.42)',
+                                            backgroundColor: 'rgba(47,116,255,0.2)',
+                                            color: '#8dbdff',
+                                          }}
+                                        >
+                                          결과보기
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+
+                    <div
+                      className="shrink-0 border-t px-6 py-5"
+                      style={{
+                        borderColor: desktopColors.border,
+                        backgroundColor: desktopColors.surface,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setIsTopicPickerOpen(true)}
+                        className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[16px] text-[16px] font-bold transition"
+                        style={{
+                          backgroundColor: desktopColors.buttonBg,
+                          color: desktopColors.textPrimary,
+                        }}
+                      >
+                        주제 전체보기
+                        <ChevronRight className="h-4 w-4" style={{ color: desktopColors.textSecondary }} />
+                      </button>
+                    </div>
+                  </aside>
+                ) : null
+              ) : null}
+
+              <div className="relative min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={handleMapLayoutFullscreenToggle}
+                  className="pointer-events-auto absolute right-6 top-6 z-30 inline-flex h-11 items-center gap-2 rounded-[12px] border px-4 text-[14px] font-bold transition"
+                  style={{
+                    backgroundColor: desktopColors.surface,
+                    borderColor: desktopColors.border,
+                    color: desktopColors.textPrimary,
+                  }}
+                >
+                  {isMapLayoutFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                  <span>{isMapLayoutFullscreen ? '기본 보기' : '전체 화면'}</span>
+                </button>
+
+              </div>
+
+              {!isMapLayoutFullscreen ? (
+                isDesktopRightPanelOpen ? (
+                  <aside
+                    className="pointer-events-auto relative flex w-[360px] min-h-0 shrink-0 flex-col border-l"
+                    style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setIsDesktopRightPanelOpen(false)}
+                      className="absolute -left-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-l-[16px] border border-r-0"
+                      style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+
+                    <div className="flex items-center justify-between border-b px-6 py-5" style={{ borderColor: desktopColors.border }}>
+                      <h2 className="inline-flex items-center gap-2 text-[18px] font-bold" style={{ color: desktopColors.textPrimary }}>
+                        <BarChart2 className="h-5 w-5" style={{ color: desktopColors.blue }} />
+                        상세 결과 분석
+                      </h2>
+                    </div>
+
+                    <div className="custom-scrollbar min-h-0 flex-1 space-y-7 overflow-y-auto p-6" style={{ backgroundColor: desktopColors.surfaceAlt }}>
+                      <section>
+                        <h3 className="text-[15px] font-bold" style={{ color: desktopColors.textPrimary }}>
+                          연령별 참여 비율
+                        </h3>
+                        <div className="mt-3 rounded-[16px] border p-4" style={{ borderColor: desktopColors.border, backgroundColor: desktopColors.surface }}>
+                          {isHomeAnalyticsLoading ? (
+                            <div className="space-y-2">
+                              <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
+                              <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
+                              <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
+                              <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
+                              <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
+                            </div>
+                          ) : ageDistributionRows.length === 0 ? (
+                            <p className="text-sm" style={{ color: desktopColors.textSecondary }}>
+                              {homeAnalyticsError ?? '연령별 데이터가 없습니다.'}
+                            </p>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {ageDistributionRows.map((row) => (
+                                <div key={row.label}>
+                                  <div className="mb-1.5 flex items-center justify-between text-[12px] font-semibold" style={{ color: desktopColors.textSecondary }}>
+                                    <span>{row.label}</span>
+                                    <span>
+                                      {row.percent.toFixed(1)}% · {row.count.toLocaleString()}명
+                                    </span>
+                                  </div>
+                                  <div className="h-2 overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
+                                    <div className="h-full rounded-full" style={{ width: `${row.percent}%`, backgroundColor: desktopColors.blue }} />
+                                  </div>
+                                </div>
+                              ))}
+                              <p className="pt-1 text-[11px]" style={{ color: desktopColors.textSecondary }}>
+                                기준: 회원 투표 데이터({homeAnalytics ? homeAnalytics.age.knownTotal.toLocaleString() : '0'}건)
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+
+                      <section>
+                        <h3 className="text-[15px] font-bold" style={{ color: desktopColors.textPrimary }}>
+                          성별 참여 비율
+                        </h3>
+                        <div className="mt-3 grid grid-cols-2 gap-4">
+                          <div className="rounded-[16px] border px-4 py-4" style={{ borderColor: 'rgba(47,116,255,0.42)', backgroundColor: 'rgba(47,116,255,0.16)' }}>
+                            <p className="text-[26px] font-extrabold" style={{ color: desktopColors.blue }}>
+                              {isHomeAnalyticsLoading ? '-' : `${homeAnalytics ? homeAnalytics.gender.male.percent.toFixed(1) : '0.0'}%`}
+                            </p>
+                            <p className="mt-1 text-[13px] font-semibold" style={{ color: desktopColors.textSecondary }}>
+                              남성 · {(homeAnalytics?.gender.male.count ?? 0).toLocaleString()}명
+                            </p>
+                          </div>
+                          <div className="rounded-[16px] border px-4 py-4" style={{ borderColor: 'rgba(255,107,0,0.42)', backgroundColor: 'rgba(255,107,0,0.16)' }}>
+                            <p className="text-[26px] font-extrabold" style={{ color: desktopColors.red }}>
+                              {isHomeAnalyticsLoading ? '-' : `${homeAnalytics ? homeAnalytics.gender.female.percent.toFixed(1) : '0.0'}%`}
+                            </p>
+                            <p className="mt-1 text-[13px] font-semibold" style={{ color: desktopColors.textSecondary }}>
+                              여성 · {(homeAnalytics?.gender.female.count ?? 0).toLocaleString()}명
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-[11px]" style={{ color: desktopColors.textSecondary }}>
+                          기타 {(homeAnalytics?.gender.otherCount ?? 0).toLocaleString()}명 · 미상 {(homeAnalytics?.gender.unknownCount ?? 0).toLocaleString()}명
+                        </p>
+                      </section>
+                    </div>
+                  </aside>
+                ) : null
+              ) : null}
+            </div>
+
+            {!isMapLayoutFullscreen && !isDesktopLeftPanelOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsDesktopLeftPanelOpen(true)}
+                className="pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition"
+                style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            ) : null}
+
+            {!isMapLayoutFullscreen && !isDesktopRightPanelOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsDesktopRightPanelOpen(true)}
+                className="pointer-events-auto absolute right-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-l-[16px] border border-r-0 transition"
+                style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          ref={bottomDockRef}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200 md:hidden"
+        >
+          <section
+            onWheel={handleBottomDockWheel}
+            onTouchStart={handleBottomDockTouchStart}
+            onTouchMove={handleBottomDockTouchMove}
+            onTouchEnd={handleBottomDockTouchEnd}
+            onTouchCancel={handleBottomDockTouchEnd}
+            className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
+            style={{ touchAction: 'pan-y' }}
+          >
+            <div className="mx-auto max-w-[430px] px-3">
+              <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
+                    광고
+                  </span>
+                  <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
+                    스폰서 배너 영역입니다.
+                  </p>
+                  <button
+                    type="button"
+                    className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
+                  >
+                    자세히
+                  </button>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+
+        <div
+          ref={bottomMenuRef}
+          className="pointer-events-none absolute inset-x-0 z-20 transition-opacity duration-200 md:hidden"
+          style={{ bottom: `${bottomAdHeight}px` }}
+        >
+          <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+            <div ref={bottomMenuGridRef} className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
+              {[
+                { id: 'home' as const, label: '홈' },
+                { id: 'map' as const, label: '지도' },
+                { id: 'game' as const, label: '게임' },
+                { id: 'me' as const, label: 'MY' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  ref={tab.id === 'map' ? mapTabButtonRef : undefined}
+                  onClick={() => handleBottomTabClick(tab.id)}
+                  className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
+                    }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        </div>
+
+        <div
+          className={`pointer-events-none absolute inset-x-0 z-30 transition-opacity duration-200 md:hidden ${isTopicPickerOpen ? 'opacity-0' : 'opacity-100'
+            }`}
+          style={{ bottom: `${bottomAdHeight + (bottomMenuHeight > 0 ? bottomMenuHeight : 62) - 2}px` }}
+        >
+          <div ref={topicHintRef} className="mx-auto max-w-[430px] px-3">
+            <div className="relative h-[48px]">
+              <div
+                className="absolute top-0 -translate-x-1/2"
+                style={{ left: `${topicHintAnchorPercent}%` }}
+              >
+                <div className="flex flex-col items-center leading-none">
+                  <span className="whitespace-nowrap text-[11px] font-semibold tracking-[-0.01em] text-[#ffd2a6]">
+                    여기서 다른 주제를 선택하세요
+                  </span>
+                  <svg
+                    className="home-chevron mt-0.5"
+                    width="30"
+                    height="36"
+                    viewBox="0 0 100 130"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <polyline
+                        id="home-chevron-shape"
+                        points="38,8 50,24 62,8"
+                        stroke="#ff9f0a"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </defs>
+                    <g className="home-chevron-group">
+                      <use href="#home-chevron-shape" />
+                      <use href="#home-chevron-shape" />
+                      <use href="#home-chevron-shape" />
+                    </g>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {isTopicPickerOpen ? (
+          <div
+            className="fixed inset-0 z-40 flex items-center justify-center bg-black/58 p-4"
+            onClick={handleTopicPickerClose}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="home-topic-picker-title"
+              className="w-full max-w-[860px] overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.96)] shadow-2xl backdrop-blur-2xl"
+              style={{ maxHeight: 'calc(100dvh - 2rem)' }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 pb-3 pt-4">
+                <div>
+                  <h4 id="home-topic-picker-title" className="text-[20px] font-semibold text-white">
+                    다른 주제 선택
+                  </h4>
+                  <p className="mt-1 text-xs text-white/60">선택하면 바로 투표 카드가 펼쳐집니다.</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="주제 선택 팝업 닫기"
+                  onClick={handleTopicPickerClose}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/14 bg-white/6 text-lg text-white/80 transition hover:bg-white/12 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+                {isTopicsLoading ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                    주제 불러오는 중...
+                  </div>
+                ) : availableTopics.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                    LIVE 주제가 없습니다.
+                  </div>
+                ) : (
+                  <>
+                    <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                      {TOPIC_TAB_META.map((tab) => {
+                        const isActive = activeTopicTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setActiveTopicTab(tab.id)}
+                            className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${isActive
+                                ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
+                                : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
+                              }`}
                           >
-                            {scoreboardError ?? '인기 투표 데이터가 아직 없습니다.'}
-                          </div>
-                        ) : (
-                          popularTopics.map((topic) => {
-                            const isExpanded = expandedHotTopicId === topic.topicId;
-                            const hasVoted = Boolean(hotTopicVotedById[topic.topicId]);
-                            const canShowDetailedDistribution = hasVoted && topic.hasDistribution;
-                            const topicMeta = topicById.get(topic.topicId);
-                            const optionA = topicMeta?.options.find((option) => option.position === 1) ?? null;
-                            const optionB = topicMeta?.options.find((option) => option.position === 2) ?? null;
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {topicsError ? <p className="mb-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
+
+                    <div
+                      className="max-h-[52dvh] overflow-y-auto pr-1"
+                      style={{
+                        paddingBottom: topicListBottomInset,
+                        scrollPaddingBottom: topicListBottomInset,
+                      }}
+                    >
+                      {filteredTopics.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
+                          이 카테고리에 표시할 주제가 없습니다.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 pb-1">
+                          {filteredTopics.map((topic) => {
+                            const optionA = topic.options.find((option) => option.position === 1) ?? null;
+                            const optionB = topic.options.find((option) => option.position === 2) ?? null;
+                            const isExpanded = expandedPickerTopicId === topic.id;
+                            const isSelectionReady = Boolean(
+                              pickerSelectedOptionKey && optionA && optionB && !isPickerSubmittingVote,
+                            );
 
                             return (
                               <div
-                                key={topic.topicId}
-                                className="group w-full rounded-[20px] border p-5 text-left shadow-[0_2px_10px_rgba(0,0,0,0.25)] transition-all duration-300 hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)]"
-                                style={{
-                                  borderColor: isExpanded ? desktopColors.blue : desktopColors.border,
-                                  backgroundColor: desktopColors.surface,
-                                  boxShadow: isExpanded ? '0 0 0 1px rgba(47,116,255,0.45), 0 16px 34px rgba(0,0,0,0.38)' : undefined,
-                                }}
+                                key={topic.id}
+                                className={`rounded-xl border bg-white/5 transition-colors duration-300 ${isExpanded ? 'border-[#ff9f0a55] bg-white/[0.07]' : 'border-white/14'
+                                  }`}
                               >
-                                <div className="mb-3 flex items-start justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-bold"
-                                      style={{ backgroundColor: desktopColors.divider, color: desktopColors.textSecondary }}
-                                    >
-                                      {topic.rank}
-                                    </span>
-                                    {topic.isHot ? (
-                                      <span
-                                        className="inline-flex items-center rounded-[6px] border px-2 py-0.5 text-[11px] font-bold"
-                                        style={{ borderColor: desktopColors.redSoft, color: desktopColors.red, backgroundColor: desktopColors.redSoft }}
-                                      >
-                                        HOT
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <span className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: desktopColors.textSecondary }}>
-                                    <Users className="h-3 w-3" /> {topic.totalVotes.toLocaleString()}명
+                                <button
+                                  type="button"
+                                  onClick={() => handleTopicPickerToggle(topic.id)}
+                                  className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-white/84 transition hover:bg-white/6"
+                                >
+                                  <p className="line-clamp-1 text-[14px] font-medium leading-5">{topic.title}</p>
+                                  <span className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2 text-[11px] font-semibold text-[#ffd2a6]">
+                                    {isExpanded ? '닫기' : '투표'}
                                   </span>
-                                </div>
+                                </button>
 
-                                <p className="mb-4 line-clamp-2 text-[16px] font-bold leading-snug transition-colors group-hover:text-[#8dbdff]" style={{ color: desktopColors.textPrimary }}>
-                                  {topic.title}
-                                </p>
-
-                                <div className="space-y-1.5">
-                                  {canShowDetailedDistribution ? (
-                                    <>
-                                      <div className="flex items-center justify-between px-1 text-[11px] font-bold" style={{ color: desktopColors.textSecondary }}>
-                                        <span>{topic.leftLabel}</span>
-                                        <span>{topic.rightLabel}</span>
-                                      </div>
-                                      <div className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
-                                        <div className="h-full bg-[#ff6b00]" style={{ width: `${topic.leftPercent}%` }} />
-                                        <div className="h-full bg-[#2f74ff]" style={{ width: `${topic.rightPercent}%` }} />
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <div className="flex items-center justify-between px-1 text-[11px] font-bold" style={{ color: desktopColors.textSecondary }}>
-                                        <span>투표 전 결과 비공개</span>
-                                        <span>격차 {topic.gapPercent}%p · 총 {topic.previewTotalVotes.toLocaleString()}표</span>
-                                      </div>
-                                      <div className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
-                                        <div className="h-full w-full bg-gray-500" />
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-
-                                <div className="mt-4">
-                                  {!isExpanded && !hasVoted ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDesktopHotTopicToggle(topic.topicId)}
-                                      className="w-full rounded-[12px] py-2.5 text-[13px] font-bold transition-colors"
-                                      style={{ backgroundColor: desktopColors.buttonBg, color: desktopColors.textPrimary }}
-                                    >
-                                      투표하기
-                                    </button>
-                                  ) : null}
-
-                                  {isExpanded && !hasVoted ? (
-                                    <div className="mt-1 border-t pt-4" style={{ borderColor: desktopColors.border }}>
-                                      {optionA && optionB ? (
-                                        <div className="grid grid-cols-2 gap-2">
+                                <div
+                                  className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] ${isExpanded ? 'max-h-[320px] opacity-100 translate-y-0' : 'pointer-events-none max-h-0 -translate-y-1 opacity-0'
+                                    }`}
+                                >
+                                  <div className="border-t border-white/10 px-3 pb-3 pt-2.5">
+                                    <p className="text-[12px] text-white/66">선택지를 고르고 바로 투표하세요.</p>
+                                    {optionA && optionB ? (
+                                      <>
+                                        <div className="mt-2 grid grid-cols-2 gap-2">
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              void handleHotTopicImmediateVote({
-                                                topicId: topic.topicId,
-                                                optionKey: optionA.key,
-                                                optionAKey: optionA.key,
-                                                optionBKey: optionB.key,
-                                              })
-                                            }
-                                            disabled={isHotTopicSubmittingVote}
-                                            className="rounded-[12px] bg-[#ff6b00]/10 py-3 text-[14px] font-bold text-[#ffad63] transition-colors hover:bg-[#ff6b00]/22 disabled:cursor-not-allowed disabled:opacity-60"
+                                            onClick={() => {
+                                              setPickerSelectedOptionKey(optionA.key);
+                                              setPickerVoteMessage(null);
+                                            }}
+                                            className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${pickerSelectedOptionKey === optionA.key
+                                                ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]'
+                                                : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                              }`}
                                           >
                                             {optionA.label}
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              void handleHotTopicImmediateVote({
-                                                topicId: topic.topicId,
-                                                optionKey: optionB.key,
-                                                optionAKey: optionA.key,
-                                                optionBKey: optionB.key,
-                                              })
-                                            }
-                                            disabled={isHotTopicSubmittingVote}
-                                            className="rounded-[12px] bg-[#2f74ff]/10 py-3 text-[14px] font-bold text-[#8dbdff] transition-colors hover:bg-[#2f74ff]/22 disabled:cursor-not-allowed disabled:opacity-60"
+                                            onClick={() => {
+                                              setPickerSelectedOptionKey(optionB.key);
+                                              setPickerVoteMessage(null);
+                                            }}
+                                            className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${pickerSelectedOptionKey === optionB.key
+                                                ? 'border-[#4ea1ff88] bg-[#2f7cff2e] text-[#cfe2ff]'
+                                                : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                              }`}
                                           >
                                             {optionB.label}
                                           </button>
                                         </div>
-                                      ) : (
-                                        <p className="text-xs" style={{ color: desktopColors.red }}>
-                                          선택지 정보를 불러오지 못했습니다.
-                                        </p>
-                                      )}
-
-                                      {hotTopicVoteMessage ? (
-                                        <p className="mt-2 text-xs" style={{ color: desktopColors.red }}>
-                                          {hotTopicVoteMessage}
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
-
-                                  {hasVoted ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => router.push(`/results/${topic.topicId}`)}
-                                      className="mt-3 w-full rounded-[12px] border py-2.5 text-center text-[13px] font-bold transition-colors"
-                                      style={{
-                                        borderColor: 'rgba(47,116,255,0.42)',
-                                        backgroundColor: 'rgba(47,116,255,0.2)',
-                                        color: '#8dbdff',
-                                      }}
-                                    >
-                                      결과보기
-                                    </button>
-                                  ) : null}
+                                        {pickerVoteMessage ? (
+                                          <p className="mt-2 text-xs text-[#ffd0a6]">{pickerVoteMessage}</p>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleTopicPickerVoteSubmit(topic)}
+                                          disabled={!isSelectionReady}
+                                          className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b00] text-[13px] font-bold text-white transition hover:bg-[#ff7b1d] disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-white/45"
+                                        >
+                                          {isPickerSubmittingVote ? '처리 중...' : '투표 후 결과 보기'}
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <p className="mt-2 text-xs text-[#ffb4b4]">
+                                        이 주제는 선택지 정보를 불러오지 못했습니다.
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );
-                          })
-                        )}
-                      </div>
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="border-t p-6" style={{ borderColor: desktopColors.border }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsTopicPickerOpen(true)}
-                      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[16px] text-[16px] font-bold transition"
-                      style={{
-                        backgroundColor: desktopColors.buttonBg,
-                        color: desktopColors.textPrimary,
-                      }}
-                    >
-                      주제 전체보기
-                      <ChevronRight className="h-4 w-4" style={{ color: desktopColors.textSecondary }} />
-                    </button>
-                  </div>
-                </aside>
-              ) : null
-            ) : null}
-
-            <div className="relative min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={handleMapLayoutFullscreenToggle}
-                className="pointer-events-auto absolute right-6 top-6 z-30 inline-flex h-11 items-center gap-2 rounded-[12px] border px-4 text-[14px] font-bold transition"
-                style={{
-                  backgroundColor: desktopColors.surface,
-                  borderColor: desktopColors.border,
-                  color: desktopColors.textPrimary,
-                }}
-              >
-                {isMapLayoutFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                <span>{isMapLayoutFullscreen ? '기본 보기' : '전체 화면'}</span>
-              </button>
-
-              <div
-                className="pointer-events-auto absolute right-3 z-20 overflow-hidden rounded-2xl border"
-                style={{
-                  bottom: `${mapZoomControlBottomPx}px`,
-                  backgroundColor: desktopColors.surface,
-                  borderColor: desktopColors.border,
-                }}
-              >
-                <button
-                  type="button"
-                  className="inline-flex h-11 w-[58px] items-center justify-center border-b transition"
-                  style={{
-                    borderColor: desktopColors.border,
-                    color: desktopColors.textSecondary,
-                  }}
-                >
-                  <Plus className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-11 w-[58px] items-center justify-center transition"
-                  style={{ color: desktopColors.textSecondary }}
-                >
-                  <Minus className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            {!isMapLayoutFullscreen ? (
-              isDesktopRightPanelOpen ? (
-                <aside
-                  className="pointer-events-auto relative flex w-[360px] min-h-0 shrink-0 flex-col border-l"
-                  style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setIsDesktopRightPanelOpen(false)}
-                    className="absolute -left-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-l-[16px] border border-r-0"
-                    style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
-                  >
-                    <ChevronRight className="h-5 w-5" />
-                  </button>
-
-                  <div className="flex items-center justify-between border-b px-6 py-5" style={{ borderColor: desktopColors.border }}>
-                    <h2 className="inline-flex items-center gap-2 text-[18px] font-bold" style={{ color: desktopColors.textPrimary }}>
-                      <BarChart2 className="h-5 w-5" style={{ color: desktopColors.blue }} />
-                      상세 결과 분석
-                    </h2>
-                  </div>
-
-                  <div className="custom-scrollbar min-h-0 flex-1 space-y-7 overflow-y-auto p-6" style={{ backgroundColor: desktopColors.surfaceAlt }}>
-                    <section>
-                      <h3 className="text-[15px] font-bold" style={{ color: desktopColors.textPrimary }}>
-                        연령별 참여 비율
-                      </h3>
-                      <div className="mt-3 rounded-[16px] border p-4" style={{ borderColor: desktopColors.border, backgroundColor: desktopColors.surface }}>
-                        {isHomeAnalyticsLoading ? (
-                          <div className="space-y-2">
-                            <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
-                            <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
-                            <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
-                            <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
-                            <div className="h-7 animate-pulse rounded-lg" style={{ backgroundColor: desktopColors.divider }} />
-                          </div>
-                        ) : ageDistributionRows.length === 0 ? (
-                          <p className="text-sm" style={{ color: desktopColors.textSecondary }}>
-                            {homeAnalyticsError ?? '연령별 데이터가 없습니다.'}
-                          </p>
-                        ) : (
-                          <div className="space-y-2.5">
-                            {ageDistributionRows.map((row) => (
-                              <div key={row.label}>
-                                <div className="mb-1.5 flex items-center justify-between text-[12px] font-semibold" style={{ color: desktopColors.textSecondary }}>
-                                  <span>{row.label}</span>
-                                  <span>
-                                    {row.percent.toFixed(1)}% · {row.count.toLocaleString()}명
-                                  </span>
-                                </div>
-                                <div className="h-2 overflow-hidden rounded-full" style={{ backgroundColor: desktopColors.divider }}>
-                                  <div className="h-full rounded-full" style={{ width: `${row.percent}%`, backgroundColor: desktopColors.blue }} />
-                                </div>
-                              </div>
-                            ))}
-                            <p className="pt-1 text-[11px]" style={{ color: desktopColors.textSecondary }}>
-                              기준: 회원 투표 데이터({homeAnalytics ? homeAnalytics.age.knownTotal.toLocaleString() : '0'}건)
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </section>
-
-                    <section>
-                      <h3 className="text-[15px] font-bold" style={{ color: desktopColors.textPrimary }}>
-                        성별 참여 비율
-                      </h3>
-                      <div className="mt-3 grid grid-cols-2 gap-4">
-                        <div className="rounded-[16px] border px-4 py-4" style={{ borderColor: 'rgba(47,116,255,0.42)', backgroundColor: 'rgba(47,116,255,0.16)' }}>
-                          <p className="text-[26px] font-extrabold" style={{ color: desktopColors.blue }}>
-                            {isHomeAnalyticsLoading ? '-' : `${homeAnalytics ? homeAnalytics.gender.male.percent.toFixed(1) : '0.0'}%`}
-                          </p>
-                          <p className="mt-1 text-[13px] font-semibold" style={{ color: desktopColors.textSecondary }}>
-                            남성 · {(homeAnalytics?.gender.male.count ?? 0).toLocaleString()}명
-                          </p>
-                        </div>
-                        <div className="rounded-[16px] border px-4 py-4" style={{ borderColor: 'rgba(255,107,0,0.42)', backgroundColor: 'rgba(255,107,0,0.16)' }}>
-                          <p className="text-[26px] font-extrabold" style={{ color: desktopColors.red }}>
-                            {isHomeAnalyticsLoading ? '-' : `${homeAnalytics ? homeAnalytics.gender.female.percent.toFixed(1) : '0.0'}%`}
-                          </p>
-                          <p className="mt-1 text-[13px] font-semibold" style={{ color: desktopColors.textSecondary }}>
-                            여성 · {(homeAnalytics?.gender.female.count ?? 0).toLocaleString()}명
-                          </p>
-                        </div>
-                      </div>
-                      <p className="mt-2 text-[11px]" style={{ color: desktopColors.textSecondary }}>
-                        기타 {(homeAnalytics?.gender.otherCount ?? 0).toLocaleString()}명 · 미상 {(homeAnalytics?.gender.unknownCount ?? 0).toLocaleString()}명
-                      </p>
-                    </section>
-                  </div>
-                </aside>
-              ) : null
-            ) : null}
-          </div>
-
-          {!isMapLayoutFullscreen && !isDesktopLeftPanelOpen ? (
-            <button
-              type="button"
-              onClick={() => setIsDesktopLeftPanelOpen(true)}
-              className="pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition"
-              style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          ) : null}
-
-          {!isMapLayoutFullscreen && !isDesktopRightPanelOpen ? (
-            <button
-              type="button"
-              onClick={() => setIsDesktopRightPanelOpen(true)}
-              className="pointer-events-auto absolute right-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-l-[16px] border border-r-0 transition"
-              style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border, color: desktopColors.textSecondary }}
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <div
-        ref={bottomDockRef}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200 md:hidden"
-      >
-        <section
-          onWheel={handleBottomDockWheel}
-          onTouchStart={handleBottomDockTouchStart}
-          onTouchMove={handleBottomDockTouchMove}
-          onTouchEnd={handleBottomDockTouchEnd}
-          onTouchCancel={handleBottomDockTouchEnd}
-          className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
-          style={{ touchAction: 'pan-y' }}
-        >
-          <div className="mx-auto max-w-[430px] px-3">
-            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
-                  광고
-                </span>
-                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
-                  스폰서 배너 영역입니다.
-                </p>
-                <button
-                  type="button"
-                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
-                >
-                  자세히
-                </button>
+                  </>
+                )}
               </div>
             </section>
           </div>
-        </section>
-      </div>
+        ) : null}
 
-      <div
-        ref={bottomMenuRef}
-        className="pointer-events-none absolute inset-x-0 z-20 transition-opacity duration-200 md:hidden"
-        style={{ bottom: `${bottomAdHeight}px` }}
-      >
-        <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
-          <div ref={bottomMenuGridRef} className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
-            {[
-              { id: 'home' as const, label: '홈' },
-              { id: 'map' as const, label: '지도' },
-              { id: 'game' as const, label: '게임' },
-              { id: 'me' as const, label: 'MY' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                ref={tab.id === 'map' ? mapTabButtonRef : undefined}
-                onClick={() => handleBottomTabClick(tab.id)}
-                className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${
-                  activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </nav>
-      </div>
-
-      <div
-        className={`pointer-events-none absolute inset-x-0 z-30 transition-opacity duration-200 md:hidden ${
-          isTopicPickerOpen ? 'opacity-0' : 'opacity-100'
-        }`}
-        style={{ bottom: `${bottomAdHeight + (bottomMenuHeight > 0 ? bottomMenuHeight : 62) - 2}px` }}
-      >
-        <div ref={topicHintRef} className="mx-auto max-w-[430px] px-3">
-          <div className="relative h-[48px]">
-            <div
-              className="absolute top-0 -translate-x-1/2"
-              style={{ left: `${topicHintAnchorPercent}%` }}
-            >
-              <div className="flex flex-col items-center leading-none">
-                <span className="whitespace-nowrap text-[11px] font-semibold tracking-[-0.01em] text-[#ffd2a6]">
-                  여기서 다른 주제를 선택하세요
-                </span>
-                <svg
-                  className="home-chevron mt-0.5"
-                  width="30"
-                  height="36"
-                  viewBox="0 0 100 130"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <polyline
-                      id="home-chevron-shape"
-                      points="38,8 50,24 62,8"
-                      stroke="#ff9f0a"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </defs>
-                  <g className="home-chevron-group">
-                    <use href="#home-chevron-shape" />
-                    <use href="#home-chevron-shape" />
-                    <use href="#home-chevron-shape" />
-                  </g>
-                </svg>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {isTopicPickerOpen ? (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/58 p-4"
-          onClick={handleTopicPickerClose}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="home-topic-picker-title"
-            className="w-full max-w-[860px] overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.96)] shadow-2xl backdrop-blur-2xl"
-            style={{ maxHeight: 'calc(100dvh - 2rem)' }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 pb-3 pt-4">
-              <div>
-                <h4 id="home-topic-picker-title" className="text-[20px] font-semibold text-white">
-                  다른 주제 선택
-                </h4>
-                <p className="mt-1 text-xs text-white/60">선택하면 바로 투표 카드가 펼쳐집니다.</p>
-              </div>
-              <button
-                type="button"
-                aria-label="주제 선택 팝업 닫기"
-                onClick={handleTopicPickerClose}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/14 bg-white/6 text-lg text-white/80 transition hover:bg-white/12 hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
-              {isTopicsLoading ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
-                  주제 불러오는 중...
-                </div>
-              ) : availableTopics.length === 0 ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
-                  LIVE 주제가 없습니다.
-                </div>
-              ) : (
-                <>
-                  <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
-                    {TOPIC_TAB_META.map((tab) => {
-                      const isActive = activeTopicTab === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setActiveTopicTab(tab.id)}
-                          className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
-                            isActive
-                              ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
-                              : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {topicsError ? <p className="mb-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
-
-                  <div
-                    className="max-h-[52dvh] overflow-y-auto pr-1"
-                    style={{
-                      paddingBottom: topicListBottomInset,
-                      scrollPaddingBottom: topicListBottomInset,
-                    }}
-                  >
-                    {filteredTopics.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
-                        이 카테고리에 표시할 주제가 없습니다.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 pb-1">
-                        {filteredTopics.map((topic) => {
-                          const optionA = topic.options.find((option) => option.position === 1) ?? null;
-                          const optionB = topic.options.find((option) => option.position === 2) ?? null;
-                          const isExpanded = expandedPickerTopicId === topic.id;
-                          const isSelectionReady = Boolean(
-                            pickerSelectedOptionKey && optionA && optionB && !isPickerSubmittingVote,
-                          );
-
-                          return (
-                            <div
-                              key={topic.id}
-                              className={`rounded-xl border bg-white/5 transition-colors duration-300 ${
-                                isExpanded ? 'border-[#ff9f0a55] bg-white/[0.07]' : 'border-white/14'
-                              }`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => handleTopicPickerToggle(topic.id)}
-                                className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-white/84 transition hover:bg-white/6"
-                              >
-                                <p className="line-clamp-1 text-[14px] font-medium leading-5">{topic.title}</p>
-                                <span className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2 text-[11px] font-semibold text-[#ffd2a6]">
-                                  {isExpanded ? '닫기' : '투표'}
-                                </span>
-                              </button>
-
-                              <div
-                                className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] ${
-                                  isExpanded ? 'max-h-[320px] opacity-100 translate-y-0' : 'pointer-events-none max-h-0 -translate-y-1 opacity-0'
-                                }`}
-                              >
-                                <div className="border-t border-white/10 px-3 pb-3 pt-2.5">
-                                  <p className="text-[12px] text-white/66">선택지를 고르고 바로 투표하세요.</p>
-                                  {optionA && optionB ? (
-                                    <>
-                                      <div className="mt-2 grid grid-cols-2 gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setPickerSelectedOptionKey(optionA.key);
-                                            setPickerVoteMessage(null);
-                                          }}
-                                          className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
-                                            pickerSelectedOptionKey === optionA.key
-                                              ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]'
-                                              : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
-                                          }`}
-                                        >
-                                          {optionA.label}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setPickerSelectedOptionKey(optionB.key);
-                                            setPickerVoteMessage(null);
-                                          }}
-                                          className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
-                                            pickerSelectedOptionKey === optionB.key
-                                              ? 'border-[#4ea1ff88] bg-[#2f7cff2e] text-[#cfe2ff]'
-                                              : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
-                                          }`}
-                                        >
-                                          {optionB.label}
-                                        </button>
-                                      </div>
-                                      {pickerVoteMessage ? (
-                                        <p className="mt-2 text-xs text-[#ffd0a6]">{pickerVoteMessage}</p>
-                                      ) : null}
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleTopicPickerVoteSubmit(topic)}
-                                        disabled={!isSelectionReady}
-                                        className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b00] text-[13px] font-bold text-white transition hover:bg-[#ff7b1d] disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-white/45"
-                                      >
-                                        {isPickerSubmittingVote ? '처리 중...' : '투표 후 결과 보기'}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <p className="mt-2 text-xs text-[#ffb4b4]">
-                                      이 주제는 선택지 정보를 불러오지 못했습니다.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {showProfileModal ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
-          <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-[20px] font-semibold text-white">최초 투표 지역 입력</h4>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowProfileModal(false);
-                  setVoteAfterProfile(false);
-                  setPendingPickerVote(null);
-                  setPendingHotTopicVote(null);
-                  setProfileModalMessage(null);
-                }}
-                className="rounded-lg px-2 py-1 text-sm text-white/65 hover:bg-white/10 hover:text-white"
-              >
-                닫기
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-sm leading-relaxed text-white/72">{regionModalHintText}</p>
-
-              {canSelectSchoolInModal ? (
-                <>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
-                    <input
-                      value={schoolQuery}
-                      onKeyDown={(event) => {
-                        if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
-                          return;
-                        }
-
-                        if (event.key === 'ArrowDown') {
-                          event.preventDefault();
-                          setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
-                          return;
-                        }
-
-                        if (event.key === 'ArrowUp') {
-                          event.preventDefault();
-                          setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
-                          return;
-                        }
-
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
-                          if (target) {
-                            handleSelectSchool(target);
-                          }
-                        }
-                      }}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setSchoolQuery(nextValue);
-                        setHighlightedSchoolIndex(0);
-                        setProfileModalMessage(null);
-                        if (selectedSchool && nextValue !== selectedSchool.schoolName) {
-                          setSelectedSchool(null);
-                        }
-                      }}
-                      placeholder="학교명을 입력하세요"
-                      autoComplete="off"
-                      className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
-                    />
-                    {isSchoolListVisible ? (
-                      <div
-                        ref={schoolResultsListRef}
-                        className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
-                      >
-                        {isSchoolSearching ? (
-                          <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
-                        ) : schoolResults.length === 0 ? (
-                          <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
-                        ) : (
-                          schoolResults.map((school, index) => (
-                            <button
-                              key={`${school.source}:${school.schoolCode}`}
-                              data-school-index={index}
-                              type="button"
-                              onMouseEnter={() => setHighlightedSchoolIndex(index)}
-                              onClick={() => handleSelectSchool(school)}
-                              className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
-                                index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
-                              }`}
-                            >
-                              <p className="font-semibold">{school.schoolName}</p>
-                              <p className="mt-0.5 text-[11px] text-white/60">
-                                {school.sidoName ?? '-'} · {school.schoolLevel}
-                                {school.campusType ? ` · ${school.campusType}` : ''}
-                              </p>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                    {selectedSchool ? (
-                      <div className="mt-1 flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedSchool(null);
-                            setSchoolQuery('');
-                            setProfileModalMessage(null);
-                          }}
-                          className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                        >
-                          학교 선택 해제
-                        </button>
-                      </div>
-                    ) : null}
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <div className="h-px flex-1 bg-white/14" />
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
-                    <div className="h-px flex-1 bg-white/14" />
-                  </div>
-                </>
-              ) : null}
-
-              <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+        {showProfileModal ? (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
+            <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-[20px] font-semibold text-white">최초 투표 지역 입력</h4>
                 <button
                   type="button"
-                  onClick={() => void handleUseCurrentLocation()}
-                  disabled={isLocatingRegion}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
+                  onClick={() => {
+                    setShowProfileModal(false);
+                    setVoteAfterProfile(false);
+                    setPendingPickerVote(null);
+                    setPendingHotTopicVote(null);
+                    setProfileModalMessage(null);
+                  }}
+                  className="rounded-lg px-2 py-1 text-sm text-white/65 hover:bg-white/10 hover:text-white"
                 >
-                  {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
+                  닫기
                 </button>
-
-                {gpsRegionInput ? (
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-[#9dd2ff]">
-                    <p className="truncate">
-                      선택됨: {gpsRegionInput.region.sidoName ?? gpsRegionInput.region.sidoCode}
-                      {gpsRegionInput.region.sigunguName
-                        ? ` · ${gpsRegionInput.region.sigunguName}`
-                        : gpsRegionInput.region.sigunguCode
-                          ? ` · ${gpsRegionInput.region.sigunguCode}`
-                          : ''}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleClearGpsRegion}
-                      className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                    >
-                      위치 선택 해제
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
-                )}
               </div>
 
-              {profileModalMessage ? (
-                <p className="rounded-lg border border-white/12 bg-white/6 px-3 py-2 text-xs text-white/78">
-                  {profileModalMessage}
-                </p>
-              ) : null}
+              <div className="space-y-3">
+                <p className="text-sm leading-relaxed text-white/72">{regionModalHintText}</p>
 
-              <button
-                type="button"
-                onClick={() => void handleSaveRegionOnly()}
-                disabled={!hasPendingRegionInput || isLocatingRegion}
-                className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                저장{voteAfterProfile || pendingPickerVote ? ' 후 투표하기' : ''}
-              </button>
+                {canSelectSchoolInModal ? (
+                  <>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
+                      <input
+                        value={schoolQuery}
+                        onKeyDown={(event) => {
+                          if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
+                            return;
+                          }
+
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            setHighlightedSchoolIndex((prev) => Math.min(prev + 1, schoolResults.length - 1));
+                            return;
+                          }
+
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            setHighlightedSchoolIndex((prev) => Math.max(prev - 1, 0));
+                            return;
+                          }
+
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            const target = schoolResults[Math.min(highlightedSchoolIndex, schoolResults.length - 1)];
+                            if (target) {
+                              handleSelectSchool(target);
+                            }
+                          }
+                        }}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setSchoolQuery(nextValue);
+                          setHighlightedSchoolIndex(0);
+                          setProfileModalMessage(null);
+                          if (selectedSchool && nextValue !== selectedSchool.schoolName) {
+                            setSelectedSchool(null);
+                          }
+                        }}
+                        placeholder="학교명을 입력하세요"
+                        autoComplete="off"
+                        className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
+                      />
+                      {isSchoolListVisible ? (
+                        <div
+                          ref={schoolResultsListRef}
+                          className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+                        >
+                          {isSchoolSearching ? (
+                            <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                          ) : schoolResults.length === 0 ? (
+                            <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                          ) : (
+                            schoolResults.map((school, index) => (
+                              <button
+                                key={`${school.source}:${school.schoolCode}`}
+                                data-school-index={index}
+                                type="button"
+                                onMouseEnter={() => setHighlightedSchoolIndex(index)}
+                                onClick={() => handleSelectSchool(school)}
+                                className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                                  }`}
+                              >
+                                <p className="font-semibold">{school.schoolName}</p>
+                                <p className="mt-0.5 text-[11px] text-white/60">
+                                  {school.sidoName ?? '-'} · {school.schoolLevel}
+                                  {school.campusType ? ` · ${school.campusType}` : ''}
+                                </p>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                      {selectedSchool ? (
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-medium text-[#ffcc99]">선택됨: {selectedSchool.schoolName}</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSchool(null);
+                              setSchoolQuery('');
+                              setProfileModalMessage(null);
+                            }}
+                            className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                          >
+                            학교 선택 해제
+                          </button>
+                        </div>
+                      ) : null}
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <div className="h-px flex-1 bg-white/14" />
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
+                      <div className="h-px flex-1 bg-white/14" />
+                    </div>
+                  </>
+                ) : null}
+
+                <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleUseCurrentLocation()}
+                    disabled={isLocatingRegion}
+                    className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
+                  </button>
+
+                  {gpsRegionInput ? (
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-[#9dd2ff]">
+                      <p className="truncate">
+                        선택됨: {gpsRegionInput.region.sidoName ?? gpsRegionInput.region.sidoCode}
+                        {gpsRegionInput.region.sigunguName
+                          ? ` · ${gpsRegionInput.region.sigunguName}`
+                          : gpsRegionInput.region.sigunguCode
+                            ? ` · ${gpsRegionInput.region.sigunguCode}`
+                            : ''}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleClearGpsRegion}
+                        className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                      >
+                        위치 선택 해제
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
+                  )}
+                </div>
+
+                {profileModalMessage ? (
+                  <p className="rounded-lg border border-white/12 bg-white/6 px-3 py-2 text-xs text-white/78">
+                    {profileModalMessage}
+                  </p>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRegionOnly()}
+                  disabled={!hasPendingRegionInput || isLocatingRegion}
+                  className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b00] text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(255,107,0,0.35)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  저장{voteAfterProfile || pendingPickerVote ? ' 후 투표하기' : ''}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
       </main>
 
       <style jsx>{`
@@ -3576,7 +3545,9 @@ export default function MainMapHome() {
         }
       `}</style>
 
-      <SiteLegalFooter containerMaxWidthClassName="max-w-[1280px]" />
+      <div>
+        <SiteLegalFooter containerMaxWidthClassName="max-w-[1280px]" />
+      </div>
     </div>
   );
 }
