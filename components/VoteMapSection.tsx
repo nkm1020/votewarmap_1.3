@@ -1,8 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useState } from 'react';
-import type { RegionVoteMap, RegionVoteStat } from '@/components/KoreaAdminMap';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { MapTooltipContext, RegionVoteMap, RegionVoteStat } from '@/components/KoreaAdminMap';
 
 const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
 
@@ -105,6 +105,7 @@ function mergeMapStats(base: RegionVoteMap, extra: RegionVoteMap): RegionVoteMap
 
 export default function VoteMapSection() {
   const [activeTopic, setActiveTopic] = useState<TopicId>('transport');
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<RegionSelection | null>(null);
   const [sigunguCodes, setSigunguCodes] = useState<string[]>([]);
 
@@ -134,6 +135,27 @@ export default function VoteMapSection() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const syncViewport = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+    };
+
+    syncViewport();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport);
+      return () => mediaQuery.removeEventListener('change', syncViewport);
+    }
+
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
+  }, []);
+
   const statsByCode = useMemo(() => {
     const sidoStats = buildSidoStats(activeTopic);
     const sigunguStats: RegionVoteMap = {};
@@ -152,6 +174,30 @@ export default function VoteMapSection() {
 
     return statsByCode[selectedRegion.code] ?? statsByCode[selectedRegion.code.slice(0, 2)] ?? null;
   }, [selectedRegion, statsByCode]);
+  const renderTooltipContent = useCallback(
+    (context: MapTooltipContext) => {
+      const stat = context.stat ?? null;
+      const countA = stat?.countA ?? 0;
+      const countB = stat?.countB ?? 0;
+      const total = stat?.total ?? countA + countB;
+
+      return (
+        <div className="w-[min(320px,calc(100vw-40px))] rounded-xl border border-slate-700 bg-slate-900/95 px-3 py-2.5 text-slate-100 shadow-2xl">
+          <div className="flex items-center justify-between gap-3">
+            <p className="truncate text-sm font-semibold">{context.name || context.code}</p>
+            <span className="rounded-full border border-slate-600 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200">
+              {context.level === 'sido' ? '시/도' : '시/군/구'}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-300">
+            {TOPICS.find((topic) => topic.id === activeTopic)?.label ?? '주제'} · A {countA.toLocaleString()} / B{' '}
+            {countB.toLocaleString()} / 합계 {total.toLocaleString()}
+          </p>
+        </div>
+      );
+    },
+    [activeTopic],
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-10 sm:px-6 lg:px-8">
@@ -185,10 +231,16 @@ export default function VoteMapSection() {
       <KoreaAdminMap
         statsByCode={statsByCode}
         defaultRegionLevel="sigungu"
-        onRegionClick={(region) =>
-          setSelectedRegion((prev) =>
-            prev && prev.code === region.code && prev.level === region.level ? null : region,
-          )
+        showTooltip={isDesktopViewport}
+        tooltipPinOnClick={isDesktopViewport}
+        renderTooltipContent={isDesktopViewport ? renderTooltipContent : undefined}
+        onRegionClick={
+          isDesktopViewport
+            ? undefined
+            : (region) =>
+                setSelectedRegion((prev) =>
+                  prev && prev.code === region.code && prev.level === region.level ? null : region,
+                )
         }
         className="shadow-sm"
       />
@@ -214,7 +266,7 @@ export default function VoteMapSection() {
           : '세부 행정구역 통계 로딩 중'}
       </p>
 
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-500 lg:hidden">
         선택된 지역:{' '}
         {selectedRegion
           ? `${selectedRegion.name || selectedRegion.code} (${selectedRegion.level === 'sido' ? '시/도' : '시/군/구'})`

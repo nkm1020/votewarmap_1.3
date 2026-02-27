@@ -15,6 +15,7 @@ export type RegionVoteStat = {
   total?: number;
   countA?: number;
   countB?: number;
+  gapPercent?: number;
 };
 
 export type RegionVoteMap = Record<string, RegionVoteStat>;
@@ -71,4 +72,40 @@ export type VoteTopic = {
   title: string;
   status: string;
   options: VoteTopicOption[];
+};
+
+export type AgeBucketKey = 'teens' | 'twenties' | 'thirties' | 'forties' | 'fiftiesPlus';
+
+export type AgeBucketStat = {
+  count: number;
+  percent: number;
+};
+
+export type GenderBreakdown = {
+  male: {
+    count: number;
+    percent: number;
+  };
+  female: {
+    count: number;
+    percent: number;
+  };
+  otherCount: number;
+  unknownCount: number;
+  knownBinaryTotal: number;
+};
+
+export type HomeAnalyticsResponse = {
+  demographics: {
+    source: 'votes_members_only';
+    scope: string;
+    totalMemberVotes: number;
+    age: {
+      buckets: Record<AgeBucketKey, AgeBucketStat>;
+      knownTotal: number;
+      unknownCount: number;
+      referenceYear: number;
+    };
+    gender: GenderBreakdown;
+  };
 };

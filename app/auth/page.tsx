@@ -57,7 +57,6 @@ export default function AuthPage() {
 
       <div className="relative z-10 mx-auto flex h-full w-full max-w-[1240px] flex-col px-4 pb-8 pt-5 sm:px-6 lg:px-10">
         <DesktopTopHeader
-          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
           links={[
             { key: 'home', label: '홈', href: '/' },
             { key: 'map', label: '지도', href: '/topics-map' },

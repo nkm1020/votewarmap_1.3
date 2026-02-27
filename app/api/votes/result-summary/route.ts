@@ -37,6 +37,8 @@ type RegionCounts = {
   winner: 'A' | 'B' | 'TIE';
 };
 
+type ResultVisibility = 'locked' | 'unlocked';
+
 function normalizeInt(value: number | string | null | undefined): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -73,6 +75,17 @@ function withPercent(stat: RegionCounts) {
     aPercent,
     bPercent: Math.max(0, 100 - aPercent),
   };
+}
+
+function toGapPercent(countA: number, countB: number): number {
+  const totalVotes = Math.max(0, countA + countB);
+  if (totalVotes <= 0) {
+    return 0;
+  }
+
+  const aPercent = Math.round((countA / totalVotes) * 100);
+  const bPercent = Math.max(0, 100 - aPercent);
+  return Math.abs(aPercent - bPercent);
 }
 
 function optionKeyToWinner(optionKey: string | null, optionAKey: string, optionBKey: string): 'A' | 'B' | null {
@@ -303,6 +316,13 @@ export async function GET(request: Request) {
     const matchesMyRegion =
       myChoiceWinner && myRegion && myRegion.winner !== 'TIE' ? myChoiceWinner === myRegion.winner : null;
 
+    const hasVote = Boolean(myOptionKey);
+    const visibility: ResultVisibility = hasVote ? 'unlocked' : 'locked';
+    const preview = {
+      gapPercent: toGapPercent(nationwide.countA, nationwide.countB),
+      totalVotes: nationwide.totalVotes,
+    };
+
     return NextResponse.json({
       topic: {
         id: topicRow.id,
@@ -311,20 +331,23 @@ export async function GET(request: Request) {
         optionA,
         optionB,
       },
+      visibility,
       viewer: {
         type: viewerType,
-        hasVote: Boolean(myOptionKey),
+        hasVote,
       },
-      nationwide,
-      myRegion,
-      myChoice: myOptionKey
-        ? {
-            optionKey: myOptionKey,
-            label: myChoiceLabel,
-            matchesNationwide,
-            matchesMyRegion,
-          }
-        : null,
+      preview: visibility === 'locked' ? preview : null,
+      nationwide: visibility === 'unlocked' ? nationwide : null,
+      myRegion: visibility === 'unlocked' ? myRegion : null,
+      myChoice:
+        visibility === 'unlocked' && myOptionKey
+          ? {
+              optionKey: myOptionKey,
+              label: myChoiceLabel,
+              matchesNationwide,
+              matchesMyRegion,
+            }
+          : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'result summary failed';

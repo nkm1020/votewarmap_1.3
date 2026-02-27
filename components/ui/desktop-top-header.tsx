@@ -133,28 +133,30 @@ export function DesktopTopHeader({
 }: DesktopTopHeaderProps) {
   const visibilityClass = visibleFrom === 'lg' ? 'hidden lg:block' : 'hidden md:block';
   const linksPositionClass =
-    linksPosition === 'right' ? 'justify-end' : linksPosition === 'left' ? 'justify-start' : 'justify-center';
+    linksPosition === 'right' ? 'justify-self-end' : linksPosition === 'left' ? 'justify-self-start' : 'justify-self-center';
 
   return (
     <header
       className={joinClasses(
         visibilityClass,
-        'sticky top-0 z-50 w-full py-2',
+        'sticky top-0 z-50 w-full',
         className,
       )}
     >
       <nav
         className={joinClasses(
-          'mx-auto flex h-14 w-full max-w-[1280px] items-center justify-between rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.72)] px-4 backdrop-blur-2xl sm:px-5 lg:px-6',
+          'mx-auto grid h-16 w-full grid-cols-[1fr_auto_1fr] items-center rounded-b-2xl rounded-t-none border-b border-white/12 bg-[rgba(12,18,28,0.72)] px-6 backdrop-blur-2xl',
           containerClassName,
         )}
       >
-        <Link href={brandHref} className="inline-flex items-center gap-2 text-white">
-          <Grid2x2PlusIcon className="h-5 w-5" />
-          <span className="font-mono text-base font-bold">{brandLabel}</span>
-        </Link>
+        <div className="min-w-0 justify-self-start">
+          <Link href={brandHref} className="inline-flex min-w-0 items-center gap-2 text-white">
+            <Grid2x2PlusIcon className="h-5 w-5" />
+            <span className="font-mono text-base font-bold">{brandLabel}</span>
+          </Link>
+        </div>
 
-        <div className={joinClasses('mx-4 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto', linksPositionClass)}>
+        <div className={joinClasses('flex min-w-0 items-center gap-1 overflow-x-auto', linksPositionClass)}>
           {links.map((link) => (
             <HeaderLink
               key={link.key}
@@ -166,7 +168,7 @@ export function DesktopTopHeader({
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 justify-self-end">
           {actions.map((action) => (
             <HeaderAction
               key={action.key}

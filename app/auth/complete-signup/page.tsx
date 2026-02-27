@@ -119,7 +119,6 @@ export default function CompleteSignupPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_70%_at_20%_15%,rgba(47,116,255,0.24),rgba(47,116,255,0)_60%),radial-gradient(80%_60%_at_80%_90%,rgba(255,103,0,0.18),rgba(255,103,0,0)_65%),linear-gradient(to_bottom,rgba(19,15,12,0.95),rgba(19,15,12,0.82))]" />
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1240px] flex-col px-4 py-6 sm:px-6 lg:px-10">
         <DesktopTopHeader
-          containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
           links={[
             { key: 'home', label: '홈', href: '/' },
             { key: 'map', label: '지도', href: '/topics-map' },

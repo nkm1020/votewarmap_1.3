@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { FeatureCollection, Geometry } from 'geojson';
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource } from 'maplibre-gl';
 import { Layers3Icon, MapIcon } from 'lucide-react';
@@ -15,9 +15,20 @@ export type RegionVoteStat = {
   total?: number;
   countA?: number;
   countB?: number;
+  gapPercent?: number;
 };
 
 export type RegionVoteMap = Record<string, RegionVoteStat>;
+
+export type MapTooltipContext = {
+  code: string;
+  name: string;
+  level: 'sido' | 'sigungu';
+  stat?: RegionVoteStat;
+  isPinned: boolean;
+  x: number;
+  y: number;
+};
 
 export type MapPointMarker = {
   id: string;
@@ -56,7 +67,7 @@ type MapColors = {
 };
 
 type MapTheme = 'light' | 'dark';
-type MapFillMode = 'winner' | 'activity';
+type MapFillMode = 'winner' | 'activity' | 'locked';
 type FillTargetLevel = 'sido' | 'sigungu';
 
 export interface KoreaAdminMapProps {
@@ -74,6 +85,9 @@ export interface KoreaAdminMapProps {
   colors?: Partial<MapColors>;
   theme?: MapTheme;
   showTooltip?: boolean;
+  tooltipPinOnClick?: boolean;
+  renderTooltipContent?: (context: MapTooltipContext) => ReactNode;
+  onTooltipRegionChange?: (context: MapTooltipContext | null) => void;
   showNavigationControl?: boolean;
   showRegionLevelToggle?: boolean;
   regionLevelToggleAlign?: 'left' | 'right';
@@ -129,9 +143,9 @@ const MARKER_SOURCE_ID = 'school-points';
 const MARKER_GLOW_LAYER_ID = 'school-point-glow';
 const MARKER_CORE_LAYER_ID = 'school-point-core';
 const MARKER_LABEL_LAYER_ID = 'school-point-labels';
+const LOCKED_FILL_COLOR = 'rgba(122, 142, 165, 0.52)';
 
 const LEVEL_TRANSITION_MS = 420;
-const AUTO_BLEND_MARGIN = 0.55;
 const REGION_LEVEL_OPTIONS: Array<{ value: RegionLevel; label: string; icon: typeof MapIcon }> = [
   { value: 'sido', label: '시도', icon: MapIcon },
   { value: 'sigungu', label: '시군구', icon: Layers3Icon },
@@ -161,6 +175,20 @@ function buildFillExpression(
   const entries: string[] = [];
   const featureCode: ExpressionSpecification = ['to-string', ['coalesce', ['get', 'code'], ['id']]];
   const expectedCodeLength = targetLevel === 'sigungu' ? 5 : targetLevel === 'sido' ? 2 : null;
+
+  if (fillMode === 'locked') {
+    Object.entries(statsByCode).forEach(([code]) => {
+      if (expectedCodeLength !== null && code.length !== expectedCodeLength) {
+        return;
+      }
+      entries.push(code, LOCKED_FILL_COLOR);
+    });
+
+    if (entries.length === 0) {
+      return ['match', featureCode, '__no_stats__', LOCKED_FILL_COLOR, LOCKED_FILL_COLOR] as ExpressionSpecification;
+    }
+    return ['match', featureCode, ...entries, LOCKED_FILL_COLOR] as ExpressionSpecification;
+  }
 
   if (fillMode === 'activity') {
     const candidateEntries = Object.entries(statsByCode).filter(([code]) =>
@@ -264,7 +292,7 @@ export default function KoreaAdminMap({
   statsByCode = {},
   pointMarkers = [],
   markerEffect = 'gps',
-  defaultRegionLevel = 'sido',
+  defaultRegionLevel = 'sigungu',
   className,
   height = 640,
   initialCenter,
@@ -275,6 +303,9 @@ export default function KoreaAdminMap({
   colors,
   theme = 'light',
   showTooltip = true,
+  tooltipPinOnClick = false,
+  renderTooltipContent,
+  onTooltipRegionChange,
   showNavigationControl = true,
   showRegionLevelToggle = false,
   regionLevelToggleAlign = 'left',
@@ -285,8 +316,6 @@ export default function KoreaAdminMap({
   viewRequest,
 }: KoreaAdminMapProps) {
   const prefersReducedMotion = useReducedMotion();
-  const defaultCenter: [number, number] = initialCenter ?? [127.8, 36.2];
-  const defaultZoom = initialZoom ?? 6.3;
   const toggleBottomOffsetPx = Math.max(120, bottomDockHeightPx + toggleClearancePx);
   const mapNodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -307,9 +336,16 @@ export default function KoreaAdminMap({
   const requestLevelSwitchRef = useRef<((level?: RegionLevel) => void) | null>(null);
   const requestMarkerEffectSyncRef = useRef<(() => void) | null>(null);
   const lastAppliedViewRequestIdRef = useRef<string | null>(null);
-  const suppressAutoLevelSyncRef = useRef(false);
   const selectedLevelRef = useRef<RegionLevel>(defaultRegionLevel);
   const [hovered, setHovered] = useState<HoveredRegion | null>(null);
+  const [pinnedRegion, setPinnedRegion] = useState<HoveredRegion | null>(null);
+  const pinnedRegionRef = useRef<HoveredRegion | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    pinnedRegionRef.current = pinnedRegion;
+  }, [pinnedRegion]);
   const [selectedLevel, setSelectedLevel] = useState<RegionLevel>(defaultRegionLevel);
 
   useEffect(() => {
@@ -327,6 +363,33 @@ export default function KoreaAdminMap({
   useEffect(() => {
     selectedLevelRef.current = selectedLevel;
   }, [selectedLevel]);
+
+  useEffect(() => {
+    if (!showTooltip || !tooltipPinOnClick || !pinnedRegion) {
+      return;
+    }
+
+    const handlePointerDownOutsideTooltip = (event: PointerEvent) => {
+      const target = event.target;
+      if (tooltipRef.current && target instanceof Node && tooltipRef.current.contains(target)) {
+        return;
+      }
+      setPinnedRegion(null);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPinnedRegion(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDownOutsideTooltip, true);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDownOutsideTooltip, true);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [pinnedRegion, showTooltip, tooltipPinOnClick]);
 
   useEffect(() => {
     activeLevelRef.current = defaultRegionLevel;
@@ -590,6 +653,11 @@ export default function KoreaAdminMap({
           return;
         }
 
+        if (tooltipPinOnClick && pinnedRegionRef.current) {
+          map.getCanvas().style.cursor = 'pointer';
+          return;
+        }
+
         const prev = hoverRef.current;
         if (!prev || prev.source !== source || prev.id !== id) {
           clearHover();
@@ -639,6 +707,17 @@ export default function KoreaAdminMap({
           return;
         }
 
+        if (showTooltip && tooltipPinOnClick) {
+          setPinnedRegion({
+            code,
+            name,
+            level: source,
+            x: event.point.x + 14,
+            y: event.point.y + 14,
+            stat: statsRef.current[code],
+          });
+        }
+
         onRegionClickRef.current?.({ code, name, level: source });
       });
     };
@@ -665,7 +744,7 @@ export default function KoreaAdminMap({
     };
 
     const updateLevelVisibility = async (forcedLevel?: RegionLevel) => {
-      const nextLevel: RegionLevel = forcedLevel ?? (map.getZoom() >= zoomThreshold ? 'sigungu' : 'sido');
+      const nextLevel: RegionLevel = forcedLevel ?? selectedLevelRef.current;
       if (nextLevel === 'sigungu') {
         await ensureSigunguLoaded();
       }
@@ -688,6 +767,7 @@ export default function KoreaAdminMap({
 
       clearHover();
       setHovered(null);
+      setPinnedRegion(null);
 
       if (switchTimeoutRef.current) {
         window.clearTimeout(switchTimeoutRef.current);
@@ -712,40 +792,6 @@ export default function KoreaAdminMap({
 
       activeLevelRef.current = nextLevel;
       setSelectedLevel(nextLevel);
-    };
-
-    const applyAutoBlendByZoom = async (zoom: number) => {
-      const blendStart = zoomThreshold - AUTO_BLEND_MARGIN;
-      const blendEnd = zoomThreshold + AUTO_BLEND_MARGIN;
-
-      if (zoom <= blendStart) {
-        return;
-      }
-      if (zoom >= blendEnd) {
-        return;
-      }
-
-      await ensureSigunguLoaded();
-
-      if (switchTimeoutRef.current) {
-        window.clearTimeout(switchTimeoutRef.current);
-        switchTimeoutRef.current = null;
-      }
-
-      const ratio = (zoom - blendStart) / (blendEnd - blendStart);
-      const clampedRatio = Math.max(0, Math.min(1, ratio));
-      const nextLevel: RegionLevel = clampedRatio >= 0.5 ? 'sigungu' : 'sido';
-
-      setLayerVisibility('sido-fills', true);
-      setLayerVisibility('sido-borders', true);
-      setLayerVisibility('sigungu-fills', true);
-      setLayerVisibility('sigungu-borders', true);
-      applyLayerOpacity(majorOpacity * (1 - clampedRatio), minorOpacity * clampedRatio);
-      syncInteractiveLayerOrder(nextLevel);
-      activeLevelRef.current = nextLevel;
-      if (selectedLevelRef.current !== nextLevel) {
-        setSelectedLevel(nextLevel);
-      }
     };
 
     requestLevelSwitchRef.current = (level?: RegionLevel) => {
@@ -898,13 +944,6 @@ export default function KoreaAdminMap({
 
     let lastZoom = map.getZoom();
 
-    map.on('zoom', () => {
-      if (suppressAutoLevelSyncRef.current) {
-        return;
-      }
-      void applyAutoBlendByZoom(map.getZoom());
-    });
-
     map.on('zoomend', () => {
       const currentZoom = map.getZoom();
       const previousZoom = lastZoom;
@@ -914,14 +953,12 @@ export default function KoreaAdminMap({
         onMapZoomDirectionChangeRef.current?.({ zoom: currentZoom, direction: 'out' });
       }
       lastZoom = currentZoom;
-      if (suppressAutoLevelSyncRef.current) {
-        return;
-      }
-      requestLevelSwitchRef.current?.();
     });
 
     return () => {
       setHovered(null);
+      setPinnedRegion(null);
+      pinnedRegionRef.current = null;
       requestMarkerEffectSyncRef.current = null;
       clearMarkerPulse();
       if (switchTimeoutRef.current) {
@@ -932,7 +969,17 @@ export default function KoreaAdminMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [zoomThreshold, theme, showNavigationControl, showTooltip, initialCenter, initialZoom, fillMode, defaultRegionLevel]);
+  }, [
+    zoomThreshold,
+    theme,
+    showNavigationControl,
+    showTooltip,
+    tooltipPinOnClick,
+    initialCenter,
+    initialZoom,
+    fillMode,
+    defaultRegionLevel,
+  ]);
 
   useEffect(() => {
     statsRef.current = statsByCode;
@@ -966,35 +1013,90 @@ export default function KoreaAdminMap({
 
   const handleSelectLevel = (nextLevel: RegionLevel) => {
     setSelectedLevel(nextLevel);
-    const map = mapRef.current;
-    if (!map) {
-      requestLevelSwitchRef.current?.(nextLevel);
-      return;
-    }
-
-    const targetZoom = defaultZoom;
-    const currentCenter = map.getCenter();
-    const centerDelta = Math.abs(currentCenter.lng - defaultCenter[0]) + Math.abs(currentCenter.lat - defaultCenter[1]);
-    const zoomDelta = Math.abs(map.getZoom() - targetZoom);
-    const hasMeaningfulMove = centerDelta > 0.0005 || zoomDelta > 0.02;
-
-    if (!hasMeaningfulMove) {
-      requestLevelSwitchRef.current?.(nextLevel);
-      return;
-    }
-
-    suppressAutoLevelSyncRef.current = true;
-    map.once('moveend', () => {
-      requestLevelSwitchRef.current?.(nextLevel);
-      suppressAutoLevelSyncRef.current = false;
-    });
-    map.easeTo({
-      center: defaultCenter,
-      zoom: targetZoom,
-      duration: 430,
-      essential: true,
-    });
+    requestLevelSwitchRef.current?.(nextLevel);
   };
+  const activeTooltip = pinnedRegion ?? hovered;
+  const isTooltipPinned = Boolean(pinnedRegion);
+  const activeTooltipContext = useMemo<MapTooltipContext | null>(() => {
+    if (!activeTooltip) {
+      return null;
+    }
+
+    return {
+      ...activeTooltip,
+      isPinned: isTooltipPinned,
+    };
+  }, [activeTooltip, isTooltipPinned]);
+
+  useEffect(() => {
+    if (!onTooltipRegionChange) {
+      return;
+    }
+
+    if (!showTooltip) {
+      onTooltipRegionChange(null);
+      return;
+    }
+
+    onTooltipRegionChange(activeTooltipContext);
+  }, [activeTooltipContext, onTooltipRegionChange, showTooltip]);
+
+  useEffect(() => {
+    return () => {
+      onTooltipRegionChange?.(null);
+    };
+  }, [onTooltipRegionChange]);
+
+  useEffect(() => {
+    if (!showTooltip || !activeTooltipContext || !mapNodeRef.current) {
+      const rafId = window.requestAnimationFrame(() => {
+        setTooltipPosition(null);
+      });
+      return () => {
+        window.cancelAnimationFrame(rafId);
+      };
+    }
+
+    const clampTooltipPosition = () => {
+      const mapNode = mapNodeRef.current;
+      const tooltipNode = tooltipRef.current;
+      if (!mapNode) {
+        return;
+      }
+
+      if (!tooltipNode) {
+        setTooltipPosition({ left: activeTooltipContext.x, top: activeTooltipContext.y });
+        return;
+      }
+
+      const mapRect = mapNode.getBoundingClientRect();
+      const tooltipRect = tooltipNode.getBoundingClientRect();
+      const margin = 12;
+
+      const maxLeft = Math.max(margin, mapRect.width - tooltipRect.width - margin);
+      const maxTop = Math.max(margin, mapRect.height - tooltipRect.height - margin);
+      const left = Math.min(maxLeft, Math.max(margin, activeTooltipContext.x));
+      const top = Math.min(maxTop, Math.max(margin, activeTooltipContext.y));
+
+      setTooltipPosition((prev) => {
+        if (prev && Math.abs(prev.left - left) < 0.5 && Math.abs(prev.top - top) < 0.5) {
+          return prev;
+        }
+        return { left, top };
+      });
+    };
+
+    const rafId = window.requestAnimationFrame(clampTooltipPosition);
+    const handleResize = () => {
+      window.requestAnimationFrame(clampTooltipPosition);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [activeTooltipContext, renderTooltipContent, showTooltip]);
 
   return (
     <div
@@ -1041,21 +1143,46 @@ export default function KoreaAdminMap({
           })}
         </motion.div>
       ) : null}
-      {showTooltip && hovered ? (
+      {showTooltip && activeTooltipContext ? (
         <div
-          className={`pointer-events-none absolute z-10 rounded-md px-2.5 py-1.5 text-xs font-medium shadow-lg ${THEME_STYLES[theme].tooltipClass}`}
-          style={{ left: hovered.x, top: hovered.y }}
+          ref={tooltipRef}
+          className={`absolute z-10 shadow-lg ${isTooltipPinned ? 'pointer-events-auto' : 'pointer-events-none'} ${
+            renderTooltipContent
+              ? ''
+              : `rounded-md px-2.5 py-1.5 text-xs font-medium ${THEME_STYLES[theme].tooltipClass}`
+          }`}
+          style={{
+            left: tooltipPosition?.left ?? activeTooltipContext.x,
+            top: tooltipPosition?.top ?? activeTooltipContext.y,
+          }}
         >
-          <div>{hovered.name || hovered.code}</div>
-          <div className={`text-[11px] ${THEME_STYLES[theme].tooltipSubClass}`}>
-            {hovered.level === 'sido' ? '시/도' : '시/군/구'} · {hovered.code}
-          </div>
-          {hovered.stat ? (
-            <div className={`mt-1 text-[11px] ${THEME_STYLES[theme].tooltipSubClass}`}>
-              A {hovered.stat.countA ?? 0} · B {hovered.stat.countB ?? 0} · 합계{' '}
-              {hovered.stat.total ?? (hovered.stat.countA ?? 0) + (hovered.stat.countB ?? 0)}
-            </div>
-          ) : null}
+          {renderTooltipContent ? (
+            renderTooltipContent(activeTooltipContext)
+          ) : (
+            <>
+              <div>{activeTooltipContext.name || activeTooltipContext.code}</div>
+              <div className={`text-[11px] ${THEME_STYLES[theme].tooltipSubClass}`}>
+              {activeTooltipContext.level === 'sido' ? '시/도' : '시/군/구'} · {activeTooltipContext.code}
+              </div>
+              {activeTooltipContext.stat ? (
+                <div className={`mt-1 text-[11px] ${THEME_STYLES[theme].tooltipSubClass}`}>
+                  {typeof activeTooltipContext.stat.countA === 'number' &&
+                  typeof activeTooltipContext.stat.countB === 'number' ? (
+                    <>
+                      A {activeTooltipContext.stat.countA} · B {activeTooltipContext.stat.countB} · 합계{' '}
+                      {activeTooltipContext.stat.total ??
+                        (activeTooltipContext.stat.countA ?? 0) + (activeTooltipContext.stat.countB ?? 0)}
+                    </>
+                  ) : (
+                    <>
+                      격차 {activeTooltipContext.stat.gapPercent ?? 0}%p · 총{' '}
+                      {(activeTooltipContext.stat.total ?? 0).toLocaleString()}표
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
     </div>

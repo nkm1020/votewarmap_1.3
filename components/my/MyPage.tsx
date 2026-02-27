@@ -1,7 +1,7 @@
 'use client';
 
 import { motion, useReducedMotion } from 'framer-motion';
-import { AlertCircle, ChevronLeft, MapPin } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -30,6 +30,7 @@ type RegionPayload = {
 };
 
 type SchoolSlotType = 'middle' | 'high' | 'university' | 'graduate';
+type MainRegionSourceDraft = 'gps' | SchoolSlotType;
 
 type DashboardSchoolPayload = {
   id: string;
@@ -145,15 +146,6 @@ type HistoryResponse = {
   error?: string;
 };
 
-type ReverseRegionResponse = {
-  sidoCode: string;
-  sigunguCode: string | null;
-  sidoName: string | null;
-  sigunguName: string | null;
-  provider: string | null;
-  error?: string;
-};
-
 type ApiErrorPayload = {
   error?: string;
   details?: {
@@ -161,8 +153,6 @@ type ApiErrorPayload = {
     fieldErrors?: Record<string, string[] | undefined>;
   };
 };
-
-type RegionPolicy = 'keep' | 'clear';
 
 const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 6;
 const UNSAVED_CHANGES_CONFIRM_MESSAGE = '변경사항이 저장되지 않습니다. 페이지를 벗어나시겠어요?';
@@ -218,6 +208,27 @@ const SCHOOL_SLOT_META: Array<{ slot: SchoolSlotType; label: string }> = [
 
 function getSchoolSlotLabel(slot: SchoolSlotType): string {
   return SCHOOL_SLOT_META.find((item) => item.slot === slot)?.label ?? slot;
+}
+
+function getSchoolLevelLabel(level: SchoolSlotType): string {
+  return getSchoolSlotLabel(level);
+}
+
+function getSchoolSearchDisplayLabel(school: {
+  schoolName: string;
+  sigunguName: string | null;
+  sidoName: string | null;
+}): string {
+  const schoolName = school.schoolName?.trim();
+  if (!schoolName) {
+    return '학교 미설정';
+  }
+
+  const regionLabel = school.sigunguName?.trim() || school.sidoName?.trim() || '';
+  if (!regionLabel) {
+    return schoolName;
+  }
+  return `${schoolName}(${regionLabel})`;
 }
 
 function formatNumber(value: number): string {
@@ -671,10 +682,11 @@ type HistoryViewProps = {
   dashboard: DashboardResponse;
   history: HistoryResponse;
   onBack: () => void;
+  onOpenTopicResultMap: (topicId: string) => void;
   reducedMotion: boolean;
 };
 
-function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewProps) {
+function HistoryView({ dashboard, history, onBack, onOpenTopicResultMap, reducedMotion }: HistoryViewProps) {
   const sortedVotes = useMemo(
     () => [...history.votes].sort((a, b) => Date.parse(b.votedAt) - Date.parse(a.votedAt)),
     [history.votes],
@@ -682,7 +694,7 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
   const fallbackLocationLabel = getProfileLocationLabel(dashboard.profile);
 
   return (
-    <div className={`${APP_BG} ${TEXT_PRIMARY} mx-auto w-full max-w-[960px]`}>
+    <div className={`${APP_BG} ${TEXT_PRIMARY} mx-auto w-full max-w-[min(100%,1400px)]`}>
       <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between gap-3">
         <button
           type="button"
@@ -718,10 +730,13 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
             const motionProps = getMotionProps(reducedMotion, reducedMotion ? 0 : Math.min(index, 6) * 0.04);
 
             return (
-              <motion.article
+              <motion.button
                 key={vote.id}
                 {...motionProps}
-                className="flex items-center gap-3 rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
+                type="button"
+                onClick={() => onOpenTopicResultMap(vote.topicId)}
+                aria-label={`${vote.topicTitle} 결과 지도 보기`}
+                className="flex w-full items-center gap-3 overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-4 text-left shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition hover:bg-white/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
               >
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/7 text-xl text-white/68">∿</div>
                 <div className="min-w-0 flex-1">
@@ -729,11 +744,14 @@ function HistoryView({ dashboard, history, onBack, reducedMotion }: HistoryViewP
                   <p className="mt-1 text-[13px] text-[color:var(--my-text-muted)]">
                     {regionLabel} • {formatKoreanDateTime(vote.votedAt)}
                   </p>
+                  <span className="mt-2 inline-flex max-w-full rounded-full border border-[color:var(--my-border)] bg-white/8 px-3 py-1 text-[12px] font-semibold text-white/90 sm:hidden">
+                    <span className="truncate">{vote.optionLabel}</span>
+                  </span>
                 </div>
-                <span className="shrink-0 rounded-full border border-[color:var(--my-border)] bg-white/8 px-4 py-2 text-[14px] font-semibold text-white/90">
-                  {vote.optionLabel}
+                <span className="hidden max-w-[42%] rounded-full border border-[color:var(--my-border)] bg-white/8 px-4 py-2 text-[14px] font-semibold text-white/90 sm:inline-flex">
+                  <span className="truncate">{vote.optionLabel}</span>
                 </span>
-              </motion.article>
+              </motion.button>
             );
           })
         )}
@@ -753,7 +771,8 @@ type EditProfileViewProps = {
   isSchoolListVisible: boolean;
   selectedSchoolCandidate: SchoolSearchItem | null;
   selectedSchoolSlot: SchoolSlotType;
-  mainSchoolSlotDraft: SchoolSlotType | null;
+  mainRegionSourceDraft: MainRegionSourceDraft | null;
+  gpsResolvedLabel: string | null;
   schoolResultsListRef: React.RefObject<HTMLDivElement | null>;
   isSaveDirty: boolean;
   isSavingAny: boolean;
@@ -768,9 +787,8 @@ type EditProfileViewProps = {
   onSchoolResultHover: (index: number) => void;
   onClearSchoolCandidate: () => void;
   onSelectSchoolSlot: (slot: SchoolSlotType) => void;
-  onSelectMainSchoolSlot: (slot: SchoolSlotType) => void;
+  onSelectMainRegionSource: (source: MainRegionSourceDraft) => void;
   onSaveAll: () => Promise<void>;
-  onResolveCurrentRegion: () => Promise<void>;
   reducedMotion: boolean;
 };
 
@@ -785,7 +803,8 @@ function EditProfileView({
   isSchoolListVisible,
   selectedSchoolCandidate,
   selectedSchoolSlot,
-  mainSchoolSlotDraft,
+  mainRegionSourceDraft,
+  gpsResolvedLabel,
   schoolResultsListRef,
   isSaveDirty,
   isSavingAny,
@@ -800,24 +819,45 @@ function EditProfileView({
   onSchoolResultHover,
   onClearSchoolCandidate,
   onSelectSchoolSlot,
-  onSelectMainSchoolSlot,
+  onSelectMainRegionSource,
   onSaveAll,
-  onResolveCurrentRegion,
   reducedMotion,
 }: EditProfileViewProps) {
-  const currentLocationLabel = getProfileLocationLabel(dashboard.profile);
-  const currentSlotSchool = dashboard.profile.schoolPool[selectedSchoolSlot];
-  const currentSlotSchoolLabel = getSchoolDisplayLabel(currentSlotSchool) ?? '미설정';
-  const availableMainSlots = SCHOOL_SLOT_META.filter(({ slot }) => {
-    if (slot === selectedSchoolSlot && selectedSchoolCandidate) {
-      return true;
+  const GROUP_BG = 'bg-[var(--my-surface-strong)]';
+  const BORDER_COLOR = 'border-[color:var(--my-border-soft)]';
+  const TEXT_MUTED = 'text-[color:var(--my-text-muted)]';
+  const ACCENT_COLOR = '#FF5C00';
+  const mainRegionSource = mainRegionSourceDraft ?? (dashboard.profile.mainSchoolSlot ?? 'gps');
+  const gpsRegionLabel = gpsResolvedLabel ?? dashboard.profile.region.name ?? '시/군/구를 확인하려면 저장을 눌러주세요.';
+  const selectedSlotSchoolLabel =
+    selectedSchoolCandidate
+      ? getSchoolSearchDisplayLabel(selectedSchoolCandidate)
+      : getSchoolDisplayLabel(dashboard.profile.schoolPool[selectedSchoolSlot]) ?? '미설정';
+  const schoolSlotsForRegion = SCHOOL_SLOT_META.reduce<
+    Array<{ slot: SchoolSlotType; label: string; schoolLabel: string }>
+  >((accumulator, item) => {
+    const candidateLabel =
+      item.slot === selectedSchoolSlot && selectedSchoolCandidate
+        ? getSchoolSearchDisplayLabel(selectedSchoolCandidate)
+        : null;
+    const savedLabel = getSchoolDisplayLabel(dashboard.profile.schoolPool[item.slot]);
+    const schoolLabel = candidateLabel ?? savedLabel;
+    if (!schoolLabel) {
+      return accumulator;
     }
-    return Boolean(dashboard.profile.schoolPool[slot]);
-  });
-
+    accumulator.push({
+      slot: item.slot,
+      label: item.label,
+      schoolLabel,
+    });
+    return accumulator;
+  }, []);
   return (
-    <div className={`${APP_BG} ${TEXT_PRIMARY} mx-auto w-full max-w-[940px]`}>
-      <motion.header {...getMotionProps(reducedMotion, 0)} className="mb-4 flex items-center justify-between gap-3">
+    <div className="mx-auto w-full max-w-[min(100%,1400px)] pb-16 font-sans text-white selection:bg-[color:var(--my-accent-soft)] selection:text-[color:var(--my-accent)] lg:pb-12">
+      <motion.header
+        {...getMotionProps(reducedMotion, 0)}
+        className="mb-4 flex items-center justify-between gap-3"
+      >
         <button
           type="button"
           onClick={onBack}
@@ -832,213 +872,286 @@ function EditProfileView({
         <div className="h-11 w-11" aria-hidden />
       </motion.header>
 
-      <motion.section {...getMotionProps(reducedMotion, 0.02)} className="mb-7 lg:mb-8">
-        <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-[color:var(--my-text-main)]">
-          프로필 정보를
-          <br />
-          수정할 수 있어요
-        </h1>
-        <p className="mt-2 text-sm text-[color:var(--my-text-muted)]">변경 후 하단의 저장 버튼을 눌러주세요.</p>
-        {notice ? <p className="mt-2 text-xs text-[#ffd7b5]">{notice}</p> : null}
-        {error ? <p className="mt-2 text-xs text-[#ffb4b4]">{error}</p> : null}
-      </motion.section>
+      <motion.div {...getMotionProps(reducedMotion, 0.03)} className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-14">
+        <div className="space-y-8 lg:col-span-5">
+          <div>
+            <h1 className="text-[34px] font-bold leading-tight tracking-tight md:text-[40px]">내 정보</h1>
+            <p className={`mt-2 text-[15px] ${TEXT_MUTED}`}>프로필과 메인 활동 지역을 수정합니다.</p>
+            {notice ? <p className="mt-3 text-[12px] font-medium text-[#cbe0ff]">{notice}</p> : null}
+            {error ? <p className="mt-2 text-[12px] font-medium text-[#ffb4b4]">{error}</p> : null}
+          </div>
 
-      <div className="space-y-4 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
-        <motion.section
-          {...getMotionProps(reducedMotion, 0.05)}
-          className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
-        >
-          <label htmlFor="my-nickname-input" className="block">
-            <span className="mb-2 block text-sm font-semibold text-[color:var(--my-text-muted)]">닉네임</span>
-          </label>
-          <input
-            id="my-nickname-input"
-            value={nicknameInput}
-            onChange={(event) => onNicknameChange(event.target.value)}
-            maxLength={20}
-            autoComplete="nickname"
-            className="h-14 w-full rounded-xl border border-transparent bg-white/8 px-4 text-lg font-semibold text-[color:var(--my-text-main)] outline-none transition focus:border-[color:var(--my-accent)] focus:bg-white/12 focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-            placeholder="닉네임을 입력하세요"
-          />
+          <section>
+            <h2 className={`mb-2 ml-4 text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>Account</h2>
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
+              <div className={`flex items-center justify-between gap-3 border-b ${BORDER_COLOR} p-5`}>
+                <label htmlFor="my-nickname-input" className="w-24 shrink-0 text-[16px] font-medium text-white/90">
+                  닉네임
+                </label>
+                <input
+                  id="my-nickname-input"
+                  value={nicknameInput}
+                  onChange={(event) => onNicknameChange(event.target.value)}
+                  maxLength={20}
+                  autoComplete="nickname"
+                  className="w-full bg-transparent text-right text-[16px] font-semibold text-white outline-none placeholder:text-[color:var(--my-text-subtle)] transition focus:text-[color:var(--my-accent)]"
+                  placeholder="닉네임 입력"
+                />
+              </div>
 
-          <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">사용자명</span>
-              <span className="text-sm font-medium text-white/84">{usernameInput}</span>
+              <div className="flex items-center justify-between gap-3 bg-white/[0.01] p-5">
+                <div className="min-w-0">
+                  <p className="text-[16px] font-medium text-white/90">사용자명</p>
+                  <p className={`mt-1 text-[13px] ${TEXT_MUTED}`}>변경할 수 없는 고유 ID입니다.</p>
+                </div>
+                <span className="shrink-0 font-mono text-[16px] text-[color:var(--my-text-subtle)]">{usernameInput}</span>
+              </div>
             </div>
-            <div className="mt-1.5 flex items-center gap-1.5 text-[color:var(--my-text-subtle)]">
-              <AlertCircle size={14} />
-              <p className="text-xs">사용자명은 변경할 수 없어요.</p>
-            </div>
-          </div>
-        </motion.section>
+          </section>
+        </div>
 
-        <motion.section
-          {...getMotionProps(reducedMotion, 0.08)}
-          className="rounded-[20px] border border-[color:var(--my-border)] bg-[var(--my-surface)] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.24)]"
-        >
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <span className="text-sm font-semibold text-[color:var(--my-text-muted)]">현재 지역/학교</span>
-            <span className="text-sm font-bold text-white/84">{currentLocationLabel}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => void onResolveCurrentRegion()}
-            disabled={isResolvingRegion || isSavingAny}
-            aria-disabled={isResolvingRegion || isSavingAny}
-            aria-label="현재 위치로 지역 찾기"
-            className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--my-border)] bg-[var(--my-accent-soft)] text-[15px] font-semibold text-[color:var(--my-accent)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <MapPin size={20} />
-            {isResolvingRegion ? '위치 확인 중...' : '현재 위치로 찾기'}
-          </button>
+        <div className="space-y-8 lg:col-span-7">
+          <section>
+            <h2 className={`mb-2 ml-4 text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>Main Region</h2>
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
+              <div className={`border-b ${BORDER_COLOR} bg-white/[0.01] p-5`}>
+                <p className={`text-[14px] leading-relaxed ${TEXT_MUTED}`}>
+                  현재 활동 기준으로 사용할 지역을 선택해주세요.
+                  <br />
+                  <span className="font-semibold text-white/80">내 위치(GPS)</span> 또는 등록된 <span className="font-semibold text-white/80">학교</span> 중 하나를 메인으로 설정할 수 있습니다.
+                </p>
+              </div>
 
-          <div className="mt-3 rounded-xl border border-white/12 bg-white/6 px-3 py-2">
-            <p className="text-xs text-[color:var(--my-text-subtle)]">학교 수정 횟수</p>
-            <p className="mt-1 text-sm font-semibold text-white/90">
-              {dashboard.profile.schoolEdit.used}/{dashboard.profile.schoolEdit.limit}
-              <span className="ml-2 text-xs font-medium text-[#ffcc99]">남은 {dashboard.profile.schoolEdit.remaining}회</span>
-            </p>
-          </div>
-
-          <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
-            <p className="mb-2 text-sm font-semibold text-[color:var(--my-text-muted)]">학교 슬롯</p>
-            <div className="grid grid-cols-2 gap-2">
-              {SCHOOL_SLOT_META.map((item) => {
-                const isActive = selectedSchoolSlot === item.slot;
-                const slotSchool = dashboard.profile.schoolPool[item.slot];
-                return (
-                  <button
-                    key={item.slot}
-                    type="button"
-                    onClick={() => onSelectSchoolSlot(item.slot)}
-                    className={`inline-flex h-11 items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
-                      isActive
-                        ? 'border-[#ff9f0a88] bg-[#ff6b0024] text-[#ffd5ab]'
-                        : 'border-white/14 bg-white/8 text-white/76 hover:bg-white/12'
+              <button
+                type="button"
+                onClick={() => onSelectMainRegionSource('gps')}
+                className={`group flex w-full items-center justify-between border-b ${BORDER_COLOR} p-5 text-left transition hover:bg-white/5`}
+              >
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`flex h-12 w-12 items-center justify-center rounded-full text-[20px] transition-all duration-300 ${
+                      mainRegionSource === 'gps'
+                        ? 'bg-[color:var(--my-accent-soft)] text-[color:var(--my-accent)] shadow-[0_0_15px_rgba(255,92,0,0.25)]'
+                        : 'bg-white/10 opacity-70 grayscale group-hover:opacity-100'
                     }`}
                   >
-                    <span>{item.label}</span>
-                    <span className={`h-2 w-2 rounded-full ${slotSchool ? 'bg-[#ff9f0a]' : 'bg-white/25'}`} />
-                  </button>
-                );
-              })}
-            </div>
+                    📍
+                  </div>
+                  <div>
+                    <p className={`text-[17px] font-semibold ${mainRegionSource === 'gps' ? 'text-white' : 'text-white/76'}`}>현재 위치 (GPS)</p>
+                    <p className={`mt-0.5 text-[14px] ${TEXT_MUTED}`}>{gpsRegionLabel}</p>
+                  </div>
+                </div>
+                {mainRegionSource === 'gps' ? (
+                  <motion.svg
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    width="26"
+                    height="26"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={ACCENT_COLOR}
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </motion.svg>
+                ) : null}
+              </button>
 
-            <div className="mt-3 rounded-xl border border-white/12 bg-white/5 px-3 py-2">
-              <p className="text-[11px] text-[color:var(--my-text-subtle)]">{getSchoolSlotLabel(selectedSchoolSlot)} 현재 학교</p>
-              <p className="mt-1 truncate text-sm font-semibold text-white/88">{currentSlotSchoolLabel}</p>
-            </div>
-
-            <label htmlFor="my-school-search-input" className="block">
-              <span className="mb-2 mt-3 block text-sm font-semibold text-[color:var(--my-text-muted)]">
-                {getSchoolSlotLabel(selectedSchoolSlot)} 검색
-              </span>
-              <input
-                id="my-school-search-input"
-                value={schoolQuery}
-                onKeyDown={onSchoolInputKeyDown}
-                onChange={(event) => onSchoolQueryChange(event.target.value)}
-                placeholder="학교명을 입력하세요"
-                autoComplete="off"
-                className="h-12 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66] focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-              />
-            </label>
-
-            {isSchoolListVisible ? (
-              <div
-                ref={schoolResultsListRef}
-                className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
-              >
-                {isSchoolSearching ? (
-                  <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
-                ) : schoolResults.length === 0 ? (
-                  <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
-                ) : (
-                  schoolResults.map((school, index) => (
-                    <button
-                      key={`${school.source}:${school.schoolCode}`}
-                      data-school-index={index}
-                      type="button"
-                      onMouseEnter={() => onSchoolResultHover(index)}
-                      onClick={() => onSelectSchoolCandidate(school)}
-                      className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${
-                        index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
-                      }`}
-                    >
-                      <p className="font-semibold">{school.schoolName}</p>
-                      <p className="mt-0.5 text-[11px] text-white/60">
-                        {school.sigunguName ?? school.sidoName ?? '-'}
-                        {school.schoolLevel ? ` · ${school.schoolLevel}` : ''}
-                        {school.campusType ? ` · ${school.campusType}` : ''}
-                      </p>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : null}
-
-            {selectedSchoolCandidate ? (
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-medium text-[#ffcc99]">
-                  선택됨({getSchoolSlotLabel(selectedSchoolSlot)}): {selectedSchoolCandidate.schoolName}
-                </p>
-                <button
-                  type="button"
-                  onClick={onClearSchoolCandidate}
-                  className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                >
-                  학교 선택 해제
-                </button>
-              </div>
-            ) : null}
-
-            <div className="mt-5 border-t border-[color:var(--my-border-soft)] pt-5">
-              <p className="mb-2 text-sm font-semibold text-[color:var(--my-text-muted)]">메인 활동학교</p>
-              {availableMainSlots.length > 0 ? (
-                <div className="space-y-2">
-                  {availableMainSlots.map(({ slot, label }) => {
-                    const isActive = mainSchoolSlotDraft === slot;
-                    const slotSchool =
-                      slot === selectedSchoolSlot && selectedSchoolCandidate
-                        ? selectedSchoolCandidate.schoolName
-                        : getSchoolDisplayLabel(dashboard.profile.schoolPool[slot]) ?? '미설정';
-                    return (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => onSelectMainSchoolSlot(slot)}
-                        className={`flex h-11 w-full items-center justify-between rounded-xl border px-3 text-sm transition ${
-                          isActive
-                            ? 'border-[#ff9f0a88] bg-[#ff6b0024] text-[#ffd5ab]'
-                            : 'border-white/14 bg-white/8 text-white/80 hover:bg-white/12'
+              {schoolSlotsForRegion.length === 0 ? (
+                <div className="p-5 text-[13px] text-white/60">등록된 학교가 없습니다. 아래 학교 관리에서 먼저 등록해 주세요.</div>
+              ) : (
+                schoolSlotsForRegion.map((item, index) => (
+                  <button
+                    key={`region-slot-${item.slot}`}
+                    type="button"
+                    onClick={() => onSelectMainRegionSource(item.slot)}
+                    className={`group flex w-full items-center justify-between p-5 text-left transition hover:bg-white/5 ${
+                      index !== schoolSlotsForRegion.length - 1 ? `border-b ${BORDER_COLOR}` : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`flex h-12 w-12 items-center justify-center rounded-full text-[20px] transition-all duration-300 ${
+                          mainRegionSource === item.slot
+                            ? 'bg-[color:var(--my-accent-soft)] text-[color:var(--my-accent)] shadow-[0_0_15px_rgba(255,92,0,0.25)]'
+                            : 'bg-white/10 opacity-70 grayscale group-hover:opacity-100'
                         }`}
                       >
-                        <span className="font-semibold">{label}</span>
-                        <span className="truncate pl-3 text-xs text-white/70">{slotSchool}</span>
+                        🏫
+                      </div>
+                      <div>
+                        <p className={`text-[17px] font-semibold ${mainRegionSource === item.slot ? 'text-white' : 'text-white/76'}`}>
+                          {item.label}
+                        </p>
+                        <p className={`mt-0.5 text-[14px] ${TEXT_MUTED}`}>{item.schoolLabel}</p>
+                      </div>
+                    </div>
+                    {mainRegionSource === item.slot ? (
+                      <motion.svg
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        width="26"
+                        height="26"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke={ACCENT_COLOR}
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </motion.svg>
+                    ) : null}
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-2 ml-4 flex items-end justify-between pr-2">
+              <h2 className={`text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>School Management</h2>
+              <span className={`text-[13px] ${TEXT_MUTED}`}>
+                수정 <b className="text-white">{dashboard.profile.schoolEdit.used}</b>/{dashboard.profile.schoolEdit.limit}회 · 남은{' '}
+                <b className="text-white">{dashboard.profile.schoolEdit.remaining}</b>회
+              </span>
+            </div>
+
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
+              <div className={`border-b ${BORDER_COLOR} p-5`}>
+                <label className="mb-3 block text-[15px] font-medium text-white/90">학교 추가 및 변경</label>
+                <div className="flex rounded-[14px] border border-[color:var(--my-border-soft)] bg-white/5 p-1">
+                  {SCHOOL_SLOT_META.map((item) => {
+                    const isActive = selectedSchoolSlot === item.slot;
+                    const hasSchool = Boolean(
+                      item.slot === selectedSchoolSlot && selectedSchoolCandidate
+                        ? selectedSchoolCandidate
+                        : dashboard.profile.schoolPool[item.slot],
+                    );
+                    return (
+                      <button
+                        key={item.slot}
+                        type="button"
+                        onClick={() => onSelectSchoolSlot(item.slot)}
+                        className={`relative flex-1 rounded-xl py-2.5 text-[14px] font-bold transition-all duration-200 ${
+                          isActive ? 'bg-white/14 text-white shadow-md' : 'text-[color:var(--my-text-subtle)] hover:bg-white/8 hover:text-white'
+                        }`}
+                      >
+                        {item.label}
+                        <span
+                          aria-hidden
+                          className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${hasSchool ? 'bg-[color:var(--my-accent)]' : 'bg-white/25'}`}
+                        />
                       </button>
                     );
                   })}
                 </div>
-              ) : (
-                <p className="text-xs text-white/60">먼저 슬롯에 학교를 등록해 주세요.</p>
-              )}
-            </div>
-          </div>
-        </motion.section>
-      </div>
+              </div>
 
-      <motion.div {...getMotionProps(reducedMotion, 0.1)} className="mt-6 lg:flex lg:justify-end">
-        <button
-          type="button"
-          onClick={() => void onSaveAll()}
-          disabled={!isSaveDirty || isSavingAny}
-          aria-disabled={!isSaveDirty || isSavingAny}
-          aria-label="프로필 저장하기"
-          className="inline-flex h-14 w-full items-center justify-center rounded-[18px] border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] text-lg font-bold text-white shadow-[0_10px_28px_rgba(255,107,0,0.28)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60 lg:w-[240px]"
-        >
-          {isSavingAny ? '저장 중...' : '저장하기'}
-        </button>
+              <div className="bg-white/[0.01] p-5">
+                <div className="rounded-[14px] border border-[color:var(--my-border-soft)] bg-white/5 px-4 shadow-inner transition-all focus-within:border-[color:var(--my-accent)]/60 focus-within:ring-1 focus-within:ring-[color:var(--my-focus)]">
+                  <label htmlFor="my-school-search-input" className="sr-only">
+                    학교 검색
+                  </label>
+                  <div className="flex items-center">
+                    <svg className="shrink-0 text-[color:var(--my-text-subtle)]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input
+                      id="my-school-search-input"
+                      value={schoolQuery}
+                      onKeyDown={onSchoolInputKeyDown}
+                      onChange={(event) => onSchoolQueryChange(event.target.value)}
+                      placeholder={`${getSchoolSlotLabel(selectedSchoolSlot)} 이름을 검색하여 등록하세요`}
+                      autoComplete="off"
+                      className="w-full bg-transparent px-3 py-4 text-[16px] text-white outline-none placeholder:text-[color:var(--my-text-subtle)]"
+                    />
+                    {schoolQuery ? (
+                      <button type="button" onClick={onClearSchoolCandidate} className="p-2 -mr-2 text-[color:var(--my-text-subtle)] transition-colors hover:text-white">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-[11px] font-bold">✕</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {isSchoolListVisible ? (
+                  <div
+                    ref={schoolResultsListRef}
+                    className="mt-2 max-h-52 overflow-y-auto rounded-[14px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] p-1.5"
+                  >
+                    {isSchoolSearching ? (
+                      <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                    ) : schoolResults.length === 0 ? (
+                      <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                    ) : (
+                      schoolResults.map((school, index) => (
+                        <button
+                          key={`${school.source}:${school.schoolCode}`}
+                          data-school-index={index}
+                          type="button"
+                          onMouseEnter={() => onSchoolResultHover(index)}
+                          onClick={() => onSelectSchoolCandidate(school)}
+                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/88 transition last:mb-0 ${
+                            index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                          }`}
+                        >
+                          <p className="font-semibold">{school.schoolName}</p>
+                          <p className="mt-0.5 text-[11px] text-white/60">
+                            {school.sigunguName ?? school.sidoName ?? '-'} · {getSchoolLevelLabel(school.schoolLevel)}
+                            {school.campusType ? ` · ${school.campusType}` : ''}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 rounded-[12px] border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <p className={`text-[11px] ${TEXT_MUTED}`}>{getSchoolSlotLabel(selectedSchoolSlot)} 현재/선택 학교</p>
+                  <p className="mt-1 truncate text-[14px] font-semibold text-white/88">{selectedSlotSchoolLabel}</p>
+                </div>
+
+                {selectedSchoolCandidate ? (
+                  <p className="mt-2 text-[12px] font-medium text-[#ffd7b5]">
+                    선택됨({getSchoolSlotLabel(selectedSchoolSlot)}): {selectedSchoolCandidate.schoolName}
+                  </p>
+                ) : null}
+
+                <p className={`mt-4 flex items-center gap-1.5 text-[13px] ${TEXT_MUTED}`}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  학교를 변경하면 수정 횟수가 1회 차감됩니다.
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </motion.div>
+
+      <motion.div {...getMotionProps(reducedMotion, 0.08)} className="mt-8 flex justify-end">
+          <motion.button
+            whileHover={reducedMotion ? undefined : { scale: 1.01 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.985 }}
+            type="button"
+            onClick={() => void onSaveAll()}
+            disabled={!isSaveDirty || isSavingAny}
+            aria-disabled={!isSaveDirty || isSavingAny}
+            aria-label="변경사항 저장하기"
+            className="inline-flex h-14 w-full min-w-[200px] items-center justify-center rounded-2xl bg-[var(--my-accent-strong)] px-8 text-[17px] font-bold text-white shadow-[0_4px_20px_rgba(255,92,0,0.34)] transition-colors hover:bg-[var(--my-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
+          >
+          {isSavingAny
+            ? isResolvingRegion && mainRegionSource === 'gps'
+              ? '현재 위치 확인 중...'
+              : '저장 중...'
+            : '변경사항 저장하기'}
+        </motion.button>
       </motion.div>
     </div>
   );
@@ -1115,7 +1228,7 @@ function Footer() {
   return (
     <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
       <div
-        className="mx-auto w-full max-w-[1180px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
+        className="mx-auto w-full max-w-[min(100vw-2.5rem,1760px)] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
       >
         <div>
@@ -1127,59 +1240,6 @@ function Footer() {
         </p>
       </div>
     </footer>
-  );
-}
-
-type PolicyModalProps = {
-  isOpen: boolean;
-  pendingRegion: ReverseRegionResponse | null;
-  onKeepSchool: () => Promise<void>;
-  onClearSchool: () => Promise<void>;
-  onClose: () => void;
-};
-
-function PolicyModal({ isOpen, pendingRegion, onKeepSchool, onClearSchool, onClose }: PolicyModalProps) {
-  if (!isOpen || !pendingRegion) {
-    return null;
-  }
-
-  return (
-    <div className="fixed inset-0 z-[160] flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="region-policy-title">
-      <div className="w-full max-w-[520px] rounded-[24px] border border-[color:var(--my-border)] bg-[rgba(14,20,30,0.94)] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.38)] backdrop-blur-2xl md:p-5">
-        <h3 id="region-policy-title" className="text-[17px] font-bold text-white">
-          지역 업데이트 방식 선택
-        </h3>
-        <p className="mt-2 text-sm text-white/76">
-          현재 위치를 <span className="font-semibold text-white">{pendingRegion.sigunguName ?? pendingRegion.sidoName ?? pendingRegion.sidoCode}</span>으로 인식했습니다.
-        </p>
-        <p className="mt-1 text-xs text-white/58">학교 정보를 유지할지, 해제할지 선택해 주세요.</p>
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => void onKeepSchool()}
-            className="inline-flex h-11 items-center justify-center rounded-xl border border-[color:var(--my-border)] bg-white/8 text-sm font-semibold text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-          >
-            학교 유지
-          </button>
-          <button
-            type="button"
-            onClick={() => void onClearSchool()}
-            className="inline-flex h-11 items-center justify-center rounded-xl border border-[color:var(--my-accent)] bg-[var(--my-accent-strong)] text-sm font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-          >
-            학교 해제
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-2 inline-flex h-10 w-full items-center justify-center rounded-lg border border-[color:var(--my-border)] bg-white/5 text-xs font-semibold text-white/72 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-        >
-          취소
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -1210,7 +1270,8 @@ export default function MyPage() {
   const [highlightedSchoolIndex, setHighlightedSchoolIndex] = useState(0);
   const [selectedSchoolCandidate, setSelectedSchoolCandidate] = useState<SchoolSearchItem | null>(null);
   const [selectedSchoolSlot, setSelectedSchoolSlot] = useState<SchoolSlotType>('middle');
-  const [mainSchoolSlotDraft, setMainSchoolSlotDraft] = useState<SchoolSlotType | null>(null);
+  const [mainRegionSourceDraft, setMainRegionSourceDraft] = useState<MainRegionSourceDraft | null>(null);
+  const [gpsResolvedLabel, setGpsResolvedLabel] = useState<string | null>(null);
 
   const [privacyShowLeaderboardName, setPrivacyShowLeaderboardName] = useState(true);
   const [privacyShowRegion, setPrivacyShowRegion] = useState(false);
@@ -1220,8 +1281,6 @@ export default function MyPage() {
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
   const [isResolvingRegion, setIsResolvingRegion] = useState(false);
 
-  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
-  const [pendingRegion, setPendingRegion] = useState<ReverseRegionResponse | null>(null);
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
   const isEditRoute = pathname === '/my/edit';
   const isHistoryRoute = pathname === '/my/history';
@@ -1322,11 +1381,12 @@ export default function MyPage() {
     setIsSchoolSearching(false);
     setHighlightedSchoolIndex(0);
     setSelectedSchoolCandidate(null);
+    setGpsResolvedLabel(null);
     const fallbackMainSlot =
       dashboard.profile.mainSchoolSlot ??
       SCHOOL_SLOT_META.find(({ slot }) => Boolean(dashboard.profile.schoolPool[slot]))?.slot ??
       null;
-    setMainSchoolSlotDraft(fallbackMainSlot);
+    setMainRegionSourceDraft(dashboard.profile.mainSchoolSlot ?? 'gps');
     setSelectedSchoolSlot((prev) => {
       if (dashboard.profile.schoolPool[prev]) {
         return prev;
@@ -1345,9 +1405,11 @@ export default function MyPage() {
     const isSchoolDirty = selectedSchoolCandidate
       ? !isSameSchoolSelection(selectedSchoolCandidate, currentSlotSchool)
       : false;
-    const isMainSchoolSlotDirty = (mainSchoolSlotDraft ?? null) !== (dashboard.profile.mainSchoolSlot ?? null);
-    return isNicknameDirty || isSchoolDirty || isMainSchoolSlotDirty;
-  }, [dashboard, mainSchoolSlotDraft, nicknameInput, selectedSchoolCandidate, selectedSchoolSlot]);
+    const persistedMainRegionSource: MainRegionSourceDraft = dashboard.profile.mainSchoolSlot ?? 'gps';
+    const draftMainRegionSource = mainRegionSourceDraft ?? persistedMainRegionSource;
+    const isMainRegionDirty = draftMainRegionSource !== persistedMainRegionSource;
+    return isNicknameDirty || isSchoolDirty || isMainRegionDirty;
+  }, [dashboard, mainRegionSourceDraft, nicknameInput, selectedSchoolCandidate, selectedSchoolSlot]);
 
   const isPrivacyDirty = useMemo(() => {
     if (!dashboard) {
@@ -1428,7 +1490,7 @@ export default function MyPage() {
       setIsSchoolSearching(true);
       try {
         const response = await fetch(
-          `/api/schools/search?q=${encodeURIComponent(schoolQuery.trim())}&level=all&limit=12`,
+          `/api/schools/search?q=${encodeURIComponent(schoolQuery.trim())}&level=${selectedSchoolSlot}&limit=12`,
           {
             cache: 'no-store',
             signal: controller.signal,
@@ -1454,7 +1516,7 @@ export default function MyPage() {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [isEditRoute, isSchoolListVisible, schoolQuery]);
+  }, [isEditRoute, isSchoolListVisible, schoolQuery, selectedSchoolSlot]);
 
   useEffect(() => {
     if (!isSchoolListVisible || isSchoolSearching || schoolResults.length === 0) {
@@ -1517,14 +1579,11 @@ export default function MyPage() {
           setSchoolQuery(target.schoolName);
           setSchoolResults([]);
           setHighlightedSchoolIndex(0);
-          if (!mainSchoolSlotDraft) {
-            setMainSchoolSlotDraft(selectedSchoolSlot);
-          }
           setNotice(null);
         }
       }
     },
-    [highlightedSchoolIndex, isSchoolListVisible, isSchoolSearching, mainSchoolSlotDraft, schoolResults, selectedSchoolSlot],
+    [highlightedSchoolIndex, isSchoolListVisible, isSchoolSearching, schoolResults],
   );
 
   const handleSelectSchoolCandidate = useCallback(
@@ -1533,12 +1592,9 @@ export default function MyPage() {
       setSchoolQuery(school.schoolName);
       setSchoolResults([]);
       setHighlightedSchoolIndex(0);
-      if (!mainSchoolSlotDraft) {
-        setMainSchoolSlotDraft(selectedSchoolSlot);
-      }
       setNotice(null);
     },
-    [mainSchoolSlotDraft, selectedSchoolSlot],
+    [],
   );
 
   const handleSchoolResultHover = useCallback((index: number) => {
@@ -1554,8 +1610,8 @@ export default function MyPage() {
     setNotice(null);
   }, []);
 
-  const handleSelectMainSchoolSlot = useCallback((slot: SchoolSlotType) => {
-    setMainSchoolSlotDraft(slot);
+  const handleSelectMainRegionSource = useCallback((source: MainRegionSourceDraft) => {
+    setMainRegionSourceDraft(source);
     setNotice(null);
   }, []);
 
@@ -1566,36 +1622,6 @@ export default function MyPage() {
     setHighlightedSchoolIndex(0);
     setNotice(null);
   }, []);
-
-  const submitProfilePatch = useCallback(
-    async (payload: Record<string, unknown>, successMessage: string) => {
-      const token = await getAccessToken();
-      if (!token) {
-        setNotice('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
-        return false;
-      }
-
-      const response = await fetch('/api/me/profile', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const json = (await response.json()) as ApiErrorPayload;
-      if (!response.ok) {
-        setNotice(getApiErrorMessage(json, '프로필 저장에 실패했습니다.'));
-        return false;
-      }
-
-      setNotice(successMessage);
-      await loadMyData();
-      return true;
-    },
-    [getAccessToken, loadMyData],
-  );
 
   const handleSaveAll = useCallback(async () => {
     if (!dashboard) {
@@ -1613,11 +1639,32 @@ export default function MyPage() {
       return;
     }
 
+    const patchProfile = async (payload: Record<string, unknown>, fallbackMessage: string) => {
+      const response = await fetch('/api/me/profile', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = (await response.json()) as ApiErrorPayload;
+      if (!response.ok) {
+        setNotice(getApiErrorMessage(json, fallbackMessage));
+        return false;
+      }
+
+      return true;
+    };
+
     setIsSavingProfile(isProfileDirty);
     setIsSavingPrivacy(!isEditRoute && isPrivacyDirty);
+    setNotice(null);
     try {
       if (isProfileDirty) {
         const profilePayload: Record<string, unknown> = {};
+        let gpsRegionPayload: { sidoCode: string; sigunguCode: string | null } | null = null;
         if (nicknameInput.trim() !== (dashboard.profile.nickname ?? '')) {
           profilePayload.nickname = nicknameInput.trim();
         }
@@ -1629,31 +1676,67 @@ export default function MyPage() {
           };
         }
 
-        const canUseMainSlot =
-          mainSchoolSlotDraft &&
-          (Boolean(dashboard.profile.schoolPool[mainSchoolSlotDraft]) ||
-            (mainSchoolSlotDraft === selectedSchoolSlot && Boolean(selectedSchoolCandidate)));
-        if (mainSchoolSlotDraft && mainSchoolSlotDraft !== dashboard.profile.mainSchoolSlot) {
+        const persistedMainRegionSource: MainRegionSourceDraft = dashboard.profile.mainSchoolSlot ?? 'gps';
+        const draftMainRegionSource = mainRegionSourceDraft ?? persistedMainRegionSource;
+
+        if (draftMainRegionSource === 'gps') {
+          if (persistedMainRegionSource !== 'gps') {
+            setIsResolvingRegion(true);
+            try {
+              const gpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
+              gpsRegionPayload = {
+                sidoCode: gpsRegionInput.region.sidoCode,
+                sigunguCode: gpsRegionInput.region.sigunguCode,
+              };
+              setGpsResolvedLabel(
+                gpsRegionInput.region.sigunguName ??
+                  gpsRegionInput.region.sidoName ??
+                  gpsRegionInput.region.sidoCode,
+              );
+            } catch (gpsError) {
+              const message =
+                gpsError instanceof Error
+                  ? gpsError.message
+                  : '현재 위치에서 지역 정보를 확인하지 못했습니다.';
+              setNotice(message);
+              return;
+            } finally {
+              setIsResolvingRegion(false);
+            }
+          }
+        } else {
+          const canUseMainSlot =
+            Boolean(dashboard.profile.schoolPool[draftMainRegionSource]) ||
+            (draftMainRegionSource === selectedSchoolSlot && Boolean(selectedSchoolCandidate));
           if (!canUseMainSlot) {
             setNotice('메인 활동학교로 지정할 슬롯에 학교를 먼저 등록해 주세요.');
             return;
           }
-          profilePayload.mainSchoolSlot = mainSchoolSlotDraft;
+
+          if (draftMainRegionSource !== dashboard.profile.mainSchoolSlot) {
+            profilePayload.mainSchoolSlot = draftMainRegionSource;
+          }
         }
 
         if (Object.keys(profilePayload).length > 0) {
-          const profileResponse = await fetch('/api/me/profile', {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(profilePayload),
-          });
+          const isProfileSaved = await patchProfile(profilePayload, '기본 정보 저장에 실패했습니다.');
+          if (!isProfileSaved) {
+            return;
+          }
+        }
 
-          const profileJson = (await profileResponse.json()) as ApiErrorPayload;
-          if (!profileResponse.ok) {
-            setNotice(getApiErrorMessage(profileJson, '기본 정보 저장에 실패했습니다.'));
+        if (gpsRegionPayload) {
+          const isRegionSaved = await patchProfile(
+            {
+              region: {
+                sidoCode: gpsRegionPayload.sidoCode,
+                sigunguCode: gpsRegionPayload.sigunguCode,
+                schoolPolicy: 'clear',
+              },
+            },
+            'GPS 지역 저장에 실패했습니다.',
+          );
+          if (!isRegionSaved) {
             return;
           }
         }
@@ -1685,6 +1768,7 @@ export default function MyPage() {
     } finally {
       setIsSavingProfile(false);
       setIsSavingPrivacy(false);
+      setIsResolvingRegion(false);
     }
   }, [
     dashboard,
@@ -1694,7 +1778,7 @@ export default function MyPage() {
     isEditRoute,
     isSettingsDirty,
     loadMyData,
-    mainSchoolSlotDraft,
+    mainRegionSourceDraft,
     nicknameInput,
     privacyShowActivityHistory,
     privacyShowLeaderboardName,
@@ -1715,53 +1799,13 @@ export default function MyPage() {
     });
   }, [router, runWithLeaveConfirmation]);
 
-  const handleResolveCurrentRegion = useCallback(async () => {
-    setIsResolvingRegion(true);
-    setNotice(null);
-
-    try {
-      const gpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
-      setPendingRegion({
-        sidoCode: gpsRegionInput.region.sidoCode,
-        sigunguCode: gpsRegionInput.region.sigunguCode,
-        sidoName: gpsRegionInput.region.sidoName,
-        sigunguName: gpsRegionInput.region.sigunguName,
-        provider: gpsRegionInput.region.provider,
+  const handleOpenHistoryTopicResult = useCallback(
+    (topicId: string) => {
+      runWithLeaveConfirmation(() => {
+        router.push(`/results/${encodeURIComponent(topicId)}?entry=history&view=map`);
       });
-      setIsPolicyModalOpen(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '현재 위치에서 지역을 찾지 못했습니다.';
-      setNotice(message);
-    } finally {
-      setIsResolvingRegion(false);
-    }
-  }, []);
-
-  const handleApplyRegionPolicy = useCallback(
-    async (policy: RegionPolicy) => {
-      if (!pendingRegion) {
-        return;
-      }
-
-      setIsPolicyModalOpen(false);
-      setIsSavingProfile(true);
-      try {
-        await submitProfilePatch(
-          {
-            region: {
-              sidoCode: pendingRegion.sidoCode,
-              sigunguCode: pendingRegion.sigunguCode,
-              schoolPolicy: policy,
-            },
-          },
-          '현재 위치 기준으로 지역을 업데이트했습니다.',
-        );
-      } finally {
-        setPendingRegion(null);
-        setIsSavingProfile(false);
-      }
     },
-    [pendingRegion, submitProfilePatch],
+    [router, runWithLeaveConfirmation],
   );
 
   const handleBottomTabClick = useCallback(
@@ -1898,11 +1942,10 @@ export default function MyPage() {
     <div className="bg-[var(--my-bg)] text-white" style={PAGE_THEME_VARS}>
       <main className="relative h-screen w-full overflow-hidden bg-[var(--my-bg)] text-white">
         <div
-          className="mx-auto flex h-full w-full max-w-[1280px] flex-col overflow-y-auto px-4 pb-[var(--my-mobile-dock-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:pb-8 md:pt-0 lg:px-10 lg:pt-0"
+          className="mx-auto flex h-full w-full max-w-[min(100vw-2.5rem,1760px)] flex-col overflow-y-auto px-4 pb-[var(--my-mobile-dock-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:pb-8 md:pt-0 lg:px-10 lg:pt-0"
           style={{ '--my-mobile-dock-padding': mobileBottomDockPadding } as CSSProperties}
         >
           <DesktopTopHeader
-            containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
             links={[
               { key: 'home', label: '홈', onClick: () => handleBottomTabClick('home') },
               { key: 'map', label: '지도', onClick: () => handleBottomTabClick('map') },
@@ -1913,7 +1956,7 @@ export default function MyPage() {
           />
 
           {isLoading ? (
-            <section className="mt-3 space-y-3 md:mx-auto md:w-full md:max-w-[960px]" aria-label="로딩 상태">
+            <section className="mt-3 space-y-3 md:mx-auto md:w-full md:max-w-[min(100%,1400px)]" aria-label="로딩 상태">
               <div className="h-28 animate-pulse rounded-[22px] bg-white/10" />
               <div className="h-36 animate-pulse rounded-[22px] bg-white/10" />
               <div className="h-40 animate-pulse rounded-[22px] bg-white/10" />
@@ -1933,7 +1976,8 @@ export default function MyPage() {
                     isSchoolListVisible={isSchoolListVisible}
                     selectedSchoolCandidate={selectedSchoolCandidate}
                     selectedSchoolSlot={selectedSchoolSlot}
-                    mainSchoolSlotDraft={mainSchoolSlotDraft}
+                    mainRegionSourceDraft={mainRegionSourceDraft}
+                    gpsResolvedLabel={gpsResolvedLabel}
                     schoolResultsListRef={schoolResultsListRef}
                     isSaveDirty={isProfileDirty}
                     isSavingAny={isSavingAny}
@@ -1952,9 +1996,8 @@ export default function MyPage() {
                     onSchoolResultHover={handleSchoolResultHover}
                     onClearSchoolCandidate={handleClearSchoolCandidate}
                     onSelectSchoolSlot={handleSelectSchoolSlot}
-                    onSelectMainSchoolSlot={handleSelectMainSchoolSlot}
+                    onSelectMainRegionSource={handleSelectMainRegionSource}
                     onSaveAll={handleSaveAll}
-                    onResolveCurrentRegion={handleResolveCurrentRegion}
                     reducedMotion={Boolean(reducedMotion)}
                   />
                 </div>
@@ -1970,6 +2013,7 @@ export default function MyPage() {
                         router.push('/my');
                       });
                     }}
+                    onOpenTopicResultMap={handleOpenHistoryTopicResult}
                     reducedMotion={Boolean(reducedMotion)}
                   />
                 </div>
@@ -2010,21 +2054,6 @@ export default function MyPage() {
       </main>
 
       <Footer />
-
-      <PolicyModal
-        isOpen={isPolicyModalOpen}
-        pendingRegion={pendingRegion}
-        onKeepSchool={async () => {
-          await handleApplyRegionPolicy('keep');
-        }}
-        onClearSchool={async () => {
-          await handleApplyRegionPolicy('clear');
-        }}
-        onClose={() => {
-          setPendingRegion(null);
-          setIsPolicyModalOpen(false);
-        }}
-      />
     </div>
   );
 }

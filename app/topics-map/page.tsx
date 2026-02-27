@@ -28,10 +28,27 @@ function toBooleanFlag(raw: SearchParamsValue): boolean {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'open';
 }
 
+function toOptionalString(raw: SearchParamsValue): string | undefined {
+  const source = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof source !== 'string') {
+    return undefined;
+  }
+
+  const value = source.trim();
+  return value.length > 0 ? value : undefined;
+}
+
 export default async function TopicsMapRoute({ searchParams }: TopicsMapRouteProps) {
   const resolvedSearchParams = searchParams instanceof Promise ? await searchParams : searchParams ?? {};
   const initialTopicIds = toTopicIds(resolvedSearchParams.topics);
   const openTopicEditorOnMount = toBooleanFlag(resolvedSearchParams.openTopicEditor);
+  const redirectResultTopicId = toOptionalString(resolvedSearchParams.redirectResultTopicId);
 
-  return <TopicsMapPage initialTopicIds={initialTopicIds} openTopicEditorOnMount={openTopicEditorOnMount} />;
+  return (
+    <TopicsMapPage
+      initialTopicIds={initialTopicIds}
+      openTopicEditorOnMount={openTopicEditorOnMount}
+      redirectResultTopicId={redirectResultTopicId}
+    />
+  );
 }

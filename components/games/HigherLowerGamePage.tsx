@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -950,54 +951,55 @@ export function HigherLowerGamePage() {
 
       <main className="relative h-screen w-full overflow-hidden">
         <div
-          className="mx-auto flex h-full w-full max-w-[1280px] flex-col overflow-y-auto px-5 pb-[var(--game-mobile-dock-padding)] pt-12 md:px-8 md:pb-10 md:pt-0 lg:px-10 custom-scrollbar"
+          className="mx-auto flex h-full w-full max-w-[min(100vw-2.5rem,1760px)] flex-col overflow-y-auto px-5 pb-[var(--game-mobile-dock-padding)] pt-12 md:px-8 md:pb-10 md:pt-0 lg:px-10 custom-scrollbar"
           style={{ '--game-mobile-dock-padding': mobileBottomDockPadding } as CSSProperties}
         >
           <DesktopTopHeader
-            containerClassName="max-w-full px-0 sm:px-0 lg:px-0"
             links={[
               { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
               { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
               { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
               { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
             ]}
-            actions={[{ key: 'restart-game', label: '게임 리셋', onClick: handleRestart, variant: 'outline' }]}
+            actions={[{ key: 'game-reset', label: '게임 리셋', onClick: handleRestart, variant: 'outline' }]}
+            rightSlot={<AccountMenuButton />}
           />
 
-          <div className="md:mx-auto md:mt-4 md:w-full md:max-w-[960px]">
-          <AnimatedSection delay={0.1} className="mb-6 pl-1">
-            <h1 className="mb-5 text-[28px] font-bold tracking-tight">게임</h1>
-            <div className={`flex items-center justify-between rounded-3xl border ${CARD_BORDER} ${CARD_BG} p-5`}>
-              <div className="flex flex-col">
-                <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>현재 점수</span>
-                <span className="text-[22px] font-bold">{score.toLocaleString()}</span>
-              </div>
+          <div className="md:mx-auto md:mt-4 md:w-full md:max-w-[min(100%,1400px)]">
+            <AnimatedSection delay={0.1} className="mb-6 pl-1">
+              <h1 className="mb-5 text-[28px] font-bold tracking-tight">게임</h1>
+              <div className={`flex items-center justify-between rounded-3xl border ${CARD_BORDER} ${CARD_BG} p-5`}>
+                <div className="flex flex-col">
+                  <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>현재 점수</span>
+                  <span className="text-[22px] font-bold">{score.toLocaleString()}</span>
+                </div>
 
-              <div className="flex flex-col items-center">
-                <span className={`mb-2 text-[12px] font-medium ${TEXT_SECONDARY}`}>남은 목숨</span>
-                <div className="flex gap-1.5 text-[16px]">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <motion.span
-                      key={`life-${index}`}
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: index < lives ? 1 : 0.2 }}
-                      transition={{ duration: 0.3, delay: index * 0.1 }}
-                      className={index < lives ? 'text-[#FF3B30]' : 'text-[#3A3A3C] grayscale'}
-                    >
-                      ❤️
-                    </motion.span>
-                  ))}
+                <div className="flex flex-col items-center">
+                  <span className={`mb-2 text-[12px] font-medium ${TEXT_SECONDARY}`}>남은 목숨</span>
+                  <div className="flex gap-1.5 text-[16px]">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <motion.span
+                        key={`life-${index}`}
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: index < lives ? 1 : 0.2 }}
+                        transition={{ duration: 0.3, delay: index * 0.1 }}
+                        className={index < lives ? 'text-[#FF3B30]' : 'text-[#3A3A3C] grayscale'}
+                      >
+                        ❤️
+                      </motion.span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col text-right">
+                  <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>최고 점수</span>
+                  <span className="text-[22px] font-bold text-[#3182F6]">{bestScore.toLocaleString()}</span>
                 </div>
               </div>
+            </AnimatedSection>
 
-              <div className="flex flex-col text-right">
-                <span className={`mb-1 text-[12px] font-medium ${TEXT_SECONDARY}`}>최고 점수</span>
-                <span className="text-[22px] font-bold text-[#3182F6]">{bestScore.toLocaleString()}</span>
-              </div>
-            </div>
-          </AnimatedSection>
-
-          <AnimatedSection delay={0.2} className={`relative mb-6 overflow-hidden rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6 pb-6`}>
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
+              <AnimatedSection delay={0.2} className={`relative mb-6 overflow-hidden rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6 pb-6 lg:mb-0`}>
             {gamePhase === 'intro' ? (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -1162,66 +1164,67 @@ export function HigherLowerGamePage() {
                 ) : null}
               </motion.div>
             )}
-          </AnimatedSection>
+              </AnimatedSection>
 
-          <AnimatedSection delay={0.3} className={`mb-8 rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6`}>
-            <div className="mb-6 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-[18px] font-bold text-white">리더보드</p>
-                <p className="text-[12px] text-white/60">{activePeriodLabel} 기준</p>
-              </div>
+              <AnimatedSection delay={0.3} className={`mb-8 rounded-[32px] border ${CARD_BORDER} ${CARD_BG} p-6 lg:sticky lg:top-24`}>
+                <div className="mb-6 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[18px] font-bold text-white">리더보드</p>
+                    <p className="text-[12px] text-white/60">{activePeriodLabel} 기준</p>
+                  </div>
 
-              <div className={`flex rounded-[9px] ${SURFACE_BG} p-0.5`}>
-              {LEADERBOARD_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  aria-label={`${tab.label} 리더보드`}
-                  onClick={() => handleSelectLeaderboardPeriod(tab.key)}
-                  className={`rounded-[7px] px-3 py-1 text-[12px] font-medium transition-all duration-200 ${
-                    leaderboardPeriod === tab.key
-                      ? 'bg-[rgba(255,255,255,0.12)] text-white shadow-sm'
-                      : 'text-[#8E8E93] hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-              </div>
-            </div>
-
-            <div>
-              {leaderboardLoading ? (
-                <p className="py-10 text-center text-[14px] text-[#8E8E93]">리더보드 불러오는 중...</p>
-              ) : leaderboardError ? (
-                <p className="py-10 text-center text-[14px] text-[#ffb4b4]">{leaderboardError}</p>
-              ) : leaderboardItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10">
-                  <span className="mb-3 text-[32px] grayscale opacity-50">🏆</span>
-                  <p className="text-[14px] font-medium text-[#8E8E93]">아직 기록이 없습니다.</p>
-                  <p className="mt-1 text-[12px] text-[#8E8E93]/60">첫 기록을 세워보세요!</p>
-                </div>
-              ) : (
-                <ol className="space-y-2">
-                  {leaderboardItems.map((item) => (
-                    <li
-                      key={`${item.rank}-${item.displayName}-${item.achievedAt}`}
-                      className="flex items-center justify-between rounded-[12px] border border-white/10 bg-white/[0.03] px-3 py-2.5"
+                  <div className={`flex rounded-[9px] ${SURFACE_BG} p-0.5`}>
+                  {LEADERBOARD_TABS.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      aria-label={`${tab.label} 리더보드`}
+                      onClick={() => handleSelectLeaderboardPeriod(tab.key)}
+                      className={`rounded-[7px] px-3 py-1 text-[12px] font-medium transition-all duration-200 ${
+                        leaderboardPeriod === tab.key
+                          ? 'bg-[rgba(255,255,255,0.12)] text-white shadow-sm'
+                          : 'text-[#8E8E93] hover:text-white'
+                      }`}
                     >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-white/10 px-1.5 text-[11px] font-bold text-[#ffb13c]">
-                          {item.rank}
-                        </span>
-                        <p className="truncate text-[13px] font-semibold text-white/88">{item.displayName}</p>
-                      </div>
-                      <p className="text-[13px] font-bold text-[#8fb8ff]">{item.score}점</p>
-                    </li>
+                      {tab.label}
+                    </button>
                   ))}
-                </ol>
-              )}
+                  </div>
+                </div>
+
+                <div>
+                  {leaderboardLoading ? (
+                    <p className="py-10 text-center text-[14px] text-[#8E8E93]">리더보드 불러오는 중...</p>
+                  ) : leaderboardError ? (
+                    <p className="py-10 text-center text-[14px] text-[#ffb4b4]">{leaderboardError}</p>
+                  ) : leaderboardItems.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10">
+                      <span className="mb-3 text-[32px] grayscale opacity-50">🏆</span>
+                      <p className="text-[14px] font-medium text-[#8E8E93]">아직 기록이 없습니다.</p>
+                      <p className="mt-1 text-[12px] text-[#8E8E93]/60">첫 기록을 세워보세요!</p>
+                    </div>
+                  ) : (
+                    <ol className="space-y-2">
+                      {leaderboardItems.map((item) => (
+                        <li
+                          key={`${item.rank}-${item.displayName}-${item.achievedAt}`}
+                          className="flex items-center justify-between rounded-[12px] border border-white/10 bg-white/[0.03] px-3 py-2.5"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-white/10 px-1.5 text-[11px] font-bold text-[#ffb13c]">
+                              {item.rank}
+                            </span>
+                            <p className="truncate text-[13px] font-semibold text-white/88">{item.displayName}</p>
+                          </div>
+                          <p className="text-[13px] font-bold text-[#8fb8ff]">{item.score}점</p>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              </AnimatedSection>
+              </div>
             </div>
-          </AnimatedSection>
-          </div>
         </div>
 
         <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[130] md:hidden">
@@ -1287,7 +1290,7 @@ export function HigherLowerGamePage() {
 
       <footer className="relative border-t border-white/10 bg-[rgba(10,14,22,0.96)]">
         <div
-          className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
+          className="mx-auto w-full max-w-[min(100vw-2.5rem,1760px)] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
         >
           <div>

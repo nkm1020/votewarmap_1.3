@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { RegionVoteMap } from '@/lib/vote/types';
 
@@ -11,6 +12,7 @@ const querySchema = z.object({
   topicId: z.string().trim().min(1).optional(),
   scope: z.enum(['topic', 'all']).optional(),
   level: z.enum(['sido', 'sigungu']).default('sido'),
+  guestSessionId: z.string().uuid().optional(),
 });
 
 type RegionStatsRpcRow = {
@@ -21,6 +23,8 @@ type RegionStatsRpcRow = {
   winner: string | null;
 };
 
+type ResultVisibility = 'locked' | 'unlocked';
+
 function normalizeInt(value: number | string | null | undefined): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
@@ -30,6 +34,58 @@ function normalizeInt(value: number | string | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function calculateGapPercent(countA: number, countB: number): number {
+  const totalVotes = Math.max(0, countA + countB);
+  if (totalVotes <= 0) {
+    return 0;
+  }
+
+  const aPercent = Math.round((countA / totalVotes) * 100);
+  const bPercent = Math.max(0, 100 - aPercent);
+  return Math.abs(aPercent - bPercent);
+}
+
+async function resolveTopicVisibility(
+  request: Request,
+  topicId: string,
+  guestSessionId: string | undefined,
+): Promise<ResultVisibility> {
+  const supabase = getSupabaseServiceRoleClient();
+  const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
+
+  if (user?.id) {
+    const { data: voteRow, error: voteError } = await supabase
+      .from('votes')
+      .select('id')
+      .eq('topic_id', topicId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (voteError) {
+      throw new Error(voteError.message);
+    }
+
+    return voteRow ? 'unlocked' : 'locked';
+  }
+
+  if (guestSessionId) {
+    const { data: guestVoteRow, error: guestVoteError } = await supabase
+      .from('guest_votes_temp')
+      .select('id')
+      .eq('topic_id', topicId)
+      .eq('session_id', guestSessionId)
+      .maybeSingle();
+
+    if (guestVoteError) {
+      throw new Error(guestVoteError.message);
+    }
+
+    return guestVoteRow ? 'unlocked' : 'locked';
+  }
+
+  return 'locked';
 }
 
 export async function GET(request: Request) {
@@ -44,7 +100,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const { level } = parsed.data;
+    const { level, guestSessionId } = parsed.data;
     const scope = parsed.data.scope ?? (parsed.data.topicId ? 'topic' : 'all');
     const topicId = scope === 'topic' ? parsed.data.topicId ?? null : null;
     if (scope === 'topic' && !topicId) {
@@ -52,6 +108,8 @@ export async function GET(request: Request) {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const visibility: ResultVisibility =
+      scope === 'topic' && topicId ? await resolveTopicVisibility(request, topicId, guestSessionId) : 'locked';
 
     const accumulated = new Map<string, { total: number; countA: number; countB: number }>();
     const appendRows = (rows: RegionStatsRpcRow[]) => {
@@ -127,26 +185,45 @@ export async function GET(request: Request) {
           : value.countB > value.countA
             ? 'B'
             : 'TIE';
-      statsByCode[regionCode] = {
-        countA: value.countA,
-        countB: value.countB,
-        total: value.total,
-        winner,
-      };
+      const gapPercent = calculateGapPercent(value.countA, value.countB);
+      statsByCode[regionCode] =
+        visibility === 'unlocked'
+          ? {
+              countA: value.countA,
+              countB: value.countB,
+              total: value.total,
+              winner,
+              gapPercent,
+            }
+          : {
+              total: value.total,
+              gapPercent,
+            };
 
       totalA += value.countA;
       totalB += value.countB;
     });
 
+    const totalVotes = totalA + totalB;
+    const summary =
+      visibility === 'unlocked'
+        ? {
+            totalVotes,
+            countA: totalA,
+            countB: totalB,
+            gapPercent: calculateGapPercent(totalA, totalB),
+          }
+        : {
+            totalVotes,
+            gapPercent: calculateGapPercent(totalA, totalB),
+          };
+
     const payload = {
       scope,
       level,
+      visibility,
       statsByCode,
-      summary: {
-        totalVotes: totalA + totalB,
-        countA: totalA,
-        countB: totalB,
-      },
+      summary,
       topicCount,
     } as const;
 

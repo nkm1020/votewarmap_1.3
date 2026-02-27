@@ -4,11 +4,12 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, useReducedMotion } from 'framer-motion';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { readGuestSessionId } from '@/lib/vote/client-storage';
-import type { MapViewRequest, RegionVoteMap } from '@/components/KoreaAdminMap';
+import type { MapTooltipContext, MapViewRequest, RegionVoteMap } from '@/components/KoreaAdminMap';
 import { VoteResultModal } from '@/components/results/VoteResultModal';
 import type { VoteTopic } from '@/lib/vote/types';
 
@@ -24,6 +25,7 @@ const RESULT_MAP_COLORS = {
 const DEFAULT_MAP_CENTER: [number, number] = [127.75, 36.18];
 const DEFAULT_MAP_ZOOM = 6.1;
 const AUTO_OPEN_RESULT_MODAL = true;
+type ResultEntryMode = 'default' | 'map';
 type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
 type TopicTab = 'all' | TopicCategory;
 
@@ -54,6 +56,8 @@ type VoteSummaryStat = {
   bPercent: number;
 };
 
+type ResultVisibility = 'locked' | 'unlocked';
+
 type ResultSummaryResponse = {
   topic: {
     id: string;
@@ -66,7 +70,12 @@ type ResultSummaryResponse = {
     type: 'user' | 'guest' | 'anonymous';
     hasVote: boolean;
   };
-  nationwide: VoteSummaryStat;
+  visibility: ResultVisibility;
+  preview: {
+    gapPercent: number;
+    totalVotes: number;
+  } | null;
+  nationwide: VoteSummaryStat | null;
   myRegion:
     | (VoteSummaryStat & {
         level: 'sido' | 'sigungu';
@@ -88,7 +97,14 @@ type ResultSummaryResponse = {
     | null;
 };
 
+type ResultSummaryUnlockedResponse = ResultSummaryResponse & {
+  visibility: 'unlocked';
+  preview: null;
+  nationwide: VoteSummaryStat;
+};
+
 type RegionStatsResponse = {
+  visibility?: ResultVisibility;
   statsByCode?: RegionVoteMap;
 };
 
@@ -97,6 +113,26 @@ type SelectedRegion = {
   name: string;
   level: 'sido' | 'sigungu';
 };
+
+function buildRegionBreakdown(stat: MapTooltipContext['stat'] | null | undefined) {
+  if (!stat) {
+    return null;
+  }
+
+  const countA = stat.countA ?? 0;
+  const countB = stat.countB ?? 0;
+  const total = stat.total ?? countA + countB;
+  const aPercent = total > 0 ? Math.round((countA / total) * 100) : 0;
+  const bPercent = total > 0 ? Math.max(0, 100 - aPercent) : 0;
+
+  return {
+    countA,
+    countB,
+    total,
+    aPercent,
+    bPercent,
+  };
+}
 
 function categorizeTopic(topic: VoteTopic): TopicCategory {
   const manual = MANUAL_TOPIC_CATEGORY_BY_ID[topic.id];
@@ -123,7 +159,7 @@ function categorizeTopic(topic: VoteTopic): TopicCategory {
   return 'imagination';
 }
 
-function buildShareText(data: ResultSummaryResponse): string {
+function buildShareText(data: ResultSummaryUnlockedResponse): string {
   const nationwideSummary = `${data.topic.optionA.label} ${data.nationwide.aPercent}% vs ${data.topic.optionB.label} ${data.nationwide.bPercent}%`;
   const regionName = data.myRegion?.name ?? '지역 데이터 수집 중';
   const regionSummary = data.myRegion
@@ -138,13 +174,19 @@ function buildShareText(data: ResultSummaryResponse): string {
   ].join('\n');
 }
 
-export function ResultComparisonPage({ topicId }: { topicId: string }) {
+export function ResultComparisonPage({
+  topicId,
+  entryMode = 'default',
+}: {
+  topicId: string;
+  entryMode?: ResultEntryMode;
+}) {
   const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ResultSummaryResponse | null>(null);
+  const [data, setData] = useState<ResultSummaryUnlockedResponse | null>(null);
   const [mapStats, setMapStats] = useState<RegionVoteMap>({});
   const [selectedRegion, setSelectedRegion] = useState<SelectedRegion | null>(null);
   const [isIntroSheetOpen, setIsIntroSheetOpen] = useState(false);
@@ -158,6 +200,8 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
   const [pickerVoteMessage, setPickerVoteMessage] = useState<string | null>(null);
   const [mapViewRequest, setMapViewRequest] = useState<MapViewRequest | undefined>(undefined);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [isDesktopLeftPanelOpen, setIsDesktopLeftPanelOpen] = useState(true);
   const noticeTimerRef = useRef<number | null>(null);
   const selectedRegionPanelRef = useRef<HTMLElement | null>(null);
   const openSheetRef = useRef<HTMLElement | null>(null);
@@ -173,6 +217,8 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
       noticeTimerRef.current = null;
     }, 1800);
   }, []);
+
+  const shouldAutoOpenIntroModal = AUTO_OPEN_RESULT_MODAL && entryMode !== 'map';
 
   useEffect(() => {
     return () => {
@@ -222,7 +268,29 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         return;
       }
 
-      setData(json);
+      if (json.visibility === 'locked') {
+        const redirectQuery = new URLSearchParams({
+          topics: topicId,
+          openTopicEditor: '1',
+          redirectResultTopicId: topicId,
+        });
+        router.replace(`/topics-map?${redirectQuery.toString()}`);
+        setData(null);
+        if (!silent) {
+          setError(null);
+        }
+        return;
+      }
+
+      if (!json.nationwide || json.preview !== null) {
+        if (!silent) {
+          setError('결과 정보를 불러오지 못했습니다.');
+          setData(null);
+        }
+        return;
+      }
+
+      setData(json as ResultSummaryUnlockedResponse);
     } catch {
       if (!silent) {
         setError('결과 정보를 불러오지 못했습니다.');
@@ -233,18 +301,37 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         setIsLoading(false);
       }
     }
-  }, [isAuthenticated, topicId]);
+  }, [isAuthenticated, router, topicId]);
 
   const loadMapStats = useCallback(async () => {
     try {
+      let accessToken: string | null = null;
+      if (isAuthenticated) {
+        const supabase = getSupabaseBrowserClient();
+        if (supabase) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          accessToken = sessionData.session?.access_token ?? null;
+        }
+      }
+
+      const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+      const guestSessionId = !isAuthenticated ? readGuestSessionId() : null;
       const nonce = Date.now();
+      const buildStatsUrl = (level: 'sido' | 'sigungu') => {
+        const query = new URLSearchParams({
+          scope: 'topic',
+          topicId,
+          level,
+          ts: String(nonce),
+        });
+        if (guestSessionId) {
+          query.set('guestSessionId', guestSessionId);
+        }
+        return `/api/votes/region-stats?${query.toString()}`;
+      };
       const [sidoRes, sigunguRes] = await Promise.allSettled([
-        fetch(`/api/votes/region-stats?topicId=${encodeURIComponent(topicId)}&level=sido&ts=${nonce}`, {
-          cache: 'no-store',
-        }),
-        fetch(`/api/votes/region-stats?topicId=${encodeURIComponent(topicId)}&level=sigungu&ts=${nonce}`, {
-          cache: 'no-store',
-        }),
+        fetch(buildStatsUrl('sido'), { cache: 'no-store', headers }),
+        fetch(buildStatsUrl('sigungu'), { cache: 'no-store', headers }),
       ]);
 
       let sidoJson: RegionStatsResponse | null = null;
@@ -264,7 +351,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
     } catch {
       setMapStats({});
     }
-  }, [topicId]);
+  }, [isAuthenticated, topicId]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -275,12 +362,12 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
   }, [isAuthLoading, loadMapStats, loadResultSummary]);
 
   useEffect(() => {
-    if (!data || !AUTO_OPEN_RESULT_MODAL || hasAutoOpenedIntroRef.current) {
+    if (!data || !shouldAutoOpenIntroModal || hasAutoOpenedIntroRef.current) {
       return;
     }
     hasAutoOpenedIntroRef.current = true;
     setIsIntroSheetOpen(true);
-  }, [data]);
+  }, [data, shouldAutoOpenIntroModal]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -318,24 +405,50 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
   }, [mapStats, selectedRegion]);
 
   const selectedRegionBreakdown = useMemo(() => {
-    if (!selectedRegionStat) {
-      return null;
-    }
-
-    const countA = selectedRegionStat.countA ?? 0;
-    const countB = selectedRegionStat.countB ?? 0;
-    const total = selectedRegionStat.total ?? countA + countB;
-    const aPercent = total > 0 ? Math.round((countA / total) * 100) : 0;
-    const bPercent = total > 0 ? Math.max(0, 100 - aPercent) : 0;
-
-    return {
-      countA,
-      countB,
-      total,
-      aPercent,
-      bPercent,
-    };
+    return buildRegionBreakdown(selectedRegionStat);
   }, [selectedRegionStat]);
+  const renderRegionTooltipContent = useCallback(
+    (context: MapTooltipContext) => {
+      const breakdown = buildRegionBreakdown(context.stat);
+      return (
+        <div className="w-[min(340px,calc(100vw-44px))] rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.78)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+          <div className="flex items-center justify-between">
+            <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{context.name || context.code}</h4>
+            <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+              {context.level === 'sido' ? '시/도' : '시/군/구'}
+            </span>
+          </div>
+
+          {data ? (
+            breakdown ? (
+              <>
+                <p className="mt-2 text-[12px] text-white/68">
+                  누적 투표수 <span className="font-semibold text-white">{breakdown.total.toLocaleString()}표</span>
+                </p>
+                <div className="mt-2 flex items-center justify-between text-xs text-white/84">
+                  <span>
+                    {data.topic.optionA.label} {breakdown.aPercent}%
+                  </span>
+                  <span>
+                    {data.topic.optionB.label} {breakdown.bPercent}%
+                  </span>
+                </div>
+                <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/12">
+                  <div className="h-full bg-[#ff6b00]" style={{ width: `${breakdown.aPercent}%` }} />
+                  <div className="h-full bg-[#2f74ff]" style={{ width: `${breakdown.bPercent}%` }} />
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-white/62">투표 데이터가 아직 없습니다.</p>
+            )
+          ) : (
+            <p className="mt-2 text-xs text-white/62">결과 정보를 불러오는 중입니다.</p>
+          )}
+        </div>
+      );
+    },
+    [data],
+  );
 
   const nationwideBar = useMemo(() => {
     if (!data) {
@@ -404,6 +517,9 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
     [activeTopicTab, sortedTopics, topicsByCategory],
   );
   const topicListBottomInset = useMemo(() => 'calc(env(safe-area-inset-bottom) + 8px)', []);
+  const mapRegionLevelToggleAlign = useMemo<'left' | 'right'>(() => (isDesktopViewport ? 'left' : 'right'), [isDesktopViewport]);
+  const mapBottomDockHeightPx = useMemo(() => (isDesktopViewport ? 0 : 132), [isDesktopViewport]);
+  const mapToggleClearancePx = useMemo(() => (isDesktopViewport ? 22 : 14), [isDesktopViewport]);
 
   useEffect(() => {
     if (!expandedPickerTopicId) {
@@ -418,7 +534,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
   }, [expandedPickerTopicId, filteredTopics]);
 
   useEffect(() => {
-    if (!selectedRegion || isIntroSheetOpen) {
+    if (isDesktopViewport || !selectedRegion || isIntroSheetOpen) {
       return;
     }
 
@@ -438,7 +554,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [isIntroSheetOpen, selectedRegion]);
+  }, [isDesktopViewport, isIntroSheetOpen, selectedRegion]);
 
   const handleInstantShare = useCallback(async () => {
     if (!data || typeof window === 'undefined') {
@@ -618,9 +734,14 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
 
   const handleOpenNextTopicsFromModal = useCallback(() => {
     setIsIntroSheetOpen(false);
-    setIsBottomSheetExpanded(true);
+    if (isDesktopViewport) {
+      setIsDesktopLeftPanelOpen(true);
+      setIsBottomSheetExpanded(false);
+    } else {
+      setIsBottomSheetExpanded(true);
+    }
     void loadPickerTopics();
-  }, [loadPickerTopics]);
+  }, [isDesktopViewport, loadPickerTopics]);
 
   const handleTopicPickerToggle = useCallback((nextTopicId: string) => {
     setExpandedPickerTopicId((prev) => (prev === nextTopicId ? null : nextTopicId));
@@ -658,7 +779,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
     setPickerVoteMessage(null);
     setActiveTopicTab('all');
     hasAutoOpenedIntroRef.current = false;
-  }, [topicId]);
+  }, [entryMode, topicId]);
 
   useEffect(() => {
     if (isTopicsLoading || availableTopics.length > 0 || topicsError) {
@@ -698,6 +819,34 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
     };
   }, [isBottomSheetExpanded]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const syncViewport = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+    };
+
+    syncViewport();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport);
+      return () => mediaQuery.removeEventListener('change', syncViewport);
+    }
+
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (isDesktopViewport) {
+      setIsBottomSheetExpanded(false);
+      setSelectedRegion(null);
+    }
+  }, [isDesktopViewport]);
+
   const bottomSheetY = isBottomSheetExpanded ? 0 : 'calc(100% - 124px)';
   const bottomSheetTransition = shouldReduceMotion
     ? { duration: 0 }
@@ -717,15 +866,24 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
             height="100%"
             initialCenter={DEFAULT_MAP_CENTER}
             initialZoom={DEFAULT_MAP_ZOOM}
+            bottomDockHeightPx={mapBottomDockHeightPx}
+            toggleClearancePx={mapToggleClearancePx}
             theme="dark"
             colors={RESULT_MAP_COLORS}
             showNavigationControl={false}
-            showTooltip={false}
+            showTooltip={isDesktopViewport}
+            tooltipPinOnClick={isDesktopViewport}
+            renderTooltipContent={isDesktopViewport ? renderRegionTooltipContent : undefined}
             showRegionLevelToggle
-            regionLevelToggleAlign="right"
+            regionLevelToggleAlign={mapRegionLevelToggleAlign}
             viewRequest={mapViewRequest}
-            onRegionClick={(region) =>
-              setSelectedRegion((prev) => (prev && prev.code === region.code && prev.level === region.level ? null : region))
+            onRegionClick={
+              isDesktopViewport
+                ? undefined
+                : (region) =>
+                    setSelectedRegion((prev) =>
+                      prev && prev.code === region.code && prev.level === region.level ? null : region,
+                    )
             }
             className="h-full w-full !rounded-none !border-0"
           />
@@ -733,10 +891,9 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.36),_rgba(4,10,18,0.12)_40%,_rgba(4,10,18,0.52))]" />
         <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
-        <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1280px] flex-col px-2 pt-[calc(0.6rem+env(safe-area-inset-top))] pb-[calc(0.65rem+env(safe-area-inset-bottom))] md:px-6 md:pt-0 lg:px-10">
+        <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[min(100vw-2.5rem,1920px)] flex-col px-2 pt-[calc(0.6rem+env(safe-area-inset-top))] pb-[calc(0.65rem+env(safe-area-inset-bottom))] md:px-6 md:pt-0 lg:max-w-none lg:px-0">
           <DesktopTopHeader
             className="pointer-events-auto"
-            containerClassName="max-w-[980px] px-0 sm:px-0 lg:px-0"
             links={[
               { key: 'home', label: '홈', onClick: () => router.push('/') },
               { key: 'map', label: '지도', onClick: () => router.push('/topics-map') },
@@ -746,127 +903,380 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
             actions={[{ key: 'open-intro', label: '결과 분석 보기', onClick: () => setIsIntroSheetOpen(true), variant: 'solid' }]}
           />
 
-          {data && !isIntroSheetOpen ? (
-            <section className="pointer-events-auto absolute left-1/2 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:top-[5.2rem]">
-              <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
-              <div className="pointer-events-none absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-[#2f74ff2e] blur-2xl" />
+          {isDesktopViewport ? (
+            <div className="relative flex min-h-0 flex-1">
+              {isDesktopLeftPanelOpen ? (
+                <aside className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border border-white/12 bg-[rgba(20,20,24,0.82)] shadow-[4px_0_24px_rgba(0,0,0,0.28)]">
+                  <button
+                    type="button"
+                    onClick={() => setIsDesktopLeftPanelOpen(false)}
+                    className="absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                    aria-label="다른 주제 선택 패널 접기"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
 
-              <div className="relative flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">전국 실시간 판세</p>
-                  <p className="mt-1 line-clamp-1 text-[14px] font-semibold text-white">{data.topic.title}</p>
-                  <p className="mt-1 text-xs text-white/72">
-                    총 <span className="font-bold text-white">{data.nationwide.totalVotes.toLocaleString()}표</span> 참여
-                  </p>
-                </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/10 custom-scrollbar">
+                    <div className="border-b border-white/10 px-6 py-4">
+                      <h3 className="text-[20px] font-bold tracking-tight text-white">다른 주제 선택</h3>
+                      <p className="mt-1 text-[12px] text-white/62">선택하면 바로 해당 결과 페이지로 이동합니다.</p>
+                    </div>
 
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#70b5ff66] bg-[#2f74ff24] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#b6d4ff]">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7bc2ff] opacity-80" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[#7bc2ff]" />
-                  </span>
-                  Live
-                </span>
+                    <div className="border-b border-white/10 px-5 pb-3 pt-4">
+                      <div className="hide-scrollbar flex gap-2 overflow-x-auto">
+                        {TOPIC_TAB_META.map((tab) => {
+                          const isActive = activeTopicTab === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setActiveTopicTab(tab.id)}
+                              className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
+                                isActive
+                                  ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
+                                  : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="px-5 pb-5 pt-4">
+                      {isTopicsLoading ? (
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                          주제 불러오는 중...
+                        </div>
+                      ) : availableTopics.length === 0 ? (
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                          LIVE 주제가 없습니다.
+                        </div>
+                      ) : (
+                        <>
+                          {topicsError ? <p className="mb-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
+
+                          {filteredTopics.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
+                              이 카테고리에 표시할 주제가 없습니다.
+                            </div>
+                          ) : (
+                            <div className="space-y-2 pb-1">
+                              {filteredTopics.map((topic) => {
+                                const optionA = topic.options.find((option) => option.position === 1) ?? null;
+                                const optionB = topic.options.find((option) => option.position === 2) ?? null;
+                                const isExpanded = expandedPickerTopicId === topic.id;
+                                const isSelectionReady = Boolean(pickerSelectedOptionKey && optionA && optionB);
+
+                                return (
+                                  <div
+                                    key={topic.id}
+                                    className={`rounded-xl border bg-white/5 transition-colors duration-300 ${
+                                      isExpanded ? 'border-[#ff9f0a55] bg-white/[0.07]' : 'border-white/14'
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => handleTopicPickerToggle(topic.id)}
+                                      className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-white/84 transition hover:bg-white/6"
+                                    >
+                                      <p className="line-clamp-1 text-[14px] font-medium leading-5">{topic.title}</p>
+                                      <span className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2 text-[11px] font-semibold text-[#ffd2a6]">
+                                        {isExpanded ? '닫기' : '투표'}
+                                      </span>
+                                    </button>
+
+                                    <div
+                                      className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] ${
+                                        isExpanded
+                                          ? 'max-h-[320px] translate-y-0 opacity-100'
+                                          : 'pointer-events-none -translate-y-1 max-h-0 opacity-0'
+                                      }`}
+                                    >
+                                      <div className="border-t border-white/6 px-3 pb-3 pt-2.5">
+                                        <p className="text-[12px] text-white/66">선택지를 고르고 바로 투표하세요.</p>
+                                        {optionA && optionB ? (
+                                          <>
+                                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setPickerSelectedOptionKey(optionA.key);
+                                                  setPickerVoteMessage(null);
+                                                }}
+                                                className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
+                                                  pickerSelectedOptionKey === optionA.key
+                                                    ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]'
+                                                    : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                }`}
+                                              >
+                                                {optionA.label}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setPickerSelectedOptionKey(optionB.key);
+                                                  setPickerVoteMessage(null);
+                                                }}
+                                                className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
+                                                  pickerSelectedOptionKey === optionB.key
+                                                    ? 'border-[#4ea1ff88] bg-[#2f7cff2e] text-[#cfe2ff]'
+                                                    : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                }`}
+                                              >
+                                                {optionB.label}
+                                              </button>
+                                            </div>
+                                            {pickerVoteMessage ? <p className="mt-2 text-xs text-[#ffd0a6]">{pickerVoteMessage}</p> : null}
+                                            <button
+                                              type="button"
+                                              onClick={() => handleTopicPickerVoteSubmit(topic)}
+                                              disabled={!isSelectionReady}
+                                              className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b00] text-[13px] font-bold text-white transition hover:bg-[#ff7b1d] disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-white/45"
+                                            >
+                                              투표 후 결과 보기
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <p className="mt-2 text-xs text-[#ffb4b4]">이 주제는 선택지 정보를 불러오지 못했습니다.</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </aside>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsDesktopLeftPanelOpen(true)}
+                  className="pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                  aria-label="다른 주제 선택 패널 열기"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              )}
+
+              <div className="ml-auto flex min-h-0 w-full max-w-[clamp(320px,28vw,460px)] flex-col gap-3 px-3 pb-4 pt-3 lg:pr-8">
+                {data && !isIntroSheetOpen ? (
+                  <section className="pointer-events-auto relative overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+                    <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
+                    <div className="pointer-events-none absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-[#2f74ff2e] blur-2xl" />
+
+                    <div className="relative flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">전국 실시간 판세</p>
+                        <p className="mt-1 line-clamp-1 text-[14px] font-semibold text-white">{data.topic.title}</p>
+                        <p className="mt-1 text-xs text-white/72">
+                          총 <span className="font-bold text-white">{data.nationwide.totalVotes.toLocaleString()}표</span> 참여
+                        </p>
+                      </div>
+
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#70b5ff66] bg-[#2f74ff24] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#b6d4ff]">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7bc2ff] opacity-80" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-[#7bc2ff]" />
+                        </span>
+                        Live
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-semibold text-[#ffd3ae]">{data.topic.optionA.label}</p>
+                        <p className="text-[19px] font-black leading-none text-[#ffad63]">{nationwideBar.a}%</p>
+                      </div>
+                      <span className="pb-0.5 text-[10px] font-semibold text-white/42">VS</span>
+                      <div className="min-w-0 text-right">
+                        <p className="truncate text-[11px] font-semibold text-[#c3dcff]">{data.topic.optionB.label}</p>
+                        <p className="text-[19px] font-black leading-none text-[#8dbdff]">{nationwideBar.b}%</p>
+                      </div>
+                    </div>
+
+                    <div className="relative mt-2.5">
+                      <div className="flex h-3 overflow-hidden rounded-full bg-white/12 ring-1 ring-white/12">
+                        <div
+                          className="h-full bg-[linear-gradient(90deg,#ff6b00,#ff9f0a)] transition-[width] duration-700 ease-out"
+                          style={{ width: `${nationwideBar.displayA}%` }}
+                        />
+                        <div
+                          className="h-full bg-[linear-gradient(90deg,#2f74ff,#63a6ff)] transition-[width] duration-700 ease-out"
+                          style={{ width: `${nationwideBar.displayB}%` }}
+                        />
+                      </div>
+                      <div className="pointer-events-none absolute inset-0 rounded-full bg-[linear-gradient(90deg,rgba(255,255,255,0.18),rgba(255,255,255,0.02))] mix-blend-screen opacity-35" />
+                    </div>
+
+                    <p className="mt-2 text-[11px] font-semibold text-white/76">
+                      {nationwideBar.winner === 'TIE'
+                        ? '현재 전국 판세가 팽팽해요.'
+                        : `${nationwideBar.winner === 'A' ? data.topic.optionA.label : data.topic.optionB.label} ${nationwideBar.gap}%p 우세`}
+                    </p>
+                  </section>
+                ) : null}
+
+                {noticeMessage && !isIntroSheetOpen ? (
+                  <div className="pointer-events-none rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl">
+                    {noticeMessage}
+                  </div>
+                ) : null}
+
+                {isLoading ? (
+                  <section className="pointer-events-auto space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+                    <div className="h-5 w-44 animate-pulse rounded bg-white/14" />
+                    <div className="h-4 w-64 animate-pulse rounded bg-white/12" />
+                    <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
+                    <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
+                  </section>
+                ) : error ? (
+                  <section className="pointer-events-auto rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+                    <p className="text-sm font-semibold text-[#ffb4b4]">{error}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void loadResultSummary();
+                        void loadMapStats();
+                      }}
+                      className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-white/22 bg-white/12 text-sm font-semibold text-white/92 transition hover:bg-white/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                    >
+                      다시 시도
+                    </button>
+                  </section>
+                ) : null}
               </div>
-
-              <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-[11px] font-semibold text-[#ffd3ae]">{data.topic.optionA.label}</p>
-                  <p className="text-[19px] font-black leading-none text-[#ffad63]">{nationwideBar.a}%</p>
-                </div>
-                <span className="pb-0.5 text-[10px] font-semibold text-white/42">VS</span>
-                <div className="min-w-0 text-right">
-                  <p className="truncate text-[11px] font-semibold text-[#c3dcff]">{data.topic.optionB.label}</p>
-                  <p className="text-[19px] font-black leading-none text-[#8dbdff]">{nationwideBar.b}%</p>
-                </div>
-              </div>
-
-              <div className="relative mt-2.5">
-                <div className="flex h-3 overflow-hidden rounded-full bg-white/12 ring-1 ring-white/12">
-                  <div
-                    className="h-full bg-[linear-gradient(90deg,#ff6b00,#ff9f0a)] transition-[width] duration-700 ease-out"
-                    style={{ width: `${nationwideBar.displayA}%` }}
-                  />
-                  <div
-                    className="h-full bg-[linear-gradient(90deg,#2f74ff,#63a6ff)] transition-[width] duration-700 ease-out"
-                    style={{ width: `${nationwideBar.displayB}%` }}
-                  />
-                </div>
-                <div className="pointer-events-none absolute inset-0 rounded-full bg-[linear-gradient(90deg,rgba(255,255,255,0.18),rgba(255,255,255,0.02))] mix-blend-screen opacity-35" />
-              </div>
-
-              <p className="mt-2 text-[11px] font-semibold text-white/76">
-                {nationwideBar.winner === 'TIE'
-                  ? '현재 전국 판세가 팽팽해요.'
-                  : `${nationwideBar.winner === 'A' ? data.topic.optionA.label : data.topic.optionB.label} ${nationwideBar.gap}%p 우세`}
-              </p>
-            </section>
-          ) : null}
-
-        {data && selectedRegion && !isIntroSheetOpen ? (
-          <section
-            ref={selectedRegionPanelRef}
-            className="pointer-events-auto absolute left-1/2 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:top-[13rem]"
-          >
-            <div className="flex items-center justify-between">
-              <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{selectedRegion.name || selectedRegion.code}</h4>
-              <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-                {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
-              </span>
             </div>
+          ) : (
+            <>
+              {data && !isIntroSheetOpen ? (
+                <section className="pointer-events-auto absolute left-1/2 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:top-[5.2rem] lg:max-w-[min(46vw,760px)]">
+                  <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
+                  <div className="pointer-events-none absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-[#2f74ff2e] blur-2xl" />
 
-            {selectedRegionBreakdown ? (
-              <>
-                <p className="mt-2 text-[12px] text-white/68">
-                  누적 투표수 <span className="font-semibold text-white">{selectedRegionBreakdown.total.toLocaleString()}표</span>
-                </p>
-                <div className="mt-2 flex items-center justify-between text-xs text-white/84">
-                  <span>
-                    {data.topic.optionA.label} {selectedRegionBreakdown.aPercent}%
-                  </span>
-                  <span>
-                    {data.topic.optionB.label} {selectedRegionBreakdown.bPercent}%
-                  </span>
+                  <div className="relative flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">전국 실시간 판세</p>
+                      <p className="mt-1 line-clamp-1 text-[14px] font-semibold text-white">{data.topic.title}</p>
+                      <p className="mt-1 text-xs text-white/72">
+                        총 <span className="font-bold text-white">{data.nationwide.totalVotes.toLocaleString()}표</span> 참여
+                      </p>
+                    </div>
+
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#70b5ff66] bg-[#2f74ff24] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#b6d4ff]">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7bc2ff] opacity-80" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-[#7bc2ff]" />
+                      </span>
+                      Live
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-[11px] font-semibold text-[#ffd3ae]">{data.topic.optionA.label}</p>
+                      <p className="text-[19px] font-black leading-none text-[#ffad63]">{nationwideBar.a}%</p>
+                    </div>
+                    <span className="pb-0.5 text-[10px] font-semibold text-white/42">VS</span>
+                    <div className="min-w-0 text-right">
+                      <p className="truncate text-[11px] font-semibold text-[#c3dcff]">{data.topic.optionB.label}</p>
+                      <p className="text-[19px] font-black leading-none text-[#8dbdff]">{nationwideBar.b}%</p>
+                    </div>
+                  </div>
+
+                  <div className="relative mt-2.5">
+                    <div className="flex h-3 overflow-hidden rounded-full bg-white/12 ring-1 ring-white/12">
+                      <div
+                        className="h-full bg-[linear-gradient(90deg,#ff6b00,#ff9f0a)] transition-[width] duration-700 ease-out"
+                        style={{ width: `${nationwideBar.displayA}%` }}
+                      />
+                      <div
+                        className="h-full bg-[linear-gradient(90deg,#2f74ff,#63a6ff)] transition-[width] duration-700 ease-out"
+                        style={{ width: `${nationwideBar.displayB}%` }}
+                      />
+                    </div>
+                    <div className="pointer-events-none absolute inset-0 rounded-full bg-[linear-gradient(90deg,rgba(255,255,255,0.18),rgba(255,255,255,0.02))] mix-blend-screen opacity-35" />
+                  </div>
+
+                  <p className="mt-2 text-[11px] font-semibold text-white/76">
+                    {nationwideBar.winner === 'TIE'
+                      ? '현재 전국 판세가 팽팽해요.'
+                      : `${nationwideBar.winner === 'A' ? data.topic.optionA.label : data.topic.optionB.label} ${nationwideBar.gap}%p 우세`}
+                  </p>
+                </section>
+              ) : null}
+
+              {data && selectedRegion && !isIntroSheetOpen ? (
+                <section
+                  ref={selectedRegionPanelRef}
+                  className="pointer-events-auto absolute left-1/2 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:top-[13rem] lg:max-w-[min(46vw,760px)]"
+                >
+                  <div className="flex items-center justify-between">
+                    <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{selectedRegion.name || selectedRegion.code}</h4>
+                    <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                      {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                    </span>
+                  </div>
+
+                  {selectedRegionBreakdown ? (
+                    <>
+                      <p className="mt-2 text-[12px] text-white/68">
+                        누적 투표수 <span className="font-semibold text-white">{selectedRegionBreakdown.total.toLocaleString()}표</span>
+                      </p>
+                      <div className="mt-2 flex items-center justify-between text-xs text-white/84">
+                        <span>
+                          {data.topic.optionA.label} {selectedRegionBreakdown.aPercent}%
+                        </span>
+                        <span>
+                          {data.topic.optionB.label} {selectedRegionBreakdown.bPercent}%
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/12">
+                        <div className="h-full bg-[#ff6b00]" style={{ width: `${selectedRegionBreakdown.aPercent}%` }} />
+                        <div className="h-full bg-[#2f74ff]" style={{ width: `${selectedRegionBreakdown.bPercent}%` }} />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-white/62">투표 데이터가 아직 없습니다.</p>
+                  )}
+                </section>
+              ) : null}
+
+              {noticeMessage && !isIntroSheetOpen ? (
+                <div className="pointer-events-none absolute left-1/2 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl md:top-[16.4rem] lg:max-w-[min(46vw,760px)]">
+                  {noticeMessage}
                 </div>
-                <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/12">
-                  <div className="h-full bg-[#ff6b00]" style={{ width: `${selectedRegionBreakdown.aPercent}%` }} />
-                  <div className="h-full bg-[#2f74ff]" style={{ width: `${selectedRegionBreakdown.bPercent}%` }} />
-                </div>
-              </>
-            ) : (
-              <p className="mt-2 text-xs text-white/62">투표 데이터가 아직 없습니다.</p>
-            )}
-          </section>
-        ) : null}
+              ) : null}
 
-        {noticeMessage && !isIntroSheetOpen ? (
-          <div className="pointer-events-none absolute left-1/2 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl md:top-[16.4rem]">
-            {noticeMessage}
-          </div>
-        ) : null}
-
-        {isLoading ? (
-          <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
-            <div className="h-5 w-44 animate-pulse rounded bg-white/14" />
-            <div className="h-4 w-64 animate-pulse rounded bg-white/12" />
-            <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
-            <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
-          </section>
-        ) : error ? (
-          <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
-            <p className="text-sm font-semibold text-[#ffb4b4]">{error}</p>
-            <button
-              type="button"
-              onClick={() => {
-                void loadResultSummary();
-                void loadMapStats();
-              }}
-              className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-white/22 bg-white/12 text-sm font-semibold text-white/92 transition hover:bg-white/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-            >
-              다시 시도
-            </button>
-          </section>
-        ) : null}
+              {isLoading ? (
+                <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl lg:max-w-[min(46vw,760px)]">
+                  <div className="h-5 w-44 animate-pulse rounded bg-white/14" />
+                  <div className="h-4 w-64 animate-pulse rounded bg-white/12" />
+                  <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
+                  <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
+                </section>
+              ) : error ? (
+                <section className="pointer-events-auto absolute left-1/2 bottom-[calc(0.65rem+env(safe-area-inset-bottom))] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl lg:max-w-[min(46vw,760px)]">
+                  <p className="text-sm font-semibold text-[#ffb4b4]">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadResultSummary();
+                      void loadMapStats();
+                    }}
+                    className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-white/22 bg-white/12 text-sm font-semibold text-white/92 transition hover:bg-white/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                  >
+                    다시 시도
+                  </button>
+                </section>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -876,7 +1286,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
           initial={false}
           animate={{ y: bottomSheetY }}
           transition={bottomSheetTransition}
-          className={`pointer-events-auto fixed bottom-[calc(0.65rem+env(safe-area-inset-bottom))] left-1/2 z-30 h-[min(76dvh,620px)] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-t-[24px] rounded-b-[20px] border border-white/8 bg-[rgba(12,18,28,0.84)] shadow-[0_6px_16px_rgba(0,0,0,0.2)] backdrop-blur-2xl ${
+          className={`pointer-events-auto fixed bottom-[calc(0.65rem+env(safe-area-inset-bottom))] left-1/2 z-30 h-[min(76dvh,620px)] w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-t-[24px] rounded-b-[20px] border border-white/8 bg-[rgba(12,18,28,0.84)] shadow-[0_6px_16px_rgba(0,0,0,0.2)] backdrop-blur-2xl lg:hidden ${
             isBottomSheetExpanded ? 'overflow-y-auto' : 'overflow-hidden'
           }`}
           style={{
@@ -1066,7 +1476,7 @@ export function ResultComparisonPage({ topicId }: { topicId: string }) {
       {data && !isIntroSheetOpen ? (
         <footer className="relative z-50 border-t border-white/8 bg-[rgba(10,14,22,0.985)]">
           <div
-            className="mx-auto w-full max-w-[1280px] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
+            className="mx-auto w-full max-w-[min(100vw-2.5rem,1920px)] px-4 pb-4 pt-6 text-white/72 md:flex md:items-start md:justify-between md:gap-6 md:px-8 lg:px-10"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
           >
             <div>
