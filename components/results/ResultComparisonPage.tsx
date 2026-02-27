@@ -174,6 +174,23 @@ function buildShareText(data: ResultSummaryUnlockedResponse): string {
   ].join('\n');
 }
 
+function buildVoteRequestHeaders(
+  accessToken: string | null,
+  guestSessionId: string | null,
+): HeadersInit | undefined {
+  const headers: Record<string, string> = {};
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  if (guestSessionId) {
+    headers['X-Guest-Session-Id'] = guestSessionId;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 export function ResultComparisonPage({
   topicId,
   entryMode = 'default',
@@ -250,13 +267,10 @@ export function ResultComparisonPage({
 
       const guestSessionId = !isAuthenticated ? readGuestSessionId() : null;
       const query = new URLSearchParams({ topicId });
-      if (guestSessionId) {
-        query.set('guestSessionId', guestSessionId);
-      }
 
       const response = await fetch(`/api/votes/result-summary?${query.toString()}`, {
         cache: 'no-store',
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        headers: buildVoteRequestHeaders(accessToken, guestSessionId),
       });
 
       const json = (await response.json()) as ResultSummaryResponse & { error?: string };
@@ -314,8 +328,8 @@ export function ResultComparisonPage({
         }
       }
 
-      const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
       const guestSessionId = !isAuthenticated ? readGuestSessionId() : null;
+      const headers = buildVoteRequestHeaders(accessToken, guestSessionId);
       const nonce = Date.now();
       const buildStatsUrl = (level: 'sido' | 'sigungu') => {
         const query = new URLSearchParams({
@@ -324,9 +338,6 @@ export function ResultComparisonPage({
           level,
           ts: String(nonce),
         });
-        if (guestSessionId) {
-          query.set('guestSessionId', guestSessionId);
-        }
         return `/api/votes/region-stats?${query.toString()}`;
       };
       const [sidoRes, sigunguRes] = await Promise.allSettled([

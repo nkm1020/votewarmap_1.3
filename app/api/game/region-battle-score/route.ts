@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 export const revalidate = 0;
+const SCORE_SUBMIT_LIMIT_PER_MINUTE = 20;
 
 const bodySchema = z.object({
   runId: z.string().uuid(),
@@ -46,6 +47,23 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseServiceRoleClient();
     const { runId, score } = parsed.data;
+    const rateLimitWindowIso = new Date(Date.now() - 60 * 1000).toISOString();
+    const { count: recentSubmitCount, error: rateLimitError } = await supabase
+      .from('region_battle_game_scores')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('played_at', rateLimitWindowIso);
+
+    if (rateLimitError) {
+      return NextResponse.json({ error: rateLimitError.message }, { status: 500 });
+    }
+
+    if ((recentSubmitCount ?? 0) >= SCORE_SUBMIT_LIMIT_PER_MINUTE) {
+      return NextResponse.json(
+        { error: '점수 저장 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
+        { status: 429 },
+      );
+    }
 
     const { error: insertError } = await supabase.from('region_battle_game_scores').insert({
       user_id: user.id,

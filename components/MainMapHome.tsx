@@ -1,7 +1,6 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TouchEvent, type WheelEvent } from 'react';
 import type { MapPointMarker, MapTooltipContext, RegionVoteMap } from '@/components/KoreaAdminMap';
@@ -9,7 +8,6 @@ import {
   BarChart2,
   ChevronLeft,
   ChevronRight,
-  Grid2x2PlusIcon,
   Maximize2,
   Minus,
   Minimize2,
@@ -221,6 +219,23 @@ function normalizeSummary(summary: {
     gapPercent: Math.abs(aPercent - bPercent),
     hasData: true,
   };
+}
+
+function buildVoteRequestHeaders(
+  accessToken: string | null,
+  guestSessionId: string | null,
+): HeadersInit | undefined {
+  const headers: Record<string, string> = {};
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  if (guestSessionId) {
+    headers['X-Guest-Session-Id'] = guestSessionId;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 type NormalizedVoteSummary = ReturnType<typeof normalizeSummary>;
@@ -525,23 +540,6 @@ export default function MainMapHome() {
     }),
     [],
   );
-  const desktopTopBarColors = useMemo(
-    () => ({
-      surface: 'rgba(12,18,28,0.72)',
-      border: 'rgba(255,255,255,0.12)',
-      logoBg: 'rgba(255,255,255,0.1)',
-      logoBorder: 'rgba(255,255,255,0.16)',
-      textPrimary: '#FFFFFF',
-      textSecondary: 'rgba(255,255,255,0.72)',
-      actionBg: 'rgba(255,255,255,0.06)',
-      actionBorder: 'rgba(255,255,255,0.2)',
-      actionText: 'rgba(255,255,255,0.88)',
-      actionActiveBg: '#ff6b00',
-      actionActiveBorder: 'rgba(255,159,10,0.53)',
-      actionActiveText: '#FFFFFF',
-    }),
-    [],
-  );
   const handleMainMapZoomDirectionChange = useCallback(({ direction }: { zoom: number; direction: 'in' | 'out' }) => {
     if (direction === 'in') {
       setIsVoteCardCollapsed(true);
@@ -817,14 +815,14 @@ export default function MainMapHome() {
         }
       }
 
-      const headers = accessToken ? ({ Authorization: `Bearer ${accessToken}` } as const) : undefined;
+      const headers = buildVoteRequestHeaders(
+        accessToken,
+        isAuthenticated ? null : guestSessionId,
+      );
       const resultRows = await Promise.all(
         topicIds.map(async (topicId) => {
           try {
             const query = new URLSearchParams({ topicId });
-            if (!isAuthenticated && guestSessionId) {
-              query.set('guestSessionId', guestSessionId);
-            }
             const response = await fetch(`/api/votes/result-summary?${query.toString()}`, {
               cache: 'no-store',
               headers,
@@ -998,7 +996,10 @@ export default function MainMapHome() {
         }
       }
 
-      const headers = accessToken ? ({ Authorization: `Bearer ${accessToken}` } as const) : undefined;
+      const headers = buildVoteRequestHeaders(
+        accessToken,
+        isAuthenticated ? null : guestSessionId,
+      );
       const nonce = Date.now();
       const results = await Promise.all(
         targetIds.map(async (topicId) => {
@@ -1009,9 +1010,6 @@ export default function MainMapHome() {
               level: 'sido',
               ts: String(nonce),
             });
-            if (!isAuthenticated && guestSessionId) {
-              query.set('guestSessionId', guestSessionId);
-            }
 
             const response = await fetch(`/api/votes/region-stats?${query.toString()}`, { cache: 'no-store', headers });
             if (!response.ok) {
@@ -1165,13 +1163,13 @@ export default function MainMapHome() {
           level: 'sido',
           ts: String(Date.now()),
         });
-        if (!isAuthenticated && guestSessionId) {
-          query.set('guestSessionId', guestSessionId);
-        }
 
         const response = await fetch(`/api/votes/region-stats?${query.toString()}`, {
           cache: 'no-store',
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          headers: buildVoteRequestHeaders(
+            accessToken,
+            isAuthenticated ? null : guestSessionId,
+          ),
         });
 
         if (!response.ok) {
@@ -1334,13 +1332,13 @@ export default function MainMapHome() {
         }
 
         const query = new URLSearchParams({ topicId });
-        if (!isAuthenticated && guestSessionId) {
-          query.set('guestSessionId', guestSessionId);
-        }
 
         const response = await fetch(`/api/votes/result-summary?${query.toString()}`, {
           cache: 'no-store',
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          headers: buildVoteRequestHeaders(
+            accessToken,
+            isAuthenticated ? null : guestSessionId,
+          ),
         });
 
         if (!response.ok) {
@@ -2601,66 +2599,39 @@ export default function MainMapHome() {
         ) : null}
 
         {!isMapLayoutFullscreen ? (
-          <nav
-            className="pointer-events-auto relative z-20 grid h-16 grid-cols-[1fr_auto_1fr] items-center rounded-b-2xl border-b px-6 backdrop-blur-2xl"
-            style={{
-              backgroundColor: desktopTopBarColors.surface,
-              borderColor: desktopTopBarColors.border,
-              color: desktopTopBarColors.textPrimary,
-            }}
-          >
-            <Link href="/" className="inline-flex min-w-0 items-center gap-2 text-white justify-self-start">
-              <Grid2x2PlusIcon className="h-5 w-5" />
-              <span className="font-mono text-base font-bold">Vote War Map</span>
-            </Link>
-
-            <div className="flex items-center gap-1 justify-self-center">
-              {[
-                { id: 'home' as const, label: '홈' },
-                { id: 'map' as const, label: '지도' },
-                { id: 'game' as const, label: '게임' },
-                { id: 'me' as const, label: 'MY' },
-              ].map((tab) => (
+          <DesktopTopHeader
+            className="pointer-events-auto relative z-20"
+            links={[
+              { key: 'home', label: '홈', active: activeTab === 'home', onClick: () => handleBottomTabClick('home') },
+              { key: 'map', label: '지도', active: activeTab === 'map', onClick: () => handleBottomTabClick('map') },
+              { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
+              { key: 'my', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
+            ]}
+            rightSlot={(
+              <>
                 <button
-                  key={tab.id}
                   type="button"
-                  onClick={() => handleBottomTabClick(tab.id)}
-                  aria-current={activeTab === tab.id ? 'page' : undefined}
-                  className={`inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] ${
-                    activeTab === tab.id ? 'bg-white/14 text-[#ffbf84]' : 'text-white/72 hover:bg-white/10 hover:text-white'
+                  disabled
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/72 opacity-80"
+                  aria-label="검색"
+                >
+                  <Search className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDesktopRightPanelOpen((prev) => !prev)}
+                  className={`inline-flex h-10 items-center rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] ${
+                    isDesktopRightPanelOpen
+                      ? 'border border-[#ff9f0a88] bg-[#ff6b00] text-white hover:bg-[#ff7a1f]'
+                      : 'border border-white/20 bg-white/6 text-white/88 hover:bg-white/12 hover:text-white'
                   }`}
                 >
-                  {tab.label}
+                  결과 분석
                 </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-3 justify-self-end">
-              <button
-                type="button"
-                disabled
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full opacity-80"
-                style={{ color: desktopTopBarColors.textSecondary }}
-              >
-                <Search className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsDesktopRightPanelOpen((prev) => !prev)}
-                className="inline-flex h-10 items-center rounded-xl border px-4 text-sm font-semibold transition"
-                style={{
-                  backgroundColor: isDesktopRightPanelOpen ? desktopTopBarColors.actionActiveBg : desktopTopBarColors.actionBg,
-                  borderColor: isDesktopRightPanelOpen
-                    ? desktopTopBarColors.actionActiveBorder
-                    : desktopTopBarColors.actionBorder,
-                  color: isDesktopRightPanelOpen ? desktopTopBarColors.actionActiveText : desktopTopBarColors.actionText,
-                }}
-              >
-                결과 분석
-              </button>
-              <AccountMenuButton />
-            </div>
-          </nav>
+                <AccountMenuButton />
+              </>
+            )}
+          />
         ) : null}
 
         <div className="relative z-10 flex-1">

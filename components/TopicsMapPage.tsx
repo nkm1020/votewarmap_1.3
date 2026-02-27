@@ -198,6 +198,23 @@ function buildRegionBreakdown(stat: MapTooltipContext['stat'] | null | undefined
   };
 }
 
+function buildVoteRequestHeaders(
+  accessToken: string | null,
+  guestSessionId: string | null,
+): HeadersInit | undefined {
+  const headers: Record<string, string> = {};
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  if (guestSessionId) {
+    headers['X-Guest-Session-Id'] = guestSessionId;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 export default function TopicsMapPage({
   initialTopicIds,
   openTopicEditorOnMount = false,
@@ -458,7 +475,10 @@ export default function TopicsMapPage({
         }
       }
 
-      const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+      const headers = buildVoteRequestHeaders(
+        accessToken,
+        isAuthenticated ? null : guestSessionId,
+      );
       const nonce = Date.now();
       const buildStatsUrl = (level: 'sido' | 'sigungu') => {
         const query = new URLSearchParams({
@@ -467,9 +487,6 @@ export default function TopicsMapPage({
           level,
           ts: String(nonce),
         });
-        if (!isAuthenticated && guestSessionId) {
-          query.set('guestSessionId', guestSessionId);
-        }
         return `/api/votes/region-stats?${query.toString()}`;
       };
 

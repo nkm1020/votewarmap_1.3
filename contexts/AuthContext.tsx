@@ -74,6 +74,42 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function mapSupabaseAuthErrorMessage(rawMessage: string | null | undefined): string {
+  const fallback = '인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+  if (!rawMessage) {
+    return fallback;
+  }
+
+  const normalized = rawMessage.toLowerCase();
+
+  if (
+    normalized.includes('pwned') ||
+    normalized.includes('leaked password') ||
+    normalized.includes('compromised password') ||
+    normalized.includes('haveibeenpwned')
+  ) {
+    return '유출 이력이 없는 비밀번호로 다시 설정해 주세요.';
+  }
+
+  if (normalized.includes('rate limit') || normalized.includes('too many requests')) {
+    return '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.';
+  }
+
+  if (normalized.includes('invalid login credentials')) {
+    return '로그인 정보가 올바르지 않습니다.';
+  }
+
+  if (normalized.includes('email not confirmed')) {
+    return '이메일 인증이 완료되지 않았습니다.';
+  }
+
+  if (normalized.includes('network')) {
+    return '네트워크 오류가 발생했습니다. 연결 상태를 확인해 주세요.';
+  }
+
+  return rawMessage;
+}
+
 function profilePayloadFromUser(user: User): UserProfile {
   const synced = userSyncPayloadFromUser(user);
   return {
@@ -299,7 +335,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    return { error: error?.message ?? null };
+    return { error: error ? mapSupabaseAuthErrorMessage(error.message) : null };
   }, []);
 
   const signInWithGoogle = useCallback(async (options?: OAuthSignInOptions) => {
@@ -331,7 +367,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const json = (await response.json()) as { error?: string; profile?: UserProfile };
         if (!response.ok) {
-          return { error: json.error ?? '회원가입 완료 처리에 실패했습니다.' };
+          return { error: mapSupabaseAuthErrorMessage(json.error ?? '회원가입 완료 처리에 실패했습니다.') };
         }
 
         if (json.profile) {
@@ -345,7 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         return { error: null };
       } catch {
-        return { error: '회원가입 완료 처리에 실패했습니다.' };
+        return { error: mapSupabaseAuthErrorMessage('회원가입 완료 처리에 실패했습니다.') };
       }
     },
     [],

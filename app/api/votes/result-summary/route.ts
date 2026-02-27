@@ -13,6 +13,7 @@ const querySchema = z.object({
   topicId: z.string().min(1),
   guestSessionId: z.string().uuid().optional(),
 });
+const guestSessionHeaderSchema = z.string().uuid();
 
 type RegionLevel = 'sido' | 'sigungu';
 
@@ -142,7 +143,20 @@ export async function GET(request: Request) {
       );
     }
 
-    const { topicId, guestSessionId } = parsed.data;
+    const rawGuestSessionHeader = request.headers.get('x-guest-session-id')?.trim();
+    let guestSessionId = parsed.data.guestSessionId;
+    if (rawGuestSessionHeader) {
+      const parsedHeader = guestSessionHeaderSchema.safeParse(rawGuestSessionHeader);
+      if (!parsedHeader.success) {
+        return NextResponse.json(
+          { error: '잘못된 guest session 헤더입니다.', details: parsedHeader.error.flatten() },
+          { status: 400 },
+        );
+      }
+      guestSessionId = parsedHeader.data;
+    }
+
+    const { topicId } = parsed.data;
     const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
     const supabase = getSupabaseServiceRoleClient();
 

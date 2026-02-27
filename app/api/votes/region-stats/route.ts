@@ -14,6 +14,7 @@ const querySchema = z.object({
   level: z.enum(['sido', 'sigungu']).default('sido'),
   guestSessionId: z.string().uuid().optional(),
 });
+const guestSessionHeaderSchema = z.string().uuid();
 
 type RegionStatsRpcRow = {
   region: string | null;
@@ -100,7 +101,20 @@ export async function GET(request: Request) {
       );
     }
 
-    const { level, guestSessionId } = parsed.data;
+    const rawGuestSessionHeader = request.headers.get('x-guest-session-id')?.trim();
+    let guestSessionId = parsed.data.guestSessionId;
+    if (rawGuestSessionHeader) {
+      const parsedHeader = guestSessionHeaderSchema.safeParse(rawGuestSessionHeader);
+      if (!parsedHeader.success) {
+        return NextResponse.json(
+          { error: '잘못된 guest session 헤더입니다.', details: parsedHeader.error.flatten() },
+          { status: 400 },
+        );
+      }
+      guestSessionId = parsedHeader.data;
+    }
+
+    const { level } = parsed.data;
     const scope = parsed.data.scope ?? (parsed.data.topicId ? 'topic' : 'all');
     const topicId = scope === 'topic' ? parsed.data.topicId ?? null : null;
     if (scope === 'topic' && !topicId) {
