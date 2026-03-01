@@ -13,10 +13,12 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AdSenseSlot } from '@/components/ads/AdSenseSlot';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
+import { ADSENSE_SLOTS } from '@/lib/adsense';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { clearPendingGameScore, readPendingGameScore, writePendingGameScore } from '@/lib/vote/client-storage';
 
@@ -1270,17 +1272,9 @@ export function HigherLowerGamePage() {
                     <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                       광고
                     </span>
-                    <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">스폰서 배너 영역입니다.</p>
-                    <button
-                      type="button"
-                      disabled={isBottomDockDisabled}
-                      aria-disabled={isBottomDockDisabled}
-                      className={`inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition ${
-                        isBottomDockDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/12'
-                      }`}
-                    >
-                      자세히
-                    </button>
+                    <div className="min-w-0 flex-1">
+                      <AdSenseSlot slot={ADSENSE_SLOTS.mobileDock} minHeight={44} />
+                    </div>
                   </div>
                 </section>
               </div>

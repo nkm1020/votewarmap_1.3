@@ -15,10 +15,12 @@ import {
   useState,
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { AdSenseSlot } from '@/components/ads/AdSenseSlot';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
+import { ADSENSE_SLOTS } from '@/lib/adsense';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
 import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
@@ -1395,13 +1397,9 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
                 <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                   광고
                 </span>
-                <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">스폰서 배너 영역입니다.</p>
-                <button
-                  type="button"
-                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
-                >
-                  자세히
-                </button>
+                <div className="min-w-0 flex-1">
+                  <AdSenseSlot slot={ADSENSE_SLOTS.mobileDock} minHeight={44} />
+                </div>
               </div>
             </section>
           </div>

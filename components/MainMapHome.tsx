@@ -17,12 +17,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
+import { AdSenseSlot } from '@/components/ads/AdSenseSlot';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import CountryTabs from '@/components/map/CountryTabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { ADSENSE_SLOTS } from '@/lib/adsense';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
@@ -2876,13 +2878,18 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
             />
           ) : null}
 
-          <div className="relative z-10 flex-1">
-            <div className="mx-auto flex h-full min-h-0 w-full">
+          <div className="relative z-10 flex-1 min-h-0">
+            <div className="mx-auto flex h-full min-h-0 w-full" style={{ height: '100%' }}>
               {!isMapLayoutFullscreen ? (
                 isDesktopLeftPanelOpen ? (
                   <aside
-                    className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border shadow-[4px_0_24px_rgba(0,0,0,0.08)]"
-                    style={{ backgroundColor: desktopColors.surface, borderColor: desktopColors.border }}
+                    className="pointer-events-auto relative flex h-full w-[420px] min-h-0 shrink-0 flex-col overflow-hidden rounded-r-[24px] border shadow-[4px_0_24px_rgba(0,0,0,0.08)]"
+                    style={{
+                      backgroundColor: desktopColors.surface,
+                      borderColor: desktopColors.border,
+                      height: 'calc(100vh - 64px)',
+                      maxHeight: 'calc(100vh - 64px)',
+                    }}
                   >
                     <button
                       type="button"
@@ -2924,7 +2931,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
 
                     <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ backgroundColor: desktopColors.surfaceAlt }}>
                       <div className="flex min-h-full flex-col">
-                        <div className="flex min-h-full flex-col p-7">
+                        <div className="flex min-h-full flex-col p-7 pb-28">
                           <div className="mb-2 flex items-center justify-between">
                             <h2 className="inline-flex items-center gap-2 text-[18px] font-bold" style={{ color: desktopColors.textPrimary }}>
                               지금 가장 뜨거운 투표
@@ -3102,24 +3109,40 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                               })
                             )}
                           </div>
+
+                          <section
+                            className="rounded-[16px] border p-3.5"
+                            style={{ borderColor: desktopColors.border, backgroundColor: desktopColors.surface }}
+                          >
+                            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: desktopColors.textSecondary }}>
+                              광고
+                            </p>
+                            <AdSenseSlot
+                              slot={ADSENSE_SLOTS.desktopLeftPanel}
+                              minHeight={90}
+                              fallbackText="좌측 패널 스폰서 배너 영역입니다."
+                              fallbackClassName="text-[13px]"
+                            />
+                          </section>
+
                         </div>
 
                       </div>
                     </div>
 
                     <div
-                      className="shrink-0 border-t px-6 py-5"
+                      className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-6 pb-5 pt-10"
                       style={{
-                        borderColor: desktopColors.border,
-                        backgroundColor: desktopColors.surface,
+                        background: `linear-gradient(to top, ${desktopColors.surfaceAlt} 52%, rgba(0,0,0,0) 100%)`,
                       }}
                     >
                       <button
                         type="button"
                         onClick={() => setIsTopicPickerOpen(true)}
-                        className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[16px] text-[16px] font-bold transition"
+                        className="pointer-events-auto inline-flex h-14 w-full items-center justify-center gap-2 rounded-[16px] border text-[16px] font-bold shadow-[0_8px_20px_rgba(0,0,0,0.28)] transition"
                         style={{
                           backgroundColor: desktopColors.buttonBg,
+                          borderColor: desktopColors.border,
                           color: desktopColors.textPrimary,
                         }}
                       >
@@ -3171,6 +3194,20 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                     </div>
 
                     <div className="custom-scrollbar min-h-0 flex-1 space-y-7 overflow-y-auto p-6" style={{ backgroundColor: desktopColors.surfaceAlt }}>
+                      <section>
+                        <div className="rounded-[16px] border p-3.5" style={{ borderColor: desktopColors.border, backgroundColor: desktopColors.surface }}>
+                          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: desktopColors.textSecondary }}>
+                            광고
+                          </p>
+                          <AdSenseSlot
+                            slot={ADSENSE_SLOTS.desktopRightPanel}
+                            minHeight={250}
+                            fallbackText="데스크톱 스폰서 배너 영역입니다."
+                            fallbackClassName="text-sm"
+                          />
+                        </div>
+                      </section>
+
                       <section>
                         <h3 className="text-[15px] font-bold" style={{ color: desktopColors.textPrimary }}>
                           연령별 참여 비율
@@ -3286,15 +3323,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                   <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                     광고
                   </span>
-                  <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-white/80">
-                    스폰서 배너 영역입니다.
-                  </p>
-                  <button
-                    type="button"
-                    className="inline-flex h-11 shrink-0 items-center rounded-lg border border-white/18 bg-white/8 px-3 text-[11px] font-semibold text-white/84 transition hover:bg-white/12"
-                  >
-                    자세히
-                  </button>
+                  <div className="min-w-0 flex-1">
+                    <AdSenseSlot slot={ADSENSE_SLOTS.mobileDock} minHeight={44} />
+                  </div>
                 </div>
               </section>
             </div>
@@ -3814,6 +3845,23 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           }
         }
       `}</style>
+
+      <section className="hidden border-t border-white/10 bg-[rgba(10,14,22,0.92)] py-3 md:block">
+        <div className="mx-auto w-full max-w-[1280px] px-6">
+          <div className="flex items-center gap-3 rounded-[14px] border border-white/12 bg-[rgba(18,24,36,0.82)] px-4 py-3">
+            <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
+              광고
+            </span>
+            <div className="min-w-0 flex-1">
+              <AdSenseSlot
+                slot={ADSENSE_SLOTS.desktopBottom}
+                minHeight={90}
+                fallbackText="데스크톱 하단 스폰서 배너 영역입니다."
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div>
         <SiteLegalFooter containerMaxWidthClassName="max-w-[1280px]" />
