@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { computeBadges, computeLevel } from '@/lib/me/progression';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { calculatePersonaPowerFromCounts, normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
@@ -75,6 +76,17 @@ type RegionBattleRow = {
 type UserSchoolPoolRow = {
   slot_type: string;
   school_id: string;
+};
+
+type PersonaVoteRow = {
+  topic_id: string;
+  option_key: string;
+};
+
+type PersonaOptionRow = {
+  topic_id: string;
+  option_key: string;
+  persona_tag: string | null;
 };
 
 type SchoolPayload = {
@@ -177,6 +189,20 @@ function mapSchoolRowToPayload(school: SchoolProfileRow): SchoolPayload {
     sidoName: school.sido_name,
     sigunguName: school.sigungu_name,
     displayLabel: buildSchoolDisplayLabel(school),
+  };
+}
+
+function toPersonaSummary(egenCount: number, tetoCount: number) {
+  const metrics = calculatePersonaPowerFromCounts({
+    egenCount,
+    tetoCount,
+  });
+
+  return {
+    egenPercent: metrics.egenPercent,
+    tetoPercent: metrics.tetoPercent,
+    dominant: metrics.dominant,
+    mappedVotes: metrics.mappedVotes,
   };
 }
 
@@ -396,6 +422,100 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: firstError?.message ?? '대시보드 조회에 실패했습니다.' }, { status: 500 });
     }
 
+    const { data: myPersonaVoteRowsRaw, error: myPersonaVoteError } = await supabase
+      .from('votes')
+      .select('topic_id, option_key')
+      .eq('user_id', user.id);
+
+    if (myPersonaVoteError) {
+      return NextResponse.json({ error: myPersonaVoteError.message }, { status: 500 });
+    }
+
+    let myRegionPersonaVoteRowsRaw: PersonaVoteRow[] = [];
+    if (userRow.sigungu_code || userRow.sido_code) {
+      let regionVotesQuery = supabase
+        .from('votes')
+        .select('topic_id, option_key');
+
+      if (userRow.sigungu_code) {
+        regionVotesQuery = regionVotesQuery.eq('sigungu_code', userRow.sigungu_code);
+      } else if (userRow.sido_code) {
+        regionVotesQuery = regionVotesQuery.eq('sido_code', userRow.sido_code);
+      }
+
+      const { data: regionVoteRows, error: regionVoteError } = await regionVotesQuery;
+      if (regionVoteError) {
+        return NextResponse.json({ error: regionVoteError.message }, { status: 500 });
+      }
+      myRegionPersonaVoteRowsRaw = (regionVoteRows ?? []) as PersonaVoteRow[];
+    }
+
+    const myPersonaVoteRows = (myPersonaVoteRowsRaw ?? []) as PersonaVoteRow[];
+    const personaTopicIds = Array.from(
+      new Set(
+        [...myPersonaVoteRows, ...myRegionPersonaVoteRowsRaw]
+          .map((row) => String(row.topic_id ?? '').trim())
+          .filter((id) => id.length > 0),
+      ),
+    );
+
+    let personaTagByVoteKey = new Map<string, ReturnType<typeof normalizePersonaTag>>();
+    if (personaTopicIds.length > 0) {
+      const { data: personaOptionRows, error: personaOptionError } = await supabase
+        .from('vote_options')
+        .select('topic_id, option_key, persona_tag')
+        .in('topic_id', personaTopicIds);
+
+      if (personaOptionError) {
+        return NextResponse.json({ error: personaOptionError.message }, { status: 500 });
+      }
+
+      personaTagByVoteKey = new Map(
+        ((personaOptionRows ?? []) as PersonaOptionRow[]).map((row) => [
+          `${row.topic_id}:${row.option_key}`,
+          normalizePersonaTag(row.persona_tag),
+        ]),
+      );
+    }
+
+    const countPersonaVotes = (rows: PersonaVoteRow[]) => {
+      let egenCount = 0;
+      let tetoCount = 0;
+
+      rows.forEach((row) => {
+        const topicId = String(row.topic_id ?? '').trim();
+        const optionKey = String(row.option_key ?? '').trim();
+        if (!topicId || !optionKey) {
+          return;
+        }
+        const personaTag = personaTagByVoteKey.get(`${topicId}:${optionKey}`) ?? null;
+        if (personaTag === 'egen') {
+          egenCount += 1;
+        } else if (personaTag === 'teto') {
+          tetoCount += 1;
+        }
+      });
+
+      return { egenCount, tetoCount };
+    };
+
+    const myPersonaCounts = countPersonaVotes(myPersonaVoteRows);
+    const myRegionPersonaCounts = countPersonaVotes(myRegionPersonaVoteRowsRaw);
+
+    const personaRegionLevel: 'sido' | 'sigungu' | null = userRow.sigungu_code
+      ? 'sigungu'
+      : userRow.sido_code
+        ? 'sido'
+        : null;
+    const personaRegionCode = userRow.sigungu_code ?? userRow.sido_code ?? null;
+    const personaRegionName =
+      personaRegionCode && personaRegionLevel
+        ? getRegionNameByCodes({
+            sidoCode: userRow.sido_code,
+            sigunguCode: userRow.sigungu_code,
+          }) ?? personaRegionCode
+        : null;
+
     const schoolPoolRows = (schoolPoolResult.data ?? []) as UserSchoolPoolRow[];
     const schoolPoolIds = Array.from(
       new Set(
@@ -600,6 +720,15 @@ export async function GET(request: Request) {
         },
       },
       northstar: northstarMetrics,
+      personaPower: {
+        my: toPersonaSummary(myPersonaCounts.egenCount, myPersonaCounts.tetoCount),
+        myRegion: {
+          ...toPersonaSummary(myRegionPersonaCounts.egenCount, myRegionPersonaCounts.tetoCount),
+          regionLevel: personaRegionLevel,
+          regionCode: personaRegionCode,
+          regionName: personaRegionName,
+        },
+      },
       stats: {
         totalVotes,
         totalGameScore,

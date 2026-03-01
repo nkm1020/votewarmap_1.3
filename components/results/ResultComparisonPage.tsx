@@ -59,6 +59,13 @@ type VoteSummaryStat = {
 };
 
 type ResultVisibility = 'locked' | 'unlocked';
+type PersonaDominant = 'egen' | 'teto' | 'golden_balance' | 'none';
+type PersonaPowerSummary = {
+  egenPercent: number;
+  tetoPercent: number;
+  dominant: PersonaDominant;
+  mappedVotes: number;
+};
 
 type ResultSummaryResponse = {
   topic: {
@@ -66,8 +73,8 @@ type ResultSummaryResponse = {
     title: string;
     status: string;
     countryCode: string;
-    optionA: { key: string; label: string; position: 1 };
-    optionB: { key: string; label: string; position: 2 };
+    optionA: { key: string; label: string; position: 1; personaTag: 'egen' | 'teto' | null };
+    optionB: { key: string; label: string; position: 2; personaTag: 'egen' | 'teto' | null };
   };
   viewer: {
     type: 'user' | 'guest' | 'anonymous';
@@ -90,6 +97,10 @@ type ResultSummaryResponse = {
         } | null;
       })
     | null;
+  persona: {
+    nationwide: PersonaPowerSummary | null;
+    myRegion: PersonaPowerSummary | null;
+  };
   myChoice:
     | {
         optionKey: string;
@@ -154,6 +165,26 @@ function formatCountryLevel(level: CountryMapLevel, fallbackLabel?: string): str
     return 'L2';
   }
   return 'L3';
+}
+
+function formatPersonaDominantText(summary: PersonaPowerSummary | null): string {
+  if (!summary || summary.mappedVotes <= 0 || summary.dominant === 'none') {
+    return '데이터 없음';
+  }
+  if (summary.dominant === 'golden_balance') {
+    return '황금밸런스';
+  }
+  if (summary.dominant === 'egen') {
+    return `에겐력 ${summary.egenPercent}%`;
+  }
+  return `테토력 ${summary.tetoPercent}%`;
+}
+
+function formatPersonaRatioText(summary: PersonaPowerSummary | null): string {
+  if (!summary || summary.mappedVotes <= 0) {
+    return '에겐/테토 매핑 데이터 없음';
+  }
+  return `에겐 ${summary.egenPercent}% · 테토 ${summary.tetoPercent}%`;
 }
 
 function categorizeTopic(topic: VoteTopic): TopicCategory {
@@ -536,6 +567,22 @@ export function ResultComparisonPage({
       gap: Math.abs(a - b),
     };
   }, [data]);
+  const nationwidePersonaDominantText = useMemo(
+    () => formatPersonaDominantText(data?.persona.nationwide ?? null),
+    [data?.persona.nationwide],
+  );
+  const nationwidePersonaRatioText = useMemo(
+    () => formatPersonaRatioText(data?.persona.nationwide ?? null),
+    [data?.persona.nationwide],
+  );
+  const myRegionPersonaDominantText = useMemo(
+    () => formatPersonaDominantText(data?.persona.myRegion ?? null),
+    [data?.persona.myRegion],
+  );
+  const myRegionPersonaRatioText = useMemo(
+    () => formatPersonaRatioText(data?.persona.myRegion ?? null),
+    [data?.persona.myRegion],
+  );
 
   const sortedTopics = useMemo(
     () =>
@@ -563,7 +610,14 @@ export function ResultComparisonPage({
     [activeTopicTab, sortedTopics, topicsByCategory],
   );
   const topicListBottomInset = useMemo(() => 'calc(env(safe-area-inset-bottom) + 8px)', []);
-  const mapRegionLevelToggleAlign = useMemo<'left' | 'right'>(() => (isDesktopViewport ? 'left' : 'right'), [isDesktopViewport]);
+  const mapRegionLevelToggleAlign = useMemo<'right'>(() => 'right', []);
+  const mapDefaultRegionLevel = useMemo<CountryMapLevel>(() => {
+    const countryForMap = activeCountry || DEFAULT_COUNTRY;
+    if (countryForMap === 'KR') {
+      return 'l2';
+    }
+    return data?.myRegion?.level === 'sigungu' ? 'l2' : 'l1';
+  }, [activeCountry, data?.myRegion?.level]);
   const mapBottomDockHeightPx = useMemo(() => (isDesktopViewport ? 0 : 132), [isDesktopViewport]);
   const mapToggleClearancePx = useMemo(() => (isDesktopViewport ? 22 : 14), [isDesktopViewport]);
 
@@ -924,7 +978,7 @@ export function ResultComparisonPage({
             country={activeCountry}
             enableWorldNavigation={false}
             statsByCode={mapStats}
-            defaultRegionLevel={data?.myRegion?.level === 'sigungu' ? 'l2' : 'l1'}
+            defaultRegionLevel={mapDefaultRegionLevel}
             fillMode="winner"
             height="100%"
             initialCenter={activeCountryConfig.center}
@@ -1189,6 +1243,20 @@ export function ResultComparisonPage({
                         ? '현재 전국 판세가 팽팽해요.'
                         : `${nationwideBar.winner === 'A' ? data.topic.optionA.label : data.topic.optionB.label} ${nationwideBar.gap}%p 우세`}
                     </p>
+
+                    <div className="mt-2.5 rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">전국 에겐/테토 (전체 주제)</p>
+                      <p className="mt-1 text-[13px] font-bold text-[#ffd6ad]">{nationwidePersonaDominantText}</p>
+                      <p className="mt-0.5 text-[11px] text-white/66">{nationwidePersonaRatioText}</p>
+                    </div>
+
+                    <div className="mt-2 rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">
+                        {data.myRegion?.name ?? '우리 지역'} 에겐/테토 (전체 주제)
+                      </p>
+                      <p className="mt-1 text-[13px] font-bold text-[#cfe2ff]">{myRegionPersonaDominantText}</p>
+                      <p className="mt-0.5 text-[11px] text-white/66">{myRegionPersonaRatioText}</p>
+                    </div>
                   </section>
                 ) : null}
 
@@ -1278,6 +1346,20 @@ export function ResultComparisonPage({
                       ? '현재 전국 판세가 팽팽해요.'
                       : `${nationwideBar.winner === 'A' ? data.topic.optionA.label : data.topic.optionB.label} ${nationwideBar.gap}%p 우세`}
                   </p>
+
+                  <div className="mt-2.5 rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">전국 에겐/테토 (전체 주제)</p>
+                    <p className="mt-1 text-[13px] font-bold text-[#ffd6ad]">{nationwidePersonaDominantText}</p>
+                    <p className="mt-0.5 text-[11px] text-white/66">{nationwidePersonaRatioText}</p>
+                  </div>
+
+                  <div className="mt-2 rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">
+                      {data.myRegion?.name ?? '우리 지역'} 에겐/테토 (전체 주제)
+                    </p>
+                    <p className="mt-1 text-[13px] font-bold text-[#cfe2ff]">{myRegionPersonaDominantText}</p>
+                    <p className="mt-0.5 text-[11px] text-white/66">{myRegionPersonaRatioText}</p>
+                  </div>
                 </section>
               ) : null}
 
@@ -1567,7 +1649,6 @@ export function ResultComparisonPage({
             percent: data.nationwide.bPercent,
             count: data.nationwide.countB,
           }}
-          totalVotes={data.nationwide.totalVotes}
           myRegion={
             data.myRegion
               ? {
@@ -1577,6 +1658,8 @@ export function ResultComparisonPage({
                 }
               : null
           }
+          nationwidePersona={data.persona.nationwide}
+          myRegionPersona={data.persona.myRegion}
           onMapView={handleMapView}
           onShareKakao={handleKakaoShare}
           onShareLinkCopy={handleCopyShareLink}

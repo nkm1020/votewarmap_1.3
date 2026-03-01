@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
+import { normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
 
@@ -26,6 +27,7 @@ type VoteOptionRow = {
   option_key: string;
   option_label: string;
   position: number;
+  persona_tag: string | null;
 };
 
 type TopicScoreRow = {
@@ -107,7 +109,7 @@ export async function GET(request: Request) {
 
     const { data: optionRows, error: optionsError } = await supabase
       .from('vote_options')
-      .select('topic_id, option_key, option_label, position')
+      .select('topic_id, option_key, option_label, position, persona_tag')
       .in('topic_id', candidateTopicIds)
       .order('position', { ascending: true });
 
@@ -131,6 +133,7 @@ export async function GET(request: Request) {
         key: row.option_key,
         label: row.option_label,
         position: row.position,
+        personaTag: normalizePersonaTag(row.persona_tag),
       });
       optionsByTopic.set(row.topic_id, options);
     });

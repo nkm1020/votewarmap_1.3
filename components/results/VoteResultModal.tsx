@@ -16,6 +16,11 @@ type VoteResultModalRegion = {
   percentB: number;
 } | null;
 
+type VoteResultModalPersona = {
+  egenPercent: number;
+  tetoPercent: number;
+} | null;
+
 export interface VoteResultModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,8 +29,9 @@ export interface VoteResultModalProps {
   myChoice: 'A' | 'B' | null;
   optionA: VoteResultModalOption;
   optionB: VoteResultModalOption;
-  totalVotes: number;
   myRegion: VoteResultModalRegion;
+  nationwidePersona: VoteResultModalPersona;
+  myRegionPersona: VoteResultModalPersona;
   onMapView: () => void;
   onShareKakao: () => Promise<void>;
   onShareLinkCopy: () => Promise<void>;
@@ -64,8 +70,9 @@ export function VoteResultModal({
   myChoice,
   optionA,
   optionB,
-  totalVotes,
   myRegion,
+  nationwidePersona,
+  myRegionPersona,
   onMapView,
   onShareKakao,
   onShareLinkCopy,
@@ -140,6 +147,18 @@ export function VoteResultModal({
     }
     return displayPercents(myRegion.percentA, myRegion.percentB);
   }, [myRegion]);
+  const nationwidePersonaLine = useMemo(() => {
+    if (!nationwidePersona) {
+      return '에겐/테토 데이터 없음';
+    }
+    return `에겐 ${nationwidePersona.egenPercent}% · 테토 ${nationwidePersona.tetoPercent}%`;
+  }, [nationwidePersona]);
+  const myRegionPersonaLine = useMemo(() => {
+    if (!myRegionPersona) {
+      return '에겐/테토 데이터 없음';
+    }
+    return `에겐 ${myRegionPersona.egenPercent}% · 테토 ${myRegionPersona.tetoPercent}%`;
+  }, [myRegionPersona]);
   const regionWinner = useMemo<'A' | 'B' | 'TIE' | null>(() => {
     if (!myRegion) {
       return null;
@@ -257,6 +276,7 @@ export function VoteResultModal({
                                 transition={{ duration: reducedMotion ? 0 : 0.5, ease: 'easeOut' }}
                               />
                             </div>
+                            <p className="text-[11px] font-medium text-white/64">전체 주제 기준 · {myRegionPersonaLine}</p>
                           </>
                         ) : (
                           <p className="text-[11px] text-white/56">지역 데이터 수집 중</p>
@@ -264,10 +284,7 @@ export function VoteResultModal({
                       </section>
 
                       <section className="space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px] font-semibold text-white/72">
-                          <span>전국 결과</span>
-                          <span>총 {totalVotes.toLocaleString()}표</span>
-                        </div>
+                        <div className="text-[11px] font-semibold text-white/72">전국 결과</div>
                         <div className="flex items-center justify-between text-[12px]">
                           <span className="font-semibold text-[#ffc38e]">
                             {optionA.label} {optionA.percent}%
@@ -292,6 +309,7 @@ export function VoteResultModal({
                             transition={{ duration: reducedMotion ? 0 : 0.5, ease: 'easeOut' }}
                           />
                         </div>
+                        <p className="text-[11px] font-medium text-white/64">전체 주제 기준 · {nationwidePersonaLine}</p>
                       </section>
                     </div>
                   </div>

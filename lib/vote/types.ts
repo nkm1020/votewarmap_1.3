@@ -61,10 +61,13 @@ export type VoteRegionInputByGps = {
 
 export type VoteRegionInput = VoteRegionInputBySchool | VoteRegionInputByGps;
 
+export type PersonaTag = 'egen' | 'teto';
+
 export type VoteTopicOption = {
   key: string;
   label: string;
   position: 1 | 2;
+  personaTag: PersonaTag | null;
 };
 
 export type VoteTopic = {

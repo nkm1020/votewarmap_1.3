@@ -43,6 +43,21 @@ type DashboardSchoolPayload = {
   displayLabel: string;
 };
 
+type PersonaDominant = 'egen' | 'teto' | 'golden_balance' | 'none';
+
+type PersonaPowerSummary = {
+  egenPercent: number;
+  tetoPercent: number;
+  dominant: PersonaDominant;
+  mappedVotes: number;
+};
+
+type PersonaPowerRegionSummary = PersonaPowerSummary & {
+  regionName: string | null;
+  regionLevel: 'sido' | 'sigungu' | null;
+  regionCode: string | null;
+};
+
 type DashboardResponse = {
   profile: {
     id: string;
@@ -72,6 +87,10 @@ type DashboardResponse = {
     schoolSampleTopics: number;
     schoolEligible: boolean;
     schoolMinimumSample: number;
+  };
+  personaPower: {
+    my: PersonaPowerSummary;
+    myRegion: PersonaPowerRegionSummary;
   };
   stats: {
     totalVotes: number;
@@ -250,6 +269,32 @@ function normalizePercent(value: number): number {
   }
   const rounded = Math.round(value * 10) / 10;
   return Math.max(0, Math.min(100, rounded));
+}
+
+function getPersonaDominantLabel(summary: PersonaPowerSummary): string {
+  if (summary.mappedVotes <= 0 || summary.dominant === 'none') {
+    return '데이터 없음';
+  }
+  if (summary.dominant === 'golden_balance') {
+    return '황금밸런스';
+  }
+  if (summary.dominant === 'egen') {
+    return `에겐력 ${normalizePercent(summary.egenPercent)}%`;
+  }
+  return `테토력 ${normalizePercent(summary.tetoPercent)}%`;
+}
+
+function getPersonaDominantToneClass(summary: PersonaPowerSummary): string {
+  if (summary.mappedVotes <= 0 || summary.dominant === 'none') {
+    return 'text-white/60';
+  }
+  if (summary.dominant === 'golden_balance') {
+    return 'text-[#ffd26f]';
+  }
+  if (summary.dominant === 'egen') {
+    return 'text-[#ff9f0a]';
+  }
+  return 'text-[#63a6ff]';
 }
 
 function formatKoreanDateTime(value: string): string {
@@ -446,6 +491,57 @@ function WaffleChart({ value, colorClass }: { value: number; colorClass: string 
   );
 }
 
+type PersonaPowerCardProps = {
+  title: string;
+  subtitle: string;
+  summary: PersonaPowerSummary;
+};
+
+function PersonaPowerCard({ title, subtitle, summary }: PersonaPowerCardProps) {
+  const reducedMotion = useReducedMotion();
+  const egenPercent = normalizePercent(summary.egenPercent);
+  const tetoPercent = normalizePercent(summary.tetoPercent);
+  const hasData = summary.mappedVotes > 0 && summary.dominant !== 'none';
+  const dominantLabel = getPersonaDominantLabel(summary);
+  const dominantToneClass = getPersonaDominantToneClass(summary);
+
+  return (
+    <section className={`${CARD_BG} rounded-[28px] p-5 md:p-6`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-[16px] font-bold text-white">{title}</h3>
+          <p className="mt-1 text-[12px] text-white/58">{subtitle}</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-white/12 bg-white/6 px-2.5 py-1 text-[11px] font-semibold text-white/72">
+          {hasData ? `${formatNumber(summary.mappedVotes)}표 기반` : '표본 없음'}
+        </span>
+      </div>
+
+      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-[#2C2C2E]">
+        <motion.div
+          className="h-full bg-[#ff9f0a]"
+          initial={{ width: 0 }}
+          animate={{ width: `${egenPercent}%` }}
+          transition={{ duration: reducedMotion ? 0 : 0.65, ease: 'easeOut' }}
+        />
+        <motion.div
+          className="h-full bg-[#4f8dff]"
+          initial={{ width: 0 }}
+          animate={{ width: `${tetoPercent}%` }}
+          transition={{ duration: reducedMotion ? 0 : 0.65, ease: 'easeOut' }}
+        />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between text-[12px] font-semibold text-white/74">
+        <span>에겐 {egenPercent}%</span>
+        <span>테토 {tetoPercent}%</span>
+      </div>
+
+      <p className={`mt-3 text-[15px] font-bold ${dominantToneClass}`}>{dominantLabel}</p>
+    </section>
+  );
+}
+
 type MainDashboardProps = {
   dashboard: DashboardResponse;
   privacyShowLeaderboardName: boolean;
@@ -477,6 +573,9 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
   const effectiveMatchTab: 'school' | 'region' = schoolEligible ? activeMatchTab : 'region';
   const activeTargetLabel = effectiveMatchTab === 'school' ? schoolLabel ?? '내 학교' : regionShort;
   const activeMatchRate = effectiveMatchTab === 'school' ? mySchoolMatchRate : myRegionMatchRate;
+  const myPersonaSummary = dashboard.personaPower.my;
+  const myRegionPersonaSummary = dashboard.personaPower.myRegion;
+  const myRegionPersonaLabel = myRegionPersonaSummary.regionName ?? dashboard.profile.region.name ?? '우리 지역';
 
   return (
     <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
@@ -562,7 +661,18 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
               </section>
             </MainAnimatedSection>
 
-            <MainAnimatedSection delay={0.3}>
+            <MainAnimatedSection delay={0.28}>
+              <section className="grid gap-4 lg:grid-cols-2">
+                <PersonaPowerCard title="나의 에겐력/테토력" subtitle="내 투표 기반 성향 지표" summary={myPersonaSummary} />
+                <PersonaPowerCard
+                  title="우리 지역 에겐력/테토력"
+                  subtitle={`${myRegionPersonaLabel} 기반 지표`}
+                  summary={myRegionPersonaSummary}
+                />
+              </section>
+            </MainAnimatedSection>
+
+            <MainAnimatedSection delay={0.36}>
               <section className={`${CARD_BG} rounded-[32px] p-7 shadow-sm`}>
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-lg font-bold">동네 대세 지수</h3>

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getCountryRegionCentroid, getCountryRegionNameByCodes } from '@/lib/server/country-region-geo';
+import { calculatePersonaPowerFromCounts, normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -22,6 +23,7 @@ type VoteOptionRow = {
   option_key: string;
   option_label: string;
   position: number;
+  persona_tag: string | null;
 };
 
 type RegionStatsRpcRow = {
@@ -37,6 +39,12 @@ type RegionCounts = {
   countB: number;
   totalVotes: number;
   winner: 'A' | 'B' | 'TIE';
+};
+
+type PersonaScopeStatsRpcRow = {
+  egen_count: number | string | null;
+  teto_count: number | string | null;
+  mapped_votes: number | string | null;
 };
 
 type ResultVisibility = 'locked' | 'unlocked';
@@ -132,6 +140,33 @@ async function loadRegionStatsMap(topicId: string, level: RegionLevel): Promise<
   return map;
 }
 
+async function loadPersonaScopeStats(
+  countryCode: string,
+  region:
+    | {
+        sidoCode: string | null;
+        sigunguCode: string | null;
+      }
+    | null = null,
+) {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('get_persona_power_scope_stats', {
+    p_country_code: countryCode,
+    p_sido_code: region?.sidoCode ?? null,
+    p_sigungu_code: region?.sigunguCode ?? null,
+  });
+
+  if (rpcError) {
+    throw new Error(rpcError.message);
+  }
+
+  const row = (Array.isArray(rpcRows) ? rpcRows[0] : null) as PersonaScopeStatsRpcRow | null;
+  return calculatePersonaPowerFromCounts({
+    egenCount: normalizeInt(row?.egen_count),
+    tetoCount: normalizeInt(row?.teto_count),
+  });
+}
+
 export async function GET(request: Request) {
   try {
     const parsed = querySchema.safeParse(
@@ -181,7 +216,7 @@ export async function GET(request: Request) {
 
     const { data: optionRows, error: optionsError } = await supabase
       .from('vote_options')
-      .select('option_key, option_label, position')
+      .select('option_key, option_label, position, persona_tag')
       .eq('topic_id', topicId)
       .order('position', { ascending: true });
 
@@ -195,6 +230,7 @@ export async function GET(request: Request) {
         key: option.option_key,
         label: option.option_label,
         position: option.position as 1 | 2,
+        personaTag: normalizePersonaTag(option.persona_tag),
       }));
 
     const optionA = options.find((option) => option.position === 1);
@@ -228,6 +264,7 @@ export async function GET(request: Request) {
       totalVotes: nationalCountA + nationalCountB,
       winner: toWinner(nationalCountA, nationalCountB),
     });
+    const nationwidePersona = await loadPersonaScopeStats(topicCountryCode);
 
     let viewerType: 'user' | 'guest' | 'anonymous' = 'anonymous';
     let myOptionKey: string | null = null;
@@ -305,6 +342,7 @@ export async function GET(request: Request) {
           } | null;
         })
       | null = null;
+    let myRegionPersona: ReturnType<typeof calculatePersonaPowerFromCounts> | null = null;
 
     if (myRegionLevel && myRegionCode) {
       const statsMap = await getStats(myRegionLevel);
@@ -336,6 +374,10 @@ export async function GET(request: Request) {
           regionCode: myRegionCode,
         }),
       };
+      myRegionPersona = await loadPersonaScopeStats(topicCountryCode, {
+        sidoCode: mySidoCode,
+        sigunguCode: mySigunguCode,
+      });
     }
 
     const myChoiceWinner = optionKeyToWinner(myOptionKey, optionA.key, optionB.key);
@@ -369,6 +411,26 @@ export async function GET(request: Request) {
       preview: visibility === 'locked' ? preview : null,
       nationwide: visibility === 'unlocked' ? nationwide : null,
       myRegion: visibility === 'unlocked' ? myRegion : null,
+      persona: {
+        nationwide:
+          visibility === 'unlocked'
+            ? {
+                egenPercent: nationwidePersona.egenPercent,
+                tetoPercent: nationwidePersona.tetoPercent,
+                dominant: nationwidePersona.dominant,
+                mappedVotes: nationwidePersona.mappedVotes,
+              }
+            : null,
+        myRegion:
+          visibility === 'unlocked' && myRegionPersona
+            ? {
+                egenPercent: myRegionPersona.egenPercent,
+                tetoPercent: myRegionPersona.tetoPercent,
+                dominant: myRegionPersona.dominant,
+                mappedVotes: myRegionPersona.mappedVotes,
+              }
+            : null,
+      },
       myChoice:
         visibility === 'unlocked' && myOptionKey
           ? {
