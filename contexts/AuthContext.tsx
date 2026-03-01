@@ -32,6 +32,7 @@ type UserProfile = {
   birth_year: number | null;
   gender: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
   school_id: string | null;
+  country_code: string;
   sido_code: string | null;
   sigungu_code: string | null;
   signup_completed_at: string | null;
@@ -120,6 +121,7 @@ function profilePayloadFromUser(user: User): UserProfile {
     birth_year: null,
     gender: null,
     school_id: null,
+    country_code: 'KR',
     sido_code: null,
     sigungu_code: null,
     signup_completed_at: null,
@@ -127,6 +129,11 @@ function profilePayloadFromUser(user: User): UserProfile {
     privacy_show_region: false,
     privacy_show_activity_history: false,
   };
+}
+
+function normalizeProfileCountryCode(raw: string | null | undefined): string {
+  const normalized = String(raw ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : 'KR';
 }
 
 function userSyncPayloadFromUser(user: User): UserSyncPayload {
@@ -163,7 +170,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   }
 
   const fullSelect =
-    'id, email, full_name, nickname, username, avatar_url, avatar_preset, provider, birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
+    'id, email, full_name, nickname, username, avatar_url, avatar_preset, provider, birth_year, gender, school_id, country_code, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
 
   const { data, error } = await supabase
     .from('users')
@@ -174,7 +181,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   if (error?.message.toLowerCase().includes('column')) {
     const { data: legacyData, error: legacyError } = await supabase
       .from('users')
-      .select('id, email, full_name, avatar_url, provider, birth_year, gender, school_id, sido_code, sigungu_code')
+      .select('id, email, full_name, avatar_url, provider, birth_year, gender, school_id, country_code, sido_code, sigungu_code')
       .eq('id', userId)
       .maybeSingle();
 
@@ -187,11 +194,16 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
       return null;
     }
 
+    const legacyCountryCode = normalizeProfileCountryCode(
+      (legacyData as { country_code?: string | null }).country_code,
+    );
+
     return {
       ...legacyData,
       nickname: null,
       username: null,
       avatar_preset: null,
+      country_code: legacyCountryCode,
       signup_completed_at: null,
       privacy_show_leaderboard_name: true,
       privacy_show_region: false,
@@ -204,7 +216,31 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     return null;
   }
 
-  return data;
+  if (!data) {
+    return null;
+  }
+
+  return {
+    ...data,
+    country_code: normalizeProfileCountryCode((data as { country_code?: string | null }).country_code),
+  };
+}
+
+async function syncCountryCode(accessToken: string | null | undefined): Promise<void> {
+  if (!accessToken) {
+    return;
+  }
+
+  try {
+    await fetch('/api/auth/sync-country', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch {
+    // Ignore sync failures and keep existing country value.
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -259,6 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Keep public.users in sync right after OAuth login as a safety net.
     await syncUserToPublicUsers(nextUser);
+    await syncCountryCode(session?.access_token);
     await mergeGuestVotes(session);
     const nextProfile = await fetchProfile(nextUser.id);
     setProfile(nextProfile ?? profilePayloadFromUser(nextUser));

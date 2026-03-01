@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
+import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { AgeBucketKey, HomeAnalyticsResponse } from '@/lib/vote/types';
 
@@ -9,6 +11,7 @@ export const revalidate = 0;
 
 const querySchema = z.object({
   status: z.string().trim().min(1).default('LIVE'),
+  country: z.string().trim().min(2).optional(),
 });
 
 type LiveVoteDemographicsRow = {
@@ -56,10 +59,12 @@ export async function GET(request: Request) {
       );
     }
 
-    const { status } = parsed.data;
+    const { status, country: rawCountry } = parsed.data;
+    const countryCode = resolveSupportedCountry(rawCountry ?? resolveCountryCodeFromRequest(request));
     const supabase = getSupabaseServiceRoleClient();
     const { data: rows, error } = await supabase.rpc('get_live_vote_demographics', {
       p_status: status,
+      p_country_code: countryCode,
     });
 
     if (error) {

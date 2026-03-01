@@ -5,14 +5,20 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import CountryTabs from '@/components/map/CountryTabs';
+import type { BaseCountryTooltipContext } from '@/components/map/BaseCountryAdminMap';
+import type { SupportedCountry } from '@/lib/map/countryMapRegistry';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
+  clearPendingRegionInput,
   readPendingRegionInput,
   readPendingVotes,
   writePendingRegionInput,
@@ -21,10 +27,9 @@ import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
 import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
 import type { SchoolSearchItem, VoteRegionInput, VoteTopic } from '@/lib/vote/types';
-import type { MapTooltipContext, RegionVoteMap } from './KoreaAdminMap';
+import type { RegionVoteMap } from './KoreaAdminMap';
 
-const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
-const TOPICS_MAP_INITIAL_CENTER: [number, number] = [126.0, 36.0];
+const BaseCountryAdminMap = dynamic(() => import('@/components/map/BaseCountryAdminMap'), { ssr: false });
 const TOPICS_MAP_COLORS = {
   a: 'rgba(255, 90, 0, 0.95)',
   b: 'rgba(30, 120, 255, 0.95)',
@@ -34,13 +39,19 @@ const TOPICS_MAP_COLORS = {
 const REGION_MODAL_HINT =
   '지역과 결과 비교를 위해 학교를 입력하시거나 정확한 위치 사용을 허용해주세요.';
 const REGION_MODAL_GPS_ONLY_HINT = '학교 미설정 계정은 정확한 위치 사용(GPS)으로만 투표할 수 있어요.';
+const REGION_MODAL_KR_SCHOOL_ONLY_HINT = '국내 사용자는 GPS 위치 기능이 출시 예정이라 학교 위치로만 투표할 수 있어요.';
+const KR_SCHOOL_REQUIRED_FOR_MEMBER_MESSAGE = '국내 사용자는 학교 등록 후 투표할 수 있어요. MY에서 학교를 등록해 주세요.';
 const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
+const CROSS_COUNTRY_VIEW_ONLY_MESSAGE = '다른 국가 주제는 조회만 가능하며 투표는 소속 국가에서만 가능합니다.';
 const TOPIC_SELECTOR_STACK_GAP_PX = 12;
+const PREFERRED_COUNTRY_STORAGE_KEY = 'preferred-country';
+const DESKTOP_LEFT_PANEL_MAP_FOCUS_OFFSET_X = 140;
 
 type TopicsMapPageProps = {
   initialTopicIds: string[];
   openTopicEditorOnMount?: boolean;
   redirectResultTopicId?: string;
+  initialCountryCode?: string;
 };
 
 type ResultVisibility = 'locked' | 'unlocked';
@@ -75,6 +86,25 @@ const MANUAL_TOPIC_CATEGORY_BY_ID: Record<string, TopicCategory> = {
   'balance-love-2026': 'relationship',
   'balance-work-2026': 'work',
 };
+
+function formatRegionLevelLabel(level: string): string {
+  if (level === 'sido') {
+    return '시/도';
+  }
+  if (level === 'sigungu') {
+    return '시/군/구';
+  }
+  if (level === 'l1') {
+    return 'L1';
+  }
+  if (level === 'l2') {
+    return 'L2';
+  }
+  if (level === 'l3') {
+    return 'L3';
+  }
+  return level;
+}
 
 function normalizeSummary(
   summary: {
@@ -166,7 +196,7 @@ function bumpRegionStat(
   return next;
 }
 
-function buildRegionBreakdown(stat: MapTooltipContext['stat'] | null | undefined, visibility: ResultVisibility) {
+function buildRegionBreakdown(stat: RegionVoteMap[string] | null | undefined, visibility: ResultVisibility) {
   if (!stat) {
     return null;
   }
@@ -220,9 +250,13 @@ export default function TopicsMapPage({
   initialTopicIds,
   openTopicEditorOnMount = false,
   redirectResultTopicId,
+  initialCountryCode = 'KR',
 }: TopicsMapPageProps) {
   const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
+  const [selectedCountry, setSelectedCountry] = useState<SupportedCountry>(() =>
+    resolveSupportedCountry(initialCountryCode),
+  );
   const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => initialTopicIds);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
@@ -244,7 +278,8 @@ export default function TopicsMapPage({
   const [selectedRegion, setSelectedRegion] = useState<{
     code: string;
     name: string;
-    level: 'sido' | 'sigungu';
+    level: string;
+    stat?: RegionVoteMap[string];
   } | null>(null);
   const [voteMessage, setVoteMessage] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
@@ -281,12 +316,34 @@ export default function TopicsMapPage({
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
   const { isAuthenticated, profile, requiresSignupCompletion } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === 'dark';
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
+  const viewerCountryCode = (isAuthenticated ? profile?.country_code : initialCountryCode) ?? 'KR';
+  const viewerSupportedCountry = resolveSupportedCountry(viewerCountryCode);
+  const isViewingOwnCountry = selectedCountry === viewerSupportedCountry;
+  const isKoreaSelected = selectedCountry === 'KR';
+  const canUseGpsForViewer = viewerCountryCode.toUpperCase() !== 'KR';
   const hasSavedSchool = Boolean(profile?.school_id);
   const canSkipLocationPrompt = isAuthenticated && hasSavedSchool;
   const canSelectSchoolInModal = !isAuthenticated;
-  const isGpsOnlyVoteMode = isAuthenticated && !hasSavedSchool;
-  const regionModalHintText = isGpsOnlyVoteMode ? REGION_MODAL_GPS_ONLY_HINT : REGION_MODAL_HINT;
+  const isGpsOnlyVoteMode = isAuthenticated && !hasSavedSchool && canUseGpsForViewer;
+  const regionModalHintText = !canUseGpsForViewer
+    ? REGION_MODAL_KR_SCHOOL_ONLY_HINT
+    : isGpsOnlyVoteMode
+      ? REGION_MODAL_GPS_ONLY_HINT
+      : REGION_MODAL_HINT;
+
+  useEffect(() => {
+    setSelectedCountry(viewerSupportedCountry);
+  }, [viewerSupportedCountry]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(PREFERRED_COUNTRY_STORAGE_KEY, selectedCountry);
+  }, [selectedCountry]);
   const topics = useMemo(() => {
     if (selectedTopicIds.length === 0) {
       return [];
@@ -344,7 +401,9 @@ export default function TopicsMapPage({
   const isSchoolListVisible =
     canSelectSchoolInModal &&
     Boolean(schoolQuery.trim() && (!selectedSchool || schoolQuery !== selectedSchool.schoolName));
-  const hasPendingRegionInput = Boolean((canSelectSchoolInModal && selectedSchool) || gpsRegionInput);
+  const hasPendingRegionInput = Boolean(
+    (canSelectSchoolInModal && selectedSchool) || (canUseGpsForViewer && gpsRegionInput),
+  );
   const mobileOverlayPaddingBottom = useMemo(
     () => `${bottomDockHeight + TOPIC_SELECTOR_STACK_GAP_PX}px`,
     [bottomDockHeight],
@@ -361,29 +420,27 @@ export default function TopicsMapPage({
     }
     return 'left';
   }, [isDesktopLeftPanelOpen, isDesktopViewport]);
-  const mapStatsSignature = useMemo(
-    () =>
-      Object.entries(mapStats)
-        .sort(([codeA], [codeB]) => codeA.localeCompare(codeB))
-        .map(([code, stat]) => `${code}:${stat.winner ?? 'L'}:${stat.total ?? 0}:${stat.gapPercent ?? 0}`)
-        .join('|'),
-    [mapStats],
-  );
+  const mapCountryFocusOffsetPx = useMemo<[number, number]>(() => {
+    if (isDesktopViewport && isDesktopLeftPanelOpen) {
+      return [DESKTOP_LEFT_PANEL_MAP_FOCUS_OFFSET_X, 0];
+    }
+    return [0, 0];
+  }, [isDesktopLeftPanelOpen, isDesktopViewport]);
   const selectedRegionStat = useMemo(() => {
     if (!selectedRegion) {
       return null;
     }
-    return mapStats[selectedRegion.code] ?? null;
+    return selectedRegion.stat ?? mapStats[selectedRegion.code] ?? null;
   }, [mapStats, selectedRegion]);
   const renderRegionTooltipContent = useCallback(
-    (context: MapTooltipContext) => {
+    (context: BaseCountryTooltipContext) => {
       const breakdown = buildRegionBreakdown(context.stat, resultVisibility);
       return (
         <div className="w-[min(340px,calc(100vw-44px))] rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.72)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
           <div className="flex items-center justify-between">
             <h4 className="truncate text-[15px] font-semibold text-white">{context.name || context.code}</h4>
             <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-              {context.level === 'sido' ? '시/도' : '시/군/구'}
+              {formatRegionLevelLabel(context.level)}
             </span>
           </div>
 
@@ -443,6 +500,11 @@ export default function TopicsMapPage({
   }, [isDesktopViewport]);
 
   useEffect(() => {
+    setSelectedRegion(null);
+    setVoteMessage(null);
+  }, [selectedCountry]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -466,6 +528,7 @@ export default function TopicsMapPage({
   const loadRegionStats = useCallback(async (topicId: string) => {
     const requestId = ++statsRequestRef.current;
     setIsStatsLoading(true);
+
     try {
       let accessToken: string | null = null;
       if (isAuthenticated) {
@@ -486,6 +549,7 @@ export default function TopicsMapPage({
           scope: 'topic',
           topicId,
           level,
+          country: selectedCountry,
           ts: String(nonce),
         });
         return `/api/votes/region-stats?${query.toString()}`;
@@ -573,7 +637,7 @@ export default function TopicsMapPage({
       }
       setIsStatsLoading(false);
     }
-  }, [guestSessionId, isAuthenticated]);
+  }, [guestSessionId, isAuthenticated, selectedCountry]);
 
   useEffect(() => {
     setSelectedTopicIds(initialTopicIds);
@@ -585,8 +649,13 @@ export default function TopicsMapPage({
     const run = async () => {
       setIsTopicsLoading(true);
       setTopicsError(null);
+      setAvailableTopics([]);
       try {
-        const response = await fetch('/api/votes/topics?status=LIVE', {
+        const query = new URLSearchParams({
+          status: 'LIVE',
+          country: selectedCountry,
+        });
+        const response = await fetch(`/api/votes/topics?${query.toString()}`, {
           cache: 'no-store',
         });
         const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
@@ -623,7 +692,7 @@ export default function TopicsMapPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedCountry]);
 
   useEffect(() => {
     if (topics.length === 0) {
@@ -713,6 +782,11 @@ export default function TopicsMapPage({
       if (hasSavedSchool) {
         return;
       }
+      if (!canUseGpsForViewer && storedRegionInput.source === 'gps') {
+        clearPendingRegionInput();
+        setGpsRegionInput(null);
+        return;
+      }
       if (storedRegionInput.source === 'gps') {
         setGpsRegionInput(storedRegionInput);
       }
@@ -726,8 +800,14 @@ export default function TopicsMapPage({
       return;
     }
 
+    if (!canUseGpsForViewer) {
+      clearPendingRegionInput();
+      setGpsRegionInput(null);
+      return;
+    }
+
     setGpsRegionInput(storedRegionInput);
-  }, [hasSavedSchool, isAuthenticated]);
+  }, [canUseGpsForViewer, hasSavedSchool, isAuthenticated]);
 
   useEffect(() => {
     const adNode = bottomDockRef.current;
@@ -868,13 +948,13 @@ export default function TopicsMapPage({
       return payload;
     }
 
-    if (gpsRegionInput) {
+    if (canUseGpsForViewer && gpsRegionInput) {
       writePendingRegionInput(gpsRegionInput);
       return gpsRegionInput;
     }
 
     return null;
-  }, [canSelectSchoolInModal, gpsRegionInput, hasSavedSchool, isAuthenticated, selectedSchool]);
+  }, [canSelectSchoolInModal, canUseGpsForViewer, gpsRegionInput, hasSavedSchool, isAuthenticated, selectedSchool]);
 
   const resolveOptimisticRegionCodes = useCallback(
     (regionInput: VoteRegionInput | null) => {
@@ -901,11 +981,16 @@ export default function TopicsMapPage({
   );
 
   const handleUseCurrentLocation = useCallback(async () => {
+    if (!canUseGpsForViewer) {
+      setProfileModalMessage('국내 사용자의 GPS 위치 기능은 출시 예정입니다.');
+      return;
+    }
+
     setIsLocatingRegion(true);
     setProfileModalMessage(null);
 
     try {
-      const nextGpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
+      const nextGpsRegionInput = await resolveVoteRegionInputFromCurrentLocation(viewerSupportedCountry);
       setGpsRegionInput(nextGpsRegionInput);
       setSelectedSchool(null);
       setSchoolQuery('');
@@ -917,7 +1002,7 @@ export default function TopicsMapPage({
     } finally {
       setIsLocatingRegion(false);
     }
-  }, []);
+  }, [canUseGpsForViewer, viewerSupportedCountry]);
 
   const handleClearGpsRegion = useCallback(() => {
     setGpsRegionInput(null);
@@ -1034,9 +1119,20 @@ export default function TopicsMapPage({
   );
 
   const handleVote = useCallback(async () => {
+    if (!isViewingOwnCountry) {
+      setVoteMessage(CROSS_COUNTRY_VIEW_ONLY_MESSAGE);
+      return;
+    }
+
     if (isAuthenticated && requiresSignupCompletion) {
       setVoteMessage(SIGNUP_COMPLETION_REQUIRED_MESSAGE);
       router.push('/auth/complete-signup');
+      return;
+    }
+
+    if (isAuthenticated && !hasSavedSchool && !canUseGpsForViewer) {
+      setVoteMessage(KR_SCHOOL_REQUIRED_FOR_MEMBER_MESSAGE);
+      router.push('/my/edit');
       return;
     }
 
@@ -1057,7 +1153,10 @@ export default function TopicsMapPage({
   }, [
     buildPendingRegionInput,
     canSkipLocationPrompt,
+    canUseGpsForViewer,
+    hasSavedSchool,
     isAuthenticated,
+    isViewingOwnCountry,
     requiresSignupCompletion,
     router,
     submitVote,
@@ -1145,6 +1244,7 @@ export default function TopicsMapPage({
   const renderTopicSelectorPanel = (mode: 'mobile' | 'desktop') => {
     const isDesktopMode = mode === 'desktop';
     const panelTitle = isDesktopMode ? '주제 선택' : '선택 주제 태그';
+
     return (
       <section
         ref={isDesktopMode ? undefined : topicSelectorRef}
@@ -1333,32 +1433,27 @@ export default function TopicsMapPage({
   };
 
   return (
-    <div className="bg-black text-white">
-      <main className="relative h-screen w-full overflow-hidden bg-black text-white [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
+    <div className={isDarkTheme ? 'bg-black text-white' : 'bg-[#edf2f8] text-[#0f172a]'}>
+      <main className={`relative h-screen w-full overflow-hidden [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif] ${isDarkTheme ? 'bg-black text-white' : 'bg-[#edf2f8] text-[#0f172a]'}`}>
         <div className="absolute inset-0">
-          <KoreaAdminMap
-            key={`${activeTopicId ?? 'topics-map-empty'}-${mapStatsSignature}`}
+          <BaseCountryAdminMap
+            country={selectedCountry}
+            enableWorldNavigation
             statsByCode={mapStats}
-            defaultRegionLevel="sigungu"
-            fillMode={resultVisibility === 'locked' ? 'locked' : 'winner'}
+            defaultRegionLevel={isKoreaSelected ? 'l2' : 'l1'}
+            fillMode={isKoreaSelected ? (resultVisibility === 'locked' ? 'locked' : 'winner') : 'activity'}
             height="100%"
-            initialCenter={TOPICS_MAP_INITIAL_CENTER}
-            initialZoom={6.3}
             bottomDockHeightPx={bottomDockHeight}
             toggleClearancePx={mapToggleClearancePx}
-            theme="dark"
+            theme={isDarkTheme ? 'dark' : 'light'}
             showNavigationControl={false}
             showTooltip={isDesktopViewport}
             tooltipPinOnClick={isDesktopViewport}
             renderTooltipContent={isDesktopViewport ? renderRegionTooltipContent : undefined}
             showRegionLevelToggle
             regionLevelToggleAlign={mapRegionLevelToggleAlign}
+            countryFocusOffsetPx={mapCountryFocusOffsetPx}
             colors={TOPICS_MAP_COLORS}
-            onMapZoomDirectionChange={({ direction }) => {
-              if (direction === 'in') {
-                setIsVoteCardCollapsed(true);
-              }
-            }}
             onRegionClick={
               isDesktopViewport
                 ? undefined
@@ -1367,11 +1462,21 @@ export default function TopicsMapPage({
                       prev && prev.code === region.code && prev.level === region.level ? null : region,
                     )
             }
+            onActiveCountryChange={(nextCountry) => {
+              setSelectedCountry((prev) => (prev === nextCountry ? prev : nextCountry));
+            }}
             className="h-full w-full !rounded-none !border-0"
           />
         </div>
 
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.55),_rgba(4,10,18,0.18)_38%,_rgba(4,10,18,0.74))] lg:bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.4),_rgba(4,10,18,0.06)_35%,_rgba(4,10,18,0.22)_85%,_rgba(4,10,18,0.5))]" />
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage: isDarkTheme
+              ? 'linear-gradient(to bottom, rgba(4,10,18,0.55), rgba(4,10,18,0.18) 38%, rgba(4,10,18,0.74))'
+              : 'linear-gradient(to bottom, rgba(236,242,248,0.38), rgba(236,242,248,0.14) 38%, rgba(236,242,248,0.54))',
+          }}
+        />
         <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
         <div
@@ -1386,7 +1491,16 @@ export default function TopicsMapPage({
               { key: 'game', label: '게임', active: activeTab === 'game', onClick: () => handleBottomTabClick('game') },
               { key: 'me', label: 'MY', active: activeTab === 'me', onClick: () => handleBottomTabClick('me') },
             ]}
-            rightSlot={<AccountMenuButton />}
+            rightSlot={(
+              <>
+                <CountryTabs
+                  selectedCountry={selectedCountry}
+                  onSelectCountry={setSelectedCountry}
+                  compact={!isDesktopViewport}
+                />
+                <AccountMenuButton />
+              </>
+            )}
           />
 
           {isDesktopViewport ? (
@@ -1455,6 +1569,7 @@ export default function TopicsMapPage({
                       onSubmitVote={() => void handleVote()}
                       submitDisabled={
                         isSubmittingVote ||
+                        !isViewingOwnCountry ||
                         !selectedOptionKey ||
                         (!isAuthenticated && guestHasVoted) ||
                         (!isAuthenticated && !guestSessionId)
@@ -1462,6 +1577,8 @@ export default function TopicsMapPage({
                       submitLabel={
                         isSubmittingVote
                           ? '처리 중...'
+                          : !isViewingOwnCountry
+                            ? '타국 조회 모드 · 투표 불가'
                           : !isAuthenticated && guestHasVoted
                             ? '이미 투표 완료'
                             : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
@@ -1515,6 +1632,7 @@ export default function TopicsMapPage({
                     onSubmitVote={() => void handleVote()}
                     submitDisabled={
                       isSubmittingVote ||
+                      !isViewingOwnCountry ||
                       !selectedOptionKey ||
                       (!isAuthenticated && guestHasVoted) ||
                       (!isAuthenticated && !guestSessionId)
@@ -1522,6 +1640,8 @@ export default function TopicsMapPage({
                     submitLabel={
                       isSubmittingVote
                         ? '처리 중...'
+                        : !isViewingOwnCountry
+                          ? '타국 조회 모드 · 투표 불가'
                         : !isAuthenticated && guestHasVoted
                           ? '이미 투표 완료'
                           : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
@@ -1550,7 +1670,7 @@ export default function TopicsMapPage({
                           {selectedRegion.name || selectedRegion.code}
                         </h4>
                         <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-                          {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                          {formatRegionLevelLabel(selectedRegion.level)}
                         </span>
                       </div>
 
@@ -1769,46 +1889,54 @@ export default function TopicsMapPage({
                       ) : null}
                     </label>
 
-                    <div className="flex items-center gap-2">
-                      <div className="h-px flex-1 bg-white/14" />
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
-                      <div className="h-px flex-1 bg-white/14" />
-                    </div>
+                    {canUseGpsForViewer ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-px flex-1 bg-white/14" />
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
+                        <div className="h-px flex-1 bg-white/14" />
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
 
-                <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
-                  <button
-                    type="button"
-                    onClick={() => void handleUseCurrentLocation()}
-                    disabled={isLocatingRegion}
-                    className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
-                  </button>
+                {canUseGpsForViewer ? (
+                  <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleUseCurrentLocation()}
+                      disabled={isLocatingRegion}
+                      className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
+                    </button>
 
-                  {gpsRegionInput ? (
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-[#9dd2ff]">
-                      <p className="truncate">
-                        선택됨: {gpsRegionInput.region.sidoName ?? gpsRegionInput.region.sidoCode}
-                        {gpsRegionInput.region.sigunguName
-                          ? ` · ${gpsRegionInput.region.sigunguName}`
-                          : gpsRegionInput.region.sigunguCode
-                            ? ` · ${gpsRegionInput.region.sigunguCode}`
-                            : ''}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleClearGpsRegion}
-                        className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
-                      >
-                        위치 선택 해제
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
-                  )}
-                </div>
+                    {gpsRegionInput ? (
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-[#9dd2ff]">
+                        <p className="truncate">
+                          선택됨: {gpsRegionInput.region.sidoName ?? gpsRegionInput.region.sidoCode}
+                          {gpsRegionInput.region.sigunguName
+                            ? ` · ${gpsRegionInput.region.sigunguName}`
+                            : gpsRegionInput.region.sigunguCode
+                              ? ` · ${gpsRegionInput.region.sigunguCode}`
+                              : ''}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleClearGpsRegion}
+                          className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                        >
+                          위치 선택 해제
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-white/12 bg-white/5 p-3 text-[11px] text-white/68">
+                    국내 사용자의 GPS 위치 기능은 현재 출시 준비 중입니다.
+                  </div>
+                )}
 
                 {profileModalMessage ? (
                   <p className="rounded-lg border border-white/12 bg-white/6 px-3 py-2 text-xs text-white/78">

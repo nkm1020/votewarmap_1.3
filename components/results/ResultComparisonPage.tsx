@@ -5,16 +5,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { BaseCountryTooltipContext, MapViewRequest } from '@/components/map/BaseCountryAdminMap';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getCountryMapConfig, resolveSupportedCountry, type CountryMapLevel, type SupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { readGuestSessionId } from '@/lib/vote/client-storage';
-import type { MapTooltipContext, MapViewRequest, RegionVoteMap } from '@/components/KoreaAdminMap';
 import { VoteResultModal } from '@/components/results/VoteResultModal';
-import type { VoteTopic } from '@/lib/vote/types';
+import type { RegionVoteMap, VoteTopic } from '@/lib/vote/types';
 
-const KoreaAdminMap = dynamic(() => import('@/components/KoreaAdminMap'), { ssr: false });
+const BaseCountryAdminMap = dynamic(() => import('@/components/map/BaseCountryAdminMap'), { ssr: false });
 
 const RESULT_MAP_COLORS = {
   a: 'rgba(255, 90, 0, 0.95)',
@@ -23,8 +25,7 @@ const RESULT_MAP_COLORS = {
   neutral: 'rgba(42, 34, 30, 0.18)',
 } as const;
 
-const DEFAULT_MAP_CENTER: [number, number] = [127.75, 36.18];
-const DEFAULT_MAP_ZOOM = 6.1;
+const DEFAULT_COUNTRY: SupportedCountry = 'KR';
 const AUTO_OPEN_RESULT_MODAL = true;
 type ResultEntryMode = 'default' | 'map';
 type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
@@ -64,6 +65,7 @@ type ResultSummaryResponse = {
     id: string;
     title: string;
     status: string;
+    countryCode: string;
     optionA: { key: string; label: string; position: 1 };
     optionB: { key: string; label: string; position: 2 };
   };
@@ -112,10 +114,16 @@ type RegionStatsResponse = {
 type SelectedRegion = {
   code: string;
   name: string;
-  level: 'sido' | 'sigungu';
+  level: CountryMapLevel;
 };
 
-function buildRegionBreakdown(stat: MapTooltipContext['stat'] | null | undefined) {
+type ResultRegionLevel = 'sido' | 'sigungu';
+
+function toCountryMapLevel(level: ResultRegionLevel): CountryMapLevel {
+  return level === 'sigungu' ? 'l2' : 'l1';
+}
+
+function buildRegionBreakdown(stat: BaseCountryTooltipContext['stat'] | null | undefined) {
   if (!stat) {
     return null;
   }
@@ -133,6 +141,19 @@ function buildRegionBreakdown(stat: MapTooltipContext['stat'] | null | undefined
     aPercent,
     bPercent,
   };
+}
+
+function formatCountryLevel(level: CountryMapLevel, fallbackLabel?: string): string {
+  if (fallbackLabel) {
+    return fallbackLabel;
+  }
+  if (level === 'l1') {
+    return 'L1';
+  }
+  if (level === 'l2') {
+    return 'L2';
+  }
+  return 'L3';
 }
 
 function categorizeTopic(topic: VoteTopic): TopicCategory {
@@ -202,6 +223,8 @@ export function ResultComparisonPage({
   const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === 'dark';
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ResultSummaryUnlockedResponse | null>(null);
@@ -224,6 +247,14 @@ export function ResultComparisonPage({
   const selectedRegionPanelRef = useRef<HTMLElement | null>(null);
   const openSheetRef = useRef<HTMLElement | null>(null);
   const hasAutoOpenedIntroRef = useRef(false);
+  const activeCountry = useMemo(
+    () => resolveSupportedCountry(data?.topic.countryCode),
+    [data?.topic.countryCode],
+  );
+  const activeCountryConfig = useMemo(
+    () => getCountryMapConfig(activeCountry || DEFAULT_COUNTRY),
+    [activeCountry],
+  );
 
   const showNotice = useCallback((message: string) => {
     setNoticeMessage(message);
@@ -339,6 +370,9 @@ export function ResultComparisonPage({
           level,
           ts: String(nonce),
         });
+        if (activeCountry) {
+          query.set('country', activeCountry);
+        }
         return `/api/votes/region-stats?${query.toString()}`;
       };
       const [sidoRes, sigunguRes] = await Promise.allSettled([
@@ -363,7 +397,7 @@ export function ResultComparisonPage({
     } catch {
       setMapStats({});
     }
-  }, [isAuthenticated, topicId]);
+  }, [activeCountry, isAuthenticated, topicId]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -420,14 +454,14 @@ export function ResultComparisonPage({
     return buildRegionBreakdown(selectedRegionStat);
   }, [selectedRegionStat]);
   const renderRegionTooltipContent = useCallback(
-    (context: MapTooltipContext) => {
+    (context: BaseCountryTooltipContext) => {
       const breakdown = buildRegionBreakdown(context.stat);
       return (
         <div className="w-[min(340px,calc(100vw-44px))] rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.78)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
           <div className="flex items-center justify-between">
             <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{context.name || context.code}</h4>
             <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-              {context.level === 'sido' ? '시/도' : '시/군/구'}
+              {formatCountryLevel(context.level, context.levelLabel)}
             </span>
           </div>
 
@@ -670,8 +704,8 @@ export function ResultComparisonPage({
       setSelectedRegion(null);
       setMapViewRequest({
         id: `view-${Date.now()}`,
-        center: DEFAULT_MAP_CENTER,
-        zoom: DEFAULT_MAP_ZOOM,
+        center: activeCountryConfig.center,
+        zoom: activeCountryConfig.zoom,
         reason: 'reset',
       });
       showNotice('지역 데이터 수집 중이라 전국 지도로 이동했어요.');
@@ -681,33 +715,42 @@ export function ResultComparisonPage({
     setSelectedRegion({
       code: data.myRegion.code,
       name: data.myRegion.name,
-      level: data.myRegion.level,
+      level: toCountryMapLevel(data.myRegion.level),
     });
 
     if (!data.myRegion.centroid) {
       setMapViewRequest({
         id: `view-${Date.now()}`,
-        center: DEFAULT_MAP_CENTER,
-        zoom: DEFAULT_MAP_ZOOM,
+        center: activeCountryConfig.center,
+        zoom: activeCountryConfig.zoom,
         reason: 'reset',
       });
       showNotice('지역 좌표를 찾지 못해 전국 지도로 이동했어요.');
       return;
     }
 
+    const targetZoom =
+      data.myRegion.level === 'sigungu'
+        ? Math.min(activeCountryConfig.maxZoom, activeCountryConfig.zoomThresholds.l2 + 1)
+        : activeCountryConfig.zoom;
+
     setMapViewRequest({
       id: `view-${Date.now()}`,
       center: [data.myRegion.centroid.lng, data.myRegion.centroid.lat],
-      zoom: data.myRegion.level === 'sigungu' ? 8.6 : 7.4,
+      zoom: targetZoom,
       reason: 'my-region-focus',
     });
-  }, [closeIntroSheet, data, showNotice]);
+  }, [activeCountryConfig, closeIntroSheet, data, showNotice]);
 
   const loadPickerTopics = useCallback(async () => {
     setIsTopicsLoading(true);
     setTopicsError(null);
     try {
-      const response = await fetch('/api/votes/topics?status=LIVE', { cache: 'no-store' });
+      const query = new URLSearchParams({
+        status: 'LIVE',
+        country: activeCountry,
+      });
+      const response = await fetch(`/api/votes/topics?${query.toString()}`, { cache: 'no-store' });
       const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
       if (!response.ok) {
         setTopicsError(json.error ?? '주제 목록을 불러오지 못했습니다.');
@@ -723,7 +766,7 @@ export function ResultComparisonPage({
     } finally {
       setIsTopicsLoading(false);
     }
-  }, []);
+  }, [activeCountry]);
 
   const handleSelectNextTopic = useCallback(
     (nextTopicId: string) => {
@@ -792,6 +835,11 @@ export function ResultComparisonPage({
     setActiveTopicTab('all');
     hasAutoOpenedIntroRef.current = false;
   }, [entryMode, topicId]);
+
+  useEffect(() => {
+    setAvailableTopics([]);
+    setTopicsError(null);
+  }, [activeCountry, topicId]);
 
   useEffect(() => {
     if (isTopicsLoading || availableTopics.length > 0 || topicsError) {
@@ -868,19 +916,22 @@ export function ResultComparisonPage({
   const bottomSheetBodyTransition = shouldReduceMotion ? { duration: 0.12 } : { duration: 0.16 };
 
   return (
-    <main className="relative min-h-[100dvh] w-full overflow-x-hidden overflow-y-auto bg-black text-white touch-manipulation [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif]">
+    <main className={`relative min-h-[100dvh] w-full overflow-x-hidden overflow-y-auto touch-manipulation [font-family:-apple-system,BlinkMacSystemFont,'SF_Pro_Text','SF_Pro_Display','Segoe_UI',sans-serif] ${isDarkTheme ? 'bg-black text-white' : 'bg-[#edf2f8] text-[#0f172a]'}`}>
       <div className="relative h-[100dvh] w-full">
         <div className="absolute inset-0">
-          <KoreaAdminMap
-            key={`${topicId}-${Object.keys(mapStats).length}`}
+          <BaseCountryAdminMap
+            key={`${topicId}-${activeCountry}`}
+            country={activeCountry}
+            enableWorldNavigation={false}
             statsByCode={mapStats}
-            defaultRegionLevel="sigungu"
+            defaultRegionLevel={data?.myRegion?.level === 'sigungu' ? 'l2' : 'l1'}
+            fillMode="winner"
             height="100%"
-            initialCenter={DEFAULT_MAP_CENTER}
-            initialZoom={DEFAULT_MAP_ZOOM}
+            initialCenter={activeCountryConfig.center}
+            initialZoom={activeCountryConfig.zoom}
             bottomDockHeightPx={mapBottomDockHeightPx}
             toggleClearancePx={mapToggleClearancePx}
-            theme="dark"
+            theme={isDarkTheme ? 'dark' : 'light'}
             colors={RESULT_MAP_COLORS}
             showNavigationControl={false}
             showTooltip={isDesktopViewport}
@@ -900,7 +951,14 @@ export function ResultComparisonPage({
             className="h-full w-full !rounded-none !border-0"
           />
         </div>
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,_rgba(4,10,18,0.36),_rgba(4,10,18,0.12)_40%,_rgba(4,10,18,0.52))]" />
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage: isDarkTheme
+              ? 'linear-gradient(to bottom, rgba(4,10,18,0.36), rgba(4,10,18,0.12) 40%, rgba(4,10,18,0.52))'
+              : 'linear-gradient(to bottom, rgba(236,242,248,0.35), rgba(236,242,248,0.14) 40%, rgba(236,242,248,0.56))',
+          }}
+        />
         <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-soft-light" />
 
         <div className="pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[min(100vw-2.5rem,1920px)] flex-col px-2 pt-[calc(0.6rem+env(safe-area-inset-top))] pb-[calc(0.65rem+env(safe-area-inset-bottom))] md:px-6 md:pt-0 lg:max-w-none lg:px-0">
@@ -1231,7 +1289,7 @@ export function ResultComparisonPage({
                   <div className="flex items-center justify-between">
                     <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{selectedRegion.name || selectedRegion.code}</h4>
                     <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
-                      {selectedRegion.level === 'sido' ? '시/도' : '시/군/구'}
+                      {formatCountryLevel(selectedRegion.level)}
                     </span>
                   </div>
 

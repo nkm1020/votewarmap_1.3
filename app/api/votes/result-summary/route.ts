@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
-import { getRegionCentroid } from '@/lib/server/region-centroids';
-import { getRegionNameByCodes } from '@/lib/server/region-names';
+import { getCountryRegionCentroid, getCountryRegionNameByCodes } from '@/lib/server/country-region-geo';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -12,6 +12,7 @@ export const revalidate = 0;
 const querySchema = z.object({
   topicId: z.string().min(1),
   guestSessionId: z.string().uuid().optional(),
+  country: z.string().trim().min(2).optional(),
 });
 const guestSessionHeaderSchema = z.string().uuid();
 
@@ -156,13 +157,14 @@ export async function GET(request: Request) {
       guestSessionId = parsedHeader.data;
     }
 
-    const { topicId } = parsed.data;
+    const { topicId, country: rawCountry } = parsed.data;
+    const requestedCountry = rawCountry ? resolveSupportedCountry(rawCountry) : null;
     const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
     const supabase = getSupabaseServiceRoleClient();
 
     const { data: topicRow, error: topicError } = await supabase
       .from('vote_topics')
-      .select('id, title, status')
+      .select('id, title, status, country_code')
       .eq('id', topicId)
       .maybeSingle();
 
@@ -171,6 +173,10 @@ export async function GET(request: Request) {
     }
     if (!topicRow) {
       return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
+    }
+    const topicCountryCode = resolveSupportedCountry((topicRow as { country_code?: string | null }).country_code);
+    if (requestedCountry && requestedCountry !== topicCountryCode) {
+      return NextResponse.json({ error: '요청 국가와 주제 국가가 일치하지 않습니다.' }, { status: 404 });
     }
 
     const { data: optionRows, error: optionsError } = await supabase
@@ -312,14 +318,23 @@ export async function GET(request: Request) {
         } as RegionCounts);
 
       const fallbackName = myRegionLevel === 'sigungu' ? myRegionCode : mySidoCode ?? myRegionCode;
-      const resolvedName = getRegionNameByCodes({ sidoCode: mySidoCode, sigunguCode: mySigunguCode }) ?? fallbackName;
+      const resolvedName =
+        getCountryRegionNameByCodes({
+          countryCode: topicCountryCode,
+          sidoCode: mySidoCode,
+          sigunguCode: mySigunguCode,
+        }) ?? fallbackName;
 
       myRegion = {
         ...withPercent(regionStat),
         level: myRegionLevel,
         code: myRegionCode,
         name: resolvedName,
-        centroid: getRegionCentroid(myRegionLevel, myRegionCode),
+        centroid: getCountryRegionCentroid({
+          countryCode: topicCountryCode,
+          level: myRegionLevel,
+          regionCode: myRegionCode,
+        }),
       };
     }
 
@@ -342,6 +357,7 @@ export async function GET(request: Request) {
         id: topicRow.id,
         title: topicRow.title,
         status: topicRow.status,
+        countryCode: topicCountryCode,
         optionA,
         optionB,
       },

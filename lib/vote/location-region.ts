@@ -49,7 +49,7 @@ function getCurrentPosition(): Promise<GeolocationPosition> {
   });
 }
 
-export async function resolveVoteRegionInputFromCurrentLocation(): Promise<VoteRegionInputByGps> {
+export async function resolveVoteRegionInputFromCurrentLocation(countryCode: string): Promise<VoteRegionInputByGps> {
   const position = await getCurrentPosition();
   const latitude = position.coords.latitude;
   const longitude = position.coords.longitude;
@@ -59,6 +59,7 @@ export async function resolveVoteRegionInputFromCurrentLocation(): Promise<VoteR
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-Country-Code': String(countryCode ?? '').trim().toUpperCase(),
     },
     body: JSON.stringify({ latitude, longitude }),
   });
