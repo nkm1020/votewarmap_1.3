@@ -71,6 +71,7 @@ export type VoteTopic = {
   id: string;
   title: string;
   status: string;
+  countryCode: string;
   options: VoteTopicOption[];
 };
 

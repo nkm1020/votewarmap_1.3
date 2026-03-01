@@ -54,6 +54,8 @@ export default function PrivacyPolicyPage() {
           <div>
             <h2 className="text-base font-bold text-white">제3조 (위치정보 처리)</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>국내(KR) 사용자는 GPS 기능이 출시 예정이며, 현재 학교 기반 위치만 사용합니다.</li>
+              <li>해외(non-KR) 사용자의 GPS 지원은 순차 적용 예정입니다.</li>
               <li>정밀 좌표(위도/경도)는 역지오코딩 처리에만 사용하며 서비스 DB에 저장하지 않습니다.</li>
               <li>서비스 DB에는 시도/시군구 코드 등 행정구역 정보만 저장합니다.</li>
               <li>역지오코딩 과정에서 Kakao 또는 Nominatim으로 좌표가 전송될 수 있습니다.</li>

@@ -51,6 +51,7 @@ type DashboardResponse = {
     username: string;
     avatarUrl: string | null;
     avatarPreset: string | null;
+    countryCode: string;
     joinedAt: string;
     region: RegionPayload;
     school: DashboardSchoolPayload | null;
@@ -157,6 +158,8 @@ type ApiErrorPayload = {
 
 const DOCK_SCROLL_TOUCH_THRESHOLD_PX = 6;
 const UNSAVED_CHANGES_CONFIRM_MESSAGE = '변경사항이 저장되지 않습니다. 페이지를 벗어나시겠어요?';
+const KOREA_COUNTRY_CODE = 'KR';
+const KR_GPS_COMING_SOON_MESSAGE = '국내 사용자의 GPS 위치 기능은 출시 예정입니다. 학교를 메인 활동 지역으로 선택해 주세요.';
 const APP_BG = 'bg-[var(--my-bg)]';
 const CARD_BG = 'bg-[var(--my-surface-strong)]';
 const TEXT_PRIMARY = 'text-white';
@@ -230,6 +233,11 @@ function getSchoolSearchDisplayLabel(school: {
     return schoolName;
   }
   return `${schoolName}(${regionLabel})`;
+}
+
+function normalizeCountryCode(value: string | null | undefined): string {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : KOREA_COUNTRY_CODE;
 }
 
 function formatNumber(value: number): string {
@@ -763,6 +771,7 @@ function HistoryView({ dashboard, history, onBack, onOpenTopicResultMap, reduced
 
 type EditProfileViewProps = {
   dashboard: DashboardResponse;
+  isKrUser: boolean;
   nicknameInput: string;
   usernameInput: string;
   schoolQuery: string;
@@ -799,6 +808,7 @@ type EditProfileViewProps = {
 
 function EditProfileView({
   dashboard,
+  isKrUser,
   nicknameInput,
   usernameInput,
   schoolQuery,
@@ -836,8 +846,12 @@ function EditProfileView({
   const BORDER_COLOR = 'border-[color:var(--my-border-soft)]';
   const TEXT_MUTED = 'text-[color:var(--my-text-muted)]';
   const ACCENT_COLOR = '#FF5C00';
-  const mainRegionSource = mainRegionSourceDraft ?? (dashboard.profile.mainSchoolSlot ?? 'gps');
-  const gpsRegionLabel = gpsResolvedLabel ?? dashboard.profile.region.name ?? '시/군/구를 확인하려면 저장을 눌러주세요.';
+  const persistedMainRegionSource = dashboard.profile.mainSchoolSlot ?? (isKrUser ? null : 'gps');
+  const mainRegionSource = mainRegionSourceDraft ?? persistedMainRegionSource;
+  const isGpsSelected = mainRegionSource === 'gps';
+  const gpsRegionLabel = isKrUser
+    ? '국내 서비스는 GPS 기능 출시 예정입니다.'
+    : (gpsResolvedLabel ?? dashboard.profile.region.name ?? '시/군/구를 확인하려면 저장을 눌러주세요.');
   const selectedSlotSchoolLabel =
     selectedSchoolCandidate
       ? getSchoolSearchDisplayLabel(selectedSchoolCandidate)
@@ -925,21 +939,33 @@ function EditProfileView({
             <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
               <div className={`border-b ${BORDER_COLOR} bg-white/[0.01] p-5`}>
                 <p className={`text-[14px] leading-relaxed ${TEXT_MUTED}`}>
-                  현재 활동 기준으로 사용할 지역을 선택해주세요.
-                  <br />
-                  <span className="font-semibold text-white/80">내 위치(GPS)</span> 또는 등록된 <span className="font-semibold text-white/80">학교</span> 중 하나를 메인으로 설정할 수 있습니다.
+                  {isKrUser ? (
+                    <>
+                      국내 사용자는 GPS 기능이 출시 예정이라 등록된 <span className="font-semibold text-white/80">학교</span>를
+                      메인으로 설정할 수 있습니다.
+                    </>
+                  ) : (
+                    <>
+                      현재 활동 기준으로 사용할 지역을 선택해주세요.
+                      <br />
+                      <span className="font-semibold text-white/80">내 위치(GPS)</span> 또는 등록된 <span className="font-semibold text-white/80">학교</span> 중 하나를 메인으로 설정할 수 있습니다.
+                    </>
+                  )}
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => onSelectMainRegionSource('gps')}
-                className={`group flex w-full items-center justify-between border-b ${BORDER_COLOR} p-5 text-left transition hover:bg-white/5`}
+                disabled={isKrUser}
+                className={`group flex w-full items-center justify-between border-b ${BORDER_COLOR} p-5 text-left transition ${
+                  isKrUser ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/5'
+                }`}
               >
                 <div className="flex items-center gap-4">
                   <div
                     className={`flex h-12 w-12 items-center justify-center rounded-full text-[20px] transition-all duration-300 ${
-                      mainRegionSource === 'gps'
+                      isGpsSelected && !isKrUser
                         ? 'bg-[color:var(--my-accent-soft)] text-[color:var(--my-accent)] shadow-[0_0_15px_rgba(255,92,0,0.25)]'
                         : 'bg-white/10 opacity-70 grayscale group-hover:opacity-100'
                     }`}
@@ -947,11 +973,18 @@ function EditProfileView({
                     📍
                   </div>
                   <div>
-                    <p className={`text-[17px] font-semibold ${mainRegionSource === 'gps' ? 'text-white' : 'text-white/76'}`}>현재 위치 (GPS)</p>
+                    <p className={`flex items-center gap-2 text-[17px] font-semibold ${isGpsSelected ? 'text-white' : 'text-white/76'}`}>
+                      현재 위치 (GPS)
+                      {isKrUser ? (
+                        <span className="rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white/80">
+                          출시예정
+                        </span>
+                      ) : null}
+                    </p>
                     <p className={`mt-0.5 text-[14px] ${TEXT_MUTED}`}>{gpsRegionLabel}</p>
                   </div>
                 </div>
-                {mainRegionSource === 'gps' ? (
+                {isGpsSelected && !isKrUser ? (
                   <motion.svg
                     initial={{ scale: 0.5, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
@@ -1156,7 +1189,7 @@ function EditProfileView({
             className="inline-flex h-14 w-full min-w-[200px] items-center justify-center rounded-2xl bg-[var(--my-accent-strong)] px-8 text-[17px] font-bold text-white shadow-[0_4px_20px_rgba(255,92,0,0.34)] transition-colors hover:bg-[var(--my-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
           >
           {isSavingAny
-            ? isResolvingRegion && mainRegionSource === 'gps'
+            ? isResolvingRegion && mainRegionSource === 'gps' && !isKrUser
               ? '현재 위치 확인 중...'
               : '저장 중...'
             : '변경사항 저장하기'}
@@ -1315,6 +1348,10 @@ export default function MyPage() {
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
   const isEditRoute = pathname === '/my/edit';
   const isHistoryRoute = pathname === '/my/history';
+  const isKrUser = useMemo(
+    () => normalizeCountryCode(dashboard?.profile.countryCode) === KOREA_COUNTRY_CODE,
+    [dashboard?.profile.countryCode],
+  );
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) {
@@ -1414,11 +1451,18 @@ export default function MyPage() {
     setSelectedSchoolCandidate(null);
     setGpsResolvedLabel(null);
     setDeleteConfirmInput('');
+    const isKrDashboardUser = normalizeCountryCode(dashboard.profile.countryCode) === KOREA_COUNTRY_CODE;
     const fallbackMainSlot =
       dashboard.profile.mainSchoolSlot ??
       SCHOOL_SLOT_META.find(({ slot }) => Boolean(dashboard.profile.schoolPool[slot]))?.slot ??
       null;
-    setMainRegionSourceDraft(dashboard.profile.mainSchoolSlot ?? 'gps');
+    const initialMainRegionSource =
+      dashboard.profile.mainSchoolSlot ??
+      (isKrDashboardUser ? fallbackMainSlot : 'gps');
+    setMainRegionSourceDraft(initialMainRegionSource ?? null);
+    if (isKrDashboardUser && !dashboard.profile.mainSchoolSlot && fallbackMainSlot) {
+      setNotice((prev) => prev ?? '국내 사용자는 학교를 메인 활동 지역으로 설정해 주세요. 저장 후 적용됩니다.');
+    }
     setSelectedSchoolSlot((prev) => {
       if (dashboard.profile.schoolPool[prev]) {
         return prev;
@@ -1643,9 +1687,14 @@ export default function MyPage() {
   }, []);
 
   const handleSelectMainRegionSource = useCallback((source: MainRegionSourceDraft) => {
+    if (isKrUser && source === 'gps') {
+      setNotice(KR_GPS_COMING_SOON_MESSAGE);
+      return;
+    }
+
     setMainRegionSourceDraft(source);
     setNotice(null);
-  }, []);
+  }, [isKrUser]);
 
   const handleClearSchoolCandidate = useCallback(() => {
     setSelectedSchoolCandidate(null);
@@ -1711,11 +1760,18 @@ export default function MyPage() {
         const persistedMainRegionSource: MainRegionSourceDraft = dashboard.profile.mainSchoolSlot ?? 'gps';
         const draftMainRegionSource = mainRegionSourceDraft ?? persistedMainRegionSource;
 
+        if (isKrUser && draftMainRegionSource === 'gps' && persistedMainRegionSource !== 'gps') {
+          setNotice(KR_GPS_COMING_SOON_MESSAGE);
+          return;
+        }
+
         if (draftMainRegionSource === 'gps') {
           if (persistedMainRegionSource !== 'gps') {
             setIsResolvingRegion(true);
             try {
-              const gpsRegionInput = await resolveVoteRegionInputFromCurrentLocation();
+              const gpsRegionInput = await resolveVoteRegionInputFromCurrentLocation(
+                dashboard.profile.countryCode,
+              );
               gpsRegionPayload = {
                 sidoCode: gpsRegionInput.region.sidoCode,
                 sigunguCode: gpsRegionInput.region.sigunguCode,
@@ -1815,6 +1871,7 @@ export default function MyPage() {
     privacyShowActivityHistory,
     privacyShowLeaderboardName,
     privacyShowRegion,
+    isKrUser,
     selectedSchoolCandidate,
     selectedSchoolSlot,
   ]);
@@ -2062,6 +2119,7 @@ export default function MyPage() {
                 <div className="pt-4 md:pt-2" style={MAIN_VIEW_STYLE}>
                   <EditProfileView
                     dashboard={dashboard}
+                    isKrUser={isKrUser}
                     nicknameInput={nicknameInput}
                     usernameInput={usernameInput}
                     schoolQuery={schoolQuery}

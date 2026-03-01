@@ -1,4 +1,6 @@
+import { headers } from 'next/headers';
 import TopicsMapPage from '@/components/TopicsMapPage';
+import { resolveCountryCodeFromHeaders } from '@/lib/server/country-policy';
 
 type SearchParamsValue = string | string[] | undefined;
 
@@ -40,6 +42,8 @@ function toOptionalString(raw: SearchParamsValue): string | undefined {
 
 export default async function TopicsMapRoute({ searchParams }: TopicsMapRouteProps) {
   const resolvedSearchParams = searchParams instanceof Promise ? await searchParams : searchParams ?? {};
+  const headerStore = await headers();
+  const initialCountryCode = resolveCountryCodeFromHeaders(headerStore);
   const initialTopicIds = toTopicIds(resolvedSearchParams.topics);
   const openTopicEditorOnMount = toBooleanFlag(resolvedSearchParams.openTopicEditor);
   const redirectResultTopicId = toOptionalString(resolvedSearchParams.redirectResultTopicId);
@@ -49,6 +53,7 @@ export default async function TopicsMapRoute({ searchParams }: TopicsMapRoutePro
       initialTopicIds={initialTopicIds}
       openTopicEditorOnMount={openTopicEditorOnMount}
       redirectResultTopicId={redirectResultTopicId}
+      initialCountryCode={initialCountryCode}
     />
   );
 }

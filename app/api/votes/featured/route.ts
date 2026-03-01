@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
+import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
 
@@ -9,12 +11,14 @@ export const revalidate = 0;
 
 const querySchema = z.object({
   status: z.string().trim().min(1).default('LIVE'),
+  country: z.string().trim().min(2).optional(),
 });
 
 type VoteTopicRow = {
   id: string;
   title: string;
   status: string;
+  country_code: string;
 };
 
 type VoteOptionRow = {
@@ -63,10 +67,12 @@ export async function GET(request: Request) {
       );
     }
 
-    const { status } = parsed.data;
+    const { status, country: rawCountry } = parsed.data;
+    const countryCode = resolveSupportedCountry(rawCountry ?? resolveCountryCodeFromRequest(request));
     const supabase = getSupabaseServiceRoleClient();
     const { data: scoreboardRows, error: scoreboardError } = await supabase.rpc('get_topic_live_scoreboard', {
       p_status: status,
+      p_country_code: countryCode,
     });
 
     if (scoreboardError) {
@@ -82,10 +88,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ topic: null });
     }
 
-    const { data: topicRows, error: topicsError } = await supabase
+    let topicRowsQuery = supabase
       .from('vote_topics')
-      .select('id, title, status')
+      .select('id, title, status, country_code')
       .in('id', candidateTopicIds);
+
+    if (countryCode === 'KR') {
+      topicRowsQuery = topicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
+    } else {
+      topicRowsQuery = topicRowsQuery.eq('country_code', countryCode);
+    }
+
+    const { data: topicRows, error: topicsError } = await topicRowsQuery;
 
     if (topicsError) {
       return NextResponse.json({ error: topicsError.message }, { status: 500 });
@@ -136,6 +150,7 @@ export async function GET(request: Request) {
         id: topicRow.id,
         title: topicRow.title,
         status: topicRow.status,
+        countryCode: topicRow.country_code,
         options: optionsByTopic.get(topicId) ?? [],
       };
       if (!hasRequiredOptions(topic)) {

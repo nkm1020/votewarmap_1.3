@@ -2,8 +2,26 @@
 @import "maplibre-gl/dist/maplibre-gl.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #f3f5f9;
+  --foreground: #152033;
+  --header-bg: rgba(255, 255, 255, 0.84);
+  --header-border: rgba(21, 32, 51, 0.12);
+  --header-text: rgba(21, 32, 51, 0.92);
+  --header-text-muted: rgba(21, 32, 51, 0.74);
+  --header-text-subtle: rgba(21, 32, 51, 0.6);
+  --header-hover-bg: rgba(21, 32, 51, 0.08);
+  --header-active-bg: rgba(21, 32, 51, 0.14);
+  --header-active-text: #111827;
+  --header-solid-bg: #ff7a1f;
+  --header-solid-text: #ffffff;
+  --menu-bg: rgba(255, 255, 255, 0.95);
+  --menu-border: rgba(21, 32, 51, 0.15);
+  --footer-bg: rgba(250, 251, 254, 0.95);
+  --footer-border: rgba(21, 32, 51, 0.12);
+  --footer-text: rgba(21, 32, 51, 0.74);
+  --footer-heading: rgba(21, 32, 51, 0.9);
+  --ring-accent: rgba(255, 159, 10, 0.55);
 }
 
 @theme inline {
@@ -13,10 +31,51 @@
   --font-mono: var(--font-geist-mono);
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --header-bg: rgba(12, 18, 28, 0.72);
+  --header-border: rgba(255, 255, 255, 0.12);
+  --header-text: rgba(255, 255, 255, 0.94);
+  --header-text-muted: rgba(255, 255, 255, 0.76);
+  --header-text-subtle: rgba(255, 255, 255, 0.6);
+  --header-hover-bg: rgba(255, 255, 255, 0.1);
+  --header-active-bg: rgba(255, 255, 255, 0.14);
+  --header-active-text: #ffbf84;
+  --header-solid-bg: #ff6b00;
+  --header-solid-text: #ffffff;
+  --menu-bg: rgba(20, 20, 24, 0.94);
+  --menu-border: rgba(255, 255, 255, 0.15);
+  --footer-bg: rgba(10, 14, 22, 0.96);
+  --footer-border: rgba(255, 255, 255, 0.1);
+  --footer-text: rgba(255, 255, 255, 0.72);
+  --footer-heading: rgba(255, 255, 255, 0.88);
+  --ring-accent: rgba(255, 159, 10, 0.55);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
+    color-scheme: dark;
     --background: #0a0a0a;
     --foreground: #ededed;
+    --header-bg: rgba(12, 18, 28, 0.72);
+    --header-border: rgba(255, 255, 255, 0.12);
+    --header-text: rgba(255, 255, 255, 0.94);
+    --header-text-muted: rgba(255, 255, 255, 0.76);
+    --header-text-subtle: rgba(255, 255, 255, 0.6);
+    --header-hover-bg: rgba(255, 255, 255, 0.1);
+    --header-active-bg: rgba(255, 255, 255, 0.14);
+    --header-active-text: #ffbf84;
+    --header-solid-bg: #ff6b00;
+    --header-solid-text: #ffffff;
+    --menu-bg: rgba(20, 20, 24, 0.94);
+    --menu-border: rgba(255, 255, 255, 0.15);
+    --footer-bg: rgba(10, 14, 22, 0.96);
+    --footer-border: rgba(255, 255, 255, 0.1);
+    --footer-text: rgba(255, 255, 255, 0.72);
+    --footer-heading: rgba(255, 255, 255, 0.88);
+    --ring-accent: rgba(255, 159, 10, 0.55);
   }
 }
 
@@ -24,4 +83,5 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), sans-serif;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }

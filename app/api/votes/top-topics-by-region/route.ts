@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
+import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -10,6 +12,7 @@ const querySchema = z.object({
   level: z.enum(['sido', 'sigungu']).default('sido'),
   code: z.string().trim().min(1),
   limit: z.coerce.number().int().min(1).max(10).default(3),
+  country: z.string().trim().min(2).optional(),
 });
 
 type VoteRow = {
@@ -43,15 +46,51 @@ export async function GET(request: Request) {
       );
     }
 
-    const { level, code, limit } = parsed.data;
+    const { level, code, limit, country: rawCountry } = parsed.data;
+    const countryCode = resolveSupportedCountry(rawCountry ?? resolveCountryCodeFromRequest(request));
     const regionCode = String(code).trim();
     const regionColumn = level === 'sigungu' ? 'sigungu_code' : 'sido_code';
     const supabase = getSupabaseServiceRoleClient();
 
+    let scopedTopicRowsQuery = supabase
+      .from('vote_topics')
+      .select('id, title, status')
+      .eq('status', 'LIVE');
+
+    if (countryCode === 'KR') {
+      scopedTopicRowsQuery = scopedTopicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
+    } else {
+      scopedTopicRowsQuery = scopedTopicRowsQuery.eq('country_code', countryCode);
+    }
+
+    const { data: scopedTopicRows, error: scopedTopicError } = await scopedTopicRowsQuery;
+
+    if (scopedTopicError) {
+      return NextResponse.json({ error: scopedTopicError.message }, { status: 500 });
+    }
+
+    const scopedTopicIds = (scopedTopicRows ?? [])
+      .map((row) => String(row.id ?? '').trim())
+      .filter((id) => id.length > 0);
+    if (scopedTopicIds.length === 0) {
+      return NextResponse.json({ level, code: regionCode, country: countryCode, topics: [] });
+    }
+
+    const scopedTopicMeta = new Map(
+      (scopedTopicRows ?? []).map((row) => [
+        String(row.id ?? '').trim(),
+        {
+          title: String(row.title ?? row.id ?? ''),
+          status: String(row.status ?? ''),
+        },
+      ]),
+    );
+
     const { data: voteRows, error: voteError } = await supabase
       .from('votes')
       .select('topic_id, created_at')
-      .eq(regionColumn, regionCode);
+      .eq(regionColumn, regionCode)
+      .in('topic_id', scopedTopicIds);
 
     if (voteError) {
       return NextResponse.json({ error: voteError.message }, { status: 500 });
@@ -78,7 +117,8 @@ export async function GET(request: Request) {
         .from('guest_votes_temp')
         .select('topic_id, voted_at')
         .eq(regionColumn, regionCode)
-        .in('session_id', activeSessionIds);
+        .in('session_id', activeSessionIds)
+        .in('topic_id', scopedTopicIds);
 
       if (guestVoteError) {
         return NextResponse.json({ error: guestVoteError.message }, { status: 500 });
@@ -117,27 +157,8 @@ export async function GET(request: Request) {
 
     const topicIds = Array.from(aggregate.keys());
     if (topicIds.length === 0) {
-      return NextResponse.json({ level, code: regionCode, topics: [] });
+      return NextResponse.json({ level, code: regionCode, country: countryCode, topics: [] });
     }
-
-    const { data: topicRows, error: topicError } = await supabase
-      .from('vote_topics')
-      .select('id, title, status')
-      .in('id', topicIds);
-
-    if (topicError) {
-      return NextResponse.json({ error: topicError.message }, { status: 500 });
-    }
-
-    const topicMeta = new Map(
-      (topicRows ?? []).map((row) => [
-        String(row.id ?? ''),
-        {
-          title: String(row.title ?? row.id ?? ''),
-          status: String(row.status ?? ''),
-        },
-      ]),
-    );
 
     const topics = topicIds
       .map((topicId) => {
@@ -146,7 +167,7 @@ export async function GET(request: Request) {
           return null;
         }
 
-        const meta = topicMeta.get(topicId);
+        const meta = scopedTopicMeta.get(topicId);
         return {
           topicId,
           title: meta?.title ?? topicId,
@@ -171,6 +192,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       level,
       code: regionCode,
+      country: countryCode,
       topics,
     });
   } catch (error) {
@@ -178,4 +200,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

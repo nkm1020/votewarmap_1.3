@@ -21,6 +21,7 @@ type DashboardUserRow = {
   avatar_preset: string | null;
   created_at: string;
   school_id: string | null;
+  country_code: string | null;
   main_school_slot: SchoolSlotType | null;
   school_edit_count: number | null;
   sido_code: string | null;
@@ -205,7 +206,7 @@ async function ensureUserRow(user: Awaited<ReturnType<typeof resolveUserFromAuth
 
   const supabase = getSupabaseServiceRoleClient();
   const selectFields =
-    'id, email, full_name, nickname, username, avatar_url, avatar_preset, created_at, school_id, main_school_slot, school_edit_count, sido_code, sigungu_code, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
+    'id, email, full_name, nickname, username, avatar_url, avatar_preset, created_at, school_id, country_code, main_school_slot, school_edit_count, sido_code, sigungu_code, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
 
   const { data: existingRow, error: existingError } = await supabase
     .from('users')
@@ -582,6 +583,7 @@ export async function GET(request: Request) {
         username: userRow.username ?? defaultUsername(userRow.id),
         avatarUrl: userRow.avatar_url,
         avatarPreset: userRow.avatar_preset,
+        countryCode: userRow.country_code ?? 'KR',
         joinedAt: userRow.created_at,
         region: {
           sidoCode: userRow.sido_code,

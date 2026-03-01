@@ -449,6 +449,12 @@ export default function KoreaAdminMap({
       return;
     }
 
+    // Theme change recreates the map instance; reset per-instance loading refs first.
+    sigunguLoadedRef.current = false;
+    sigunguCodesRef.current = [];
+    activeLevelRef.current = defaultRegionLevel;
+    hoverRef.current = null;
+
     const mapStyle: maplibregl.StyleSpecification =
       theme === 'dark'
         ? {
@@ -485,12 +491,31 @@ export default function KoreaAdminMap({
         : {
             version: 8,
             glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-            sources: {},
+            sources: {
+              'carto-light': {
+                type: 'raster',
+                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'],
+                tileSize: 256,
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+              },
+            },
             layers: [
               {
                 id: 'bg',
                 type: 'background',
                 paint: { 'background-color': THEME_STYLES[theme].background },
+              },
+              {
+                id: 'carto-light',
+                type: 'raster',
+                source: 'carto-light',
+                paint: {
+                  'raster-opacity': 0.92,
+                  'raster-contrast': 0.04,
+                  'raster-saturation': -0.2,
+                  'raster-brightness-min': 0.08,
+                  'raster-brightness-max': 0.96,
+                },
               },
             ],
           };
@@ -960,6 +985,10 @@ export default function KoreaAdminMap({
       setPinnedRegion(null);
       pinnedRegionRef.current = null;
       requestMarkerEffectSyncRef.current = null;
+      sigunguLoadedRef.current = false;
+      sigunguCodesRef.current = [];
+      activeLevelRef.current = defaultRegionLevel;
+      hoverRef.current = null;
       clearMarkerPulse();
       if (switchTimeoutRef.current) {
         window.clearTimeout(switchTimeoutRef.current);

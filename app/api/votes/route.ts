@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { isGpsEnabled, normalizeCountryCode, resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { ensureSchool, getSchoolIdentityById } from '@/lib/server/schools';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
@@ -55,6 +56,7 @@ type UserRegionRow = {
   birth_year: number | null;
   gender: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
   school_id: string | null;
+  country_code: string | null;
   sido_code: string | null;
   sigungu_code: string | null;
   signup_completed_at: string | null;
@@ -64,6 +66,10 @@ const REGION_REQUIRED_ERROR = '투표를 위해 학교를 선택하거나 정확
 const SIGNUP_COMPLETION_REQUIRED_ERROR = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
 const SCHOOL_UPDATE_FROM_VOTE_FORBIDDEN_ERROR = '학교 설정/변경은 MY 편집에서만 가능합니다.';
 const GPS_ONLY_FOR_NO_SCHOOL_ERROR = '학교 미설정 계정은 정확한 위치 사용(GPS)으로만 투표할 수 있어요.';
+const GPS_COMING_SOON_FOR_KR_ERROR = '국내 사용자는 GPS 위치 기능이 출시 예정입니다. 학교를 선택해 주세요.';
+const SCHOOL_REQUIRED_FOR_KR_MEMBER_ERROR = '국내 사용자는 학교 등록 후 투표할 수 있어요. MY에서 학교를 등록해 주세요.';
+const SCHOOL_ONLY_FOR_KR_GUEST_ERROR = '국내 비회원은 학교 위치로만 투표할 수 있어요. 학교를 선택해 주세요.';
+const CROSS_COUNTRY_VOTE_FORBIDDEN_ERROR = '다른 국가 주제는 조회만 가능하며 투표는 소속 국가에서만 가능합니다.';
 
 export async function POST(request: Request) {
   try {
@@ -86,6 +92,19 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const { data: topicRow, error: topicError } = await supabase
+      .from('vote_topics')
+      .select('id, country_code')
+      .eq('id', body.topicId)
+      .maybeSingle();
+
+    if (topicError) {
+      return NextResponse.json({ error: topicError.message }, { status: 500 });
+    }
+    if (!topicRow) {
+      return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
+    }
+    const topicCountryCode = normalizeCountryCode((topicRow as { country_code?: string | null }).country_code);
 
     const { data: option, error: optionError } = await supabase
       .from('vote_options')
@@ -138,11 +157,13 @@ export async function POST(request: Request) {
     let birthYearSnapshot: number | null = null;
     let genderSnapshot: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null = null;
     let userRegionRow: UserRegionRow | null = null;
+    const requestCountryCode = resolveCountryCodeFromRequest(request);
+    let resolvedCountryCode = requestCountryCode;
 
     if (voterUserId) {
       const { data: row, error: rowError } = await supabase
         .from('users')
-        .select('birth_year, gender, school_id, sido_code, sigungu_code, signup_completed_at')
+        .select('birth_year, gender, school_id, country_code, sido_code, sigungu_code, signup_completed_at')
         .eq('id', voterUserId)
         .maybeSingle();
 
@@ -151,6 +172,7 @@ export async function POST(request: Request) {
       }
 
       userRegionRow = (row as UserRegionRow | null) ?? null;
+      resolvedCountryCode = normalizeCountryCode(userRegionRow?.country_code);
       if (!userRegionRow?.signup_completed_at) {
         return NextResponse.json({ error: SIGNUP_COMPLETION_REQUIRED_ERROR }, { status: 403 });
       }
@@ -159,8 +181,17 @@ export async function POST(request: Request) {
       genderSnapshot = userRegionRow?.gender ?? null;
     }
 
+    if (topicCountryCode !== resolvedCountryCode) {
+      return NextResponse.json({ error: CROSS_COUNTRY_VOTE_FORBIDDEN_ERROR }, { status: 403 });
+    }
+
+    if (body.regionInput?.source === 'gps' && !isGpsEnabled(resolvedCountryCode)) {
+      return NextResponse.json({ error: GPS_COMING_SOON_FOR_KR_ERROR }, { status: 400 });
+    }
+
     if (voterUserId) {
       const existingSchoolId = userRegionRow?.school_id ?? null;
+      const isKrUser = !isGpsEnabled(resolvedCountryCode);
       if (existingSchoolId) {
         if (body.regionInput?.source === 'school') {
           return NextResponse.json({ error: SCHOOL_UPDATE_FROM_VOTE_FORBIDDEN_ERROR }, { status: 400 });
@@ -176,6 +207,10 @@ export async function POST(request: Request) {
         sidoCode = userRegionRow?.sido_code ?? schoolIdentity.sidoCode;
         sigunguCode = userRegionRow?.sigungu_code ?? schoolIdentity.sigunguCode;
       } else {
+        if (isKrUser) {
+          return NextResponse.json({ error: SCHOOL_REQUIRED_FOR_KR_MEMBER_ERROR }, { status: 400 });
+        }
+
         if (body.regionInput?.source === 'school') {
           return NextResponse.json({ error: GPS_ONLY_FOR_NO_SCHOOL_ERROR }, { status: 400 });
         }
@@ -202,6 +237,10 @@ export async function POST(request: Request) {
         }
       }
     } else if (body.regionInput) {
+      if (!isGpsEnabled(resolvedCountryCode) && body.regionInput.source === 'gps') {
+        return NextResponse.json({ error: SCHOOL_ONLY_FOR_KR_GUEST_ERROR }, { status: 400 });
+      }
+
       if (body.regionInput.source === 'school') {
         const ensuredSchool = await ensureSchool(body.regionInput.school);
         schoolId = ensuredSchool.schoolId;

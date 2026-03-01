@@ -242,7 +242,7 @@ export async function PATCH(request: Request) {
     const { data, error } = await supabase
       .from('users')
       .select(
-        'id, email, full_name, nickname, username, avatar_url, avatar_preset, birth_year, gender, school_id, main_school_slot, school_edit_count, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history',
+        'id, email, full_name, nickname, username, avatar_url, avatar_preset, birth_year, gender, school_id, country_code, main_school_slot, school_edit_count, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history',
       )
       .eq('id', user.id)
       .single();

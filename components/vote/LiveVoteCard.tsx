@@ -93,9 +93,28 @@ export function LiveVoteCard({
 }: LiveVoteCardProps) {
   const prefersReducedMotion = useReducedMotion();
   const [titleOverflowPx, setTitleOverflowPx] = useState(0);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const isDesktopRefined = variant === 'desktop_refined';
   const isLocked = resultVisibility === 'locked';
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const media = window.matchMedia('(max-width: 767px)');
+    const updateViewport = () => setIsMobileViewport(media.matches);
+    updateViewport();
+
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', updateViewport);
+      return () => media.removeEventListener('change', updateViewport);
+    }
+
+    media.addListener(updateViewport);
+    return () => media.removeListener(updateViewport);
+  }, []);
 
   useEffect(() => {
     const updateTitleOverflow = () => {
@@ -134,6 +153,7 @@ export function LiveVoteCard({
   const resolvedLockedGapPercent =
     typeof lockedGapPercent === 'number' && Number.isFinite(lockedGapPercent) ? Math.max(0, Math.round(lockedGapPercent)) : 0;
   const shouldAnimateTitle = titleOverflowPx > 0 && !prefersReducedMotion;
+  const shouldAnimateParticipantsBadge = isMobileViewport && !prefersReducedMotion;
   const marqueeDistance = Math.max(0, titleOverflowPx + 12);
   const marqueeDuration = Math.min(18, Math.max(6, marqueeDistance / 18));
 
@@ -160,15 +180,60 @@ export function LiveVoteCard({
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 flex-col">
             <div className="mb-1.5 flex items-center gap-2">
-              <span
+              <motion.span
                 className={`inline-flex min-h-5 items-center gap-1.5 rounded-full border border-[#ff9f0a4d] bg-[#ff9f0a1a] px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-[#ffad33] ${
                   isDesktopRefined ? 'lg:min-h-6 lg:gap-2 lg:px-3 lg:text-[11px]' : ''
-                }`}
+                } relative overflow-hidden`}
+                animate={
+                  shouldAnimateParticipantsBadge
+                    ? {
+                        y: [0, -1, 0],
+                        boxShadow: [
+                          '0 0 0 rgba(255,159,10,0)',
+                          '0 0 0 1px rgba(255,159,10,0.12), 0 10px 24px rgba(255,107,0,0.2)',
+                          '0 0 0 rgba(255,159,10,0)',
+                        ],
+                      }
+                    : undefined
+                }
+                transition={
+                  shouldAnimateParticipantsBadge
+                    ? {
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: 'easeInOut',
+                      }
+                    : undefined
+                }
               >
-                <UsersIcon className="h-3 w-3" />
-                <span>총 참여수</span>
-                <span className="tabular-nums">{totalParticipantsCount}명</span>
-              </span>
+                {shouldAnimateParticipantsBadge ? (
+                  <motion.span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent"
+                    animate={{ x: ['0%', '280%'] }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                ) : null}
+                <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center md:hidden">
+                  {shouldAnimateParticipantsBadge ? (
+                    <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-[#ffb34755] animate-ping" />
+                  ) : null}
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#ffd089]" />
+                </span>
+                <UsersIcon className="relative h-3 w-3" />
+                <span className="relative">총 참여수</span>
+                <motion.span
+                  className="relative inline-flex items-center rounded-full bg-[#ffb3472a] px-1.5 py-[1px] tabular-nums text-[#ffd8ad]"
+                  animate={shouldAnimateParticipantsBadge ? { scale: [1, 1.06, 1] } : undefined}
+                  transition={
+                    shouldAnimateParticipantsBadge
+                      ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
+                      : undefined
+                  }
+                >
+                  {totalParticipantsCount}명
+                </motion.span>
+              </motion.span>
             </div>
             <div className="min-w-0 overflow-hidden">
               <motion.h2
