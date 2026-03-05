@@ -51,6 +51,11 @@ type MetricRpcRow = {
   region_national_flow: number | string | null;
 };
 
+type EntitlementRow = {
+  granted_at: string;
+  revoked_at: string | null;
+};
+
 function normalizeInt(value: number | string | null | undefined): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -83,7 +88,7 @@ export async function GET(request: Request) {
     const supabase = getSupabaseServiceRoleClient();
     const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [votesResult, modeGamesResult, regionBattleResult, northstarMetricResult] = await Promise.all([
+    const [votesResult, modeGamesResult, regionBattleResult, northstarMetricResult, entitlementResult] = await Promise.all([
       supabase
         .from('votes')
         .select('id, topic_id, option_key, sido_code, sigungu_code, created_at')
@@ -102,9 +107,21 @@ export async function GET(request: Request) {
       supabase.rpc('get_my_vote_comparison_metrics', {
         p_user_id: user.id,
       }),
+      supabase
+        .from('user_entitlements')
+        .select('granted_at, revoked_at')
+        .eq('user_id', user.id)
+        .eq('entitlement_key', 'supporter_badge')
+        .maybeSingle(),
     ]);
 
-    const topLevelErrors = [votesResult.error, modeGamesResult.error, regionBattleResult.error, northstarMetricResult.error].filter(
+    const topLevelErrors = [
+      votesResult.error,
+      modeGamesResult.error,
+      regionBattleResult.error,
+      northstarMetricResult.error,
+      entitlementResult.error,
+    ].filter(
       (item) => Boolean(item),
     );
 
@@ -219,6 +236,8 @@ export async function GET(request: Request) {
       nationwide_match_rate: 0,
       region_national_flow: 0,
     };
+    const entitlement = (entitlementResult.data as EntitlementRow | null) ?? null;
+    const hasSupporterBadge = Boolean(entitlement && !entitlement.revoked_at);
 
     const badges = computeBadges({
       totalVotes: voteRows.length,
@@ -227,6 +246,7 @@ export async function GET(request: Request) {
       myRegionMatchRate: normalizeFloat(northstar.my_region_match_rate),
       nationwideMatchRate: normalizeFloat(northstar.nationwide_match_rate),
       regionNationalFlow: normalizeFloat(northstar.region_national_flow),
+      hasSupporterBadge,
     });
 
     return NextResponse.json({

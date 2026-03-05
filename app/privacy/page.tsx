@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 const EFFECTIVE_DATE = '2026-02-27';
-const UPDATED_DATE = '2026-02-27';
+const UPDATED_DATE = '2026-03-03';
 
 export default function PrivacyPolicyPage() {
   return (
@@ -46,6 +46,7 @@ export default function PrivacyPolicyPage() {
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>회원 가입/이용: 이메일, 로그인 제공자(provider), 닉네임, 출생연도, 성별</li>
               <li>프로필/서비스 데이터: 학교 정보, 시도/시군구 코드, 프라이버시 공개 설정, 투표/게임 기록</li>
+              <li>후원 결제 이용 시: 주문 ID, 결제 수단, 통화, 결제 상태, 결제 승인/취소/환불 시각</li>
               <li>비회원 이용: guest session ID(브라우저 세션 저장), 임시 투표 기록</li>
               <li>자동 수집 정보: 접속 로그, 쿠키/브라우저 저장소 식별자, 기기/브라우저 정보</li>
             </ul>
@@ -76,6 +77,8 @@ export default function PrivacyPolicyPage() {
             <p className="mt-2">서비스 제공을 위해 아래 사업자를 이용할 수 있습니다.</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Supabase, Inc.: 데이터베이스/인증 인프라(국외 보관 가능)</li>
+              <li>Toss Payments Corp.: 결제 승인/취소/정산 처리</li>
+              <li>PayPal Pte. Ltd.: 해외 USD 결제 처리(지원 결제수단 이용 시)</li>
               <li>Google LLC: AdSense 광고 제공, 광고 쿠키 처리(활성화 시)</li>
               <li>Vercel Inc.: 서비스 분석(Analytics) 및 운영 인프라</li>
             </ul>

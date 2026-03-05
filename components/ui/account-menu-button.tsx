@@ -62,14 +62,21 @@ export function AccountMenuButton({ menuAlign = 'right' }: AccountMenuButtonProp
         aria-label="내 계정 메뉴"
         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--header-border)] bg-[var(--header-hover-bg)] text-[color:var(--header-text)] transition hover:bg-[var(--header-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-accent)]"
       >
-        {profile?.avatar_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={profile.avatar_url} alt="프로필" className="h-7 w-7 rounded-full border border-[color:var(--header-border)] object-cover" />
-        ) : (
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--header-border)] bg-[var(--header-active-bg)] text-[11px] font-bold">
-            {displayInitial}
-          </span>
-        )}
+        <span className="relative inline-flex">
+          {profile?.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={profile.avatar_url} alt="프로필" className="h-7 w-7 rounded-full border border-[color:var(--header-border)] object-cover" />
+          ) : (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--header-border)] bg-[var(--header-active-bg)] text-[11px] font-bold">
+              {displayInitial}
+            </span>
+          )}
+          {profile?.has_supporter_badge ? (
+            <span className="absolute -right-1 -top-1 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#FFB800] px-1 text-[9px] font-black leading-none text-black shadow-[0_0_8px_rgba(255,184,0,0.55)]">
+              S
+            </span>
+          ) : null}
+        </span>
       </button>
 
       {isOpen ? (

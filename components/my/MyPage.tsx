@@ -549,11 +549,20 @@ type MainDashboardProps = {
   privacyShowLeaderboardName: boolean;
   onToggleLeaderboardName: () => void;
   onEditProfile: () => void;
+  onOpenSupport: () => void;
   onOpenHistory: () => void;
   onSignOut: () => Promise<void>;
 };
 
-function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderboardName, onEditProfile, onOpenHistory, onSignOut }: MainDashboardProps) {
+function MainDashboard({
+  dashboard,
+  privacyShowLeaderboardName,
+  onToggleLeaderboardName,
+  onEditProfile,
+  onOpenSupport,
+  onOpenHistory,
+  onSignOut,
+}: MainDashboardProps) {
   const reducedMotion = useReducedMotion();
   const myRegionMatchRate = normalizePercent(dashboard.northstar.myRegionMatchRate);
   const mySchoolMatchRate = normalizePercent(dashboard.northstar.mySchoolMatchRate ?? 0);
@@ -578,6 +587,7 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
   const myPersonaSummary = dashboard.personaPower.my;
   const myRegionPersonaSummary = dashboard.personaPower.myRegion;
   const myRegionPersonaLabel = myRegionPersonaSummary.regionName ?? dashboard.profile.region.name ?? '우리 지역';
+  const hasSupporterBadge = dashboard.badges.some((badge) => badge.id === 'supporter_badge' && badge.unlocked);
 
   return (
     <div className={`${APP_BG} ${TEXT_PRIMARY}`}>
@@ -613,6 +623,11 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
                 <p className={`mt-1 text-sm ${TEXT_SECONDARY}`}>
                   @{dashboard.profile.username} · {profileLocationLabel}
                 </p>
+                {hasSupporterBadge ? (
+                  <span className="mt-2 inline-flex items-center rounded-full border border-[#ffcf66]/45 bg-[#ffb800]/18 px-3 py-1 text-[11px] font-semibold tracking-[0.04em] text-[#ffe49f]">
+                    ★ 후원자 배지
+                  </span>
+                ) : null}
 
                 <button
                   type="button"
@@ -750,6 +765,18 @@ function MainDashboard({ dashboard, privacyShowLeaderboardName, onToggleLeaderbo
           <section>
             <h3 className="mb-2 ml-4 text-[13px] font-semibold uppercase tracking-wider text-[#8E8E93]">설정 및 기록</h3>
             <div className={`${CARD_BG} overflow-hidden rounded-3xl`}>
+              <button
+                type="button"
+                onClick={onOpenSupport}
+                className="flex w-full cursor-pointer items-center justify-between border-b border-[#2C2C2E] p-4 px-5 text-left transition-colors hover:bg-white/5"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">💛</div>
+                  <span className="text-[15px] font-medium">후원하기</span>
+                </div>
+                <span className="text-lg text-[#8E8E93]">›</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onOpenHistory}
@@ -2293,6 +2320,9 @@ export default function MyPage() {
                       setPrivacyShowLeaderboardName((prev) => !prev);
                     }}
                     onEditProfile={handleScrollToSettings}
+                    onOpenSupport={() => {
+                      router.push('/my/support');
+                    }}
                     onOpenHistory={handleOpenHistory}
                     onSignOut={async () => {
                       if (!confirmLeaveWithUnsavedChanges()) {

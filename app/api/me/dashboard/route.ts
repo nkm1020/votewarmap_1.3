@@ -90,6 +90,11 @@ type PersonaOptionRow = {
   persona_tag: string | null;
 };
 
+type EntitlementRow = {
+  granted_at: string;
+  revoked_at: string | null;
+};
+
 type SchoolPayload = {
   id: string;
   source: 'nais' | 'local_xls';
@@ -327,6 +332,7 @@ export async function GET(request: Request) {
     const [
       schoolResult,
       schoolPoolResult,
+      entitlementResult,
       totalVotesResult,
       recentVotesResult,
       modeScoresResult,
@@ -342,6 +348,12 @@ export async function GET(request: Request) {
     ] = await Promise.all([
       schoolResultPromise,
       schoolPoolResultPromise,
+      supabase
+        .from('user_entitlements')
+        .select('granted_at, revoked_at')
+        .eq('user_id', user.id)
+        .eq('entitlement_key', 'supporter_badge')
+        .maybeSingle(),
       supabase.from('votes').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase
         .from('votes')
@@ -404,6 +416,7 @@ export async function GET(request: Request) {
     const queryErrors = [
       schoolResult.error,
       schoolPoolResult.error,
+      entitlementResult.error,
       totalVotesResult.error,
       recentVotesResult.error,
       modeScoresResult.error,
@@ -592,6 +605,8 @@ export async function GET(request: Request) {
     const schoolMinimumSample = 1;
     const mySchoolMatchRate = normalizeNullableFloat(northstar.my_school_match_rate);
     const schoolSampleTopics = normalizeInt(northstar.school_sample_topics);
+    const entitlement = (entitlementResult.data as EntitlementRow | null) ?? null;
+    const hasSupporterBadge = Boolean(entitlement && !entitlement.revoked_at);
     const northstarMetrics = {
       myRegionMatchRate: roundTwo(normalizeFloat(northstar.my_region_match_rate)),
       mySchoolMatchRate: mySchoolMatchRate === null ? null : roundTwo(mySchoolMatchRate),
@@ -669,6 +684,7 @@ export async function GET(request: Request) {
       myRegionMatchRate: northstarMetrics.myRegionMatchRate,
       nationwideMatchRate: northstarMetrics.nationwideMatchRate,
       regionNationalFlow: northstarMetrics.regionNationalFlow,
+      hasSupporterBadge,
     });
 
     const profileRegionName = getRegionNameByCodes({
