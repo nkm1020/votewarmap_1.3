@@ -5,6 +5,7 @@ import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -91,7 +92,7 @@ export async function GET(request: Request) {
 
     const { data: topicRows, error: topicsError } = await topicsQuery;
     if (topicsError) {
-      return NextResponse.json({ error: topicsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/topics/route.ts', topicsError.message);
     }
 
     const topics = (topicRows ?? []) as VoteTopicRow[];
@@ -107,7 +108,7 @@ export async function GET(request: Request) {
       .order('position', { ascending: true });
 
     if (optionsError) {
-      return NextResponse.json({ error: optionsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/topics/route.ts', optionsError.message);
     }
 
     const optionsByTopic = new Map<string, VoteTopic['options']>();
@@ -148,6 +149,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ topics: ordered });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'topics fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/topics/route.ts', message);
   }
 }

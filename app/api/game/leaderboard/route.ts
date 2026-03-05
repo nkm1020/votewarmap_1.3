@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isGameFormatId } from '@/lib/game/formats';
 import type { GameLeaderboardResponse } from '@/lib/game/types';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -127,7 +128,7 @@ export async function GET(request: Request) {
     });
 
     if (leaderboardError) {
-      return NextResponse.json({ error: leaderboardError.message }, { status: 500 });
+      return internalServerError('app/api/game/leaderboard/route.ts', leaderboardError.message);
     }
 
     const rows = (Array.isArray(leaderboardRows) ? leaderboardRows : []) as LeaderboardRpcRow[];
@@ -147,7 +148,7 @@ export async function GET(request: Request) {
         .in('id', userIds);
 
       if (usersError) {
-        return NextResponse.json({ error: usersError.message }, { status: 500 });
+        return internalServerError('app/api/game/leaderboard/route.ts', usersError.message);
       }
 
       usersById = new Map(((userRows ?? []) as UserRow[]).map((row) => [row.id, row]));
@@ -177,6 +178,6 @@ export async function GET(request: Request) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'game leaderboard fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/leaderboard/route.ts', message);
   }
 }

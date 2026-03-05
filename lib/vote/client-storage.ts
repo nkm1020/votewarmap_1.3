@@ -77,6 +77,20 @@ export function getOrCreateGuestSessionId(): string | null {
   return sessionId;
 }
 
+export function writeGuestSessionId(sessionId: string): void {
+  const sessionStorageRef = getSessionStorage();
+  if (!sessionStorageRef) {
+    return;
+  }
+
+  const normalized = sessionId.trim();
+  if (!normalized) {
+    return;
+  }
+
+  sessionStorageRef.setItem(LOCAL_STORAGE_KEYS.guestSessionId, normalized);
+}
+
 // Backward-compatible alias used by legacy callers.
 export function getOrCreateGuestToken(): string | null {
   return getOrCreateGuestSessionId();

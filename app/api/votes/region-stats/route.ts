@@ -5,6 +5,7 @@ import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { RegionVoteMap } from '@/lib/vote/types';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -135,7 +136,7 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       if (topicError) {
-        return NextResponse.json({ error: topicError.message }, { status: 500 });
+        return internalServerError('app/api/votes/region-stats/route.ts', topicError.message);
       }
       if (!topicRow) {
         return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
@@ -175,7 +176,7 @@ export async function GET(request: Request) {
       });
 
       if (rpcError) {
-        return NextResponse.json({ error: rpcError.message }, { status: 500 });
+        return internalServerError('app/api/votes/region-stats/route.ts', rpcError.message);
       }
 
       appendRows((Array.isArray(rpcRows) ? rpcRows : []) as RegionStatsRpcRow[]);
@@ -195,7 +196,7 @@ export async function GET(request: Request) {
       const { data: topicRows, error: topicError } = await topicRowsQuery;
 
       if (topicError) {
-        return NextResponse.json({ error: topicError.message }, { status: 500 });
+        return internalServerError('app/api/votes/region-stats/route.ts', topicError.message);
       }
 
       const topicIds = (topicRows ?? [])
@@ -215,7 +216,7 @@ export async function GET(request: Request) {
 
         for (const result of rpcResults) {
           if (result.error) {
-            return NextResponse.json({ error: result.error.message }, { status: 500 });
+            return internalServerError('app/api/votes/region-stats/route.ts', result.error.message);
           }
           appendRows((Array.isArray(result.data) ? result.data : []) as RegionStatsRpcRow[]);
         }
@@ -286,6 +287,6 @@ export async function GET(request: Request) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'region stats failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/region-stats/route.ts', message);
   }
 }

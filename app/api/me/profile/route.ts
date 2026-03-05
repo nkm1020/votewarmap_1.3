@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { ensureSchool } from '@/lib/server/schools';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 const SCHOOL_SLOT_TYPES = ['middle', 'high', 'university', 'graduate'] as const;
@@ -95,7 +96,7 @@ function mapProfileUpdateError(error: { code?: string; message?: string }): { st
   if (error.code === '23514') {
     return { status: 400, message: '사용자명 형식이 올바르지 않습니다.' };
   }
-  return { status: 500, message: error.message ?? '프로필 저장에 실패했습니다.' };
+  return { status: 500, message: '서버 오류가 발생했습니다.' };
 }
 
 export async function PATCH(request: Request) {
@@ -182,21 +183,21 @@ export async function PATCH(request: Request) {
       if (schoolSlotError) {
         const message = schoolSlotError.message ?? '학교 슬롯 저장에 실패했습니다.';
         if (schoolSlotError.code === '42883' || message.includes('upsert_user_school_pool_slot')) {
-          return NextResponse.json(
-            { error: '학교 슬롯 DB 함수가 없습니다. 20260303 마이그레이션을 적용해 주세요.' },
-            { status: 500 },
+          return internalServerError(
+            'app/api/me/profile/route.ts',
+            '학교 슬롯 DB 함수가 없습니다. 20260303 마이그레이션을 적용해 주세요.',
           );
         }
         if (schoolSlotError.code === '42501') {
-          return NextResponse.json({ error: '학교 슬롯 DB 함수 실행 권한이 없습니다. 마이그레이션 grant를 확인해 주세요.' }, { status: 500 });
+          return internalServerError('app/api/me/profile/route.ts', '학교 슬롯 DB 함수 실행 권한이 없습니다. 마이그레이션 grant를 확인해 주세요.');
         }
         if (schoolSlotError.code === '23505') {
           return NextResponse.json({ error: '이미 다른 슬롯에 등록된 학교입니다.' }, { status: 409 });
         }
         if (message.includes('is ambiguous')) {
-          return NextResponse.json(
-            { error: '학교 슬롯 DB 함수 버전이 오래되었습니다. 최신 마이그레이션을 적용해 주세요.' },
-            { status: 500 },
+          return internalServerError(
+            'app/api/me/profile/route.ts',
+            '학교 슬롯 DB 함수 버전이 오래되었습니다. 최신 마이그레이션을 적용해 주세요.',
           );
         }
         if (message.includes('2회')) {
@@ -205,7 +206,7 @@ export async function PATCH(request: Request) {
         if (message.includes('중복 등록')) {
           return NextResponse.json({ error: message }, { status: 409 });
         }
-        return NextResponse.json({ error: message }, { status: 500 });
+        return internalServerError('app/api/me/profile/route.ts', message);
       }
     }
 
@@ -218,24 +219,24 @@ export async function PATCH(request: Request) {
       if (mainSlotError) {
         const message = mainSlotError.message ?? '메인 학교 전환에 실패했습니다.';
         if (mainSlotError.code === '42883' || message.includes('set_user_main_school_slot')) {
-          return NextResponse.json(
-            { error: '메인 학교 전환 DB 함수가 없습니다. 20260303 마이그레이션을 적용해 주세요.' },
-            { status: 500 },
+          return internalServerError(
+            'app/api/me/profile/route.ts',
+            '메인 학교 전환 DB 함수가 없습니다. 20260303 마이그레이션을 적용해 주세요.',
           );
         }
         if (mainSlotError.code === '42501') {
-          return NextResponse.json({ error: '메인 학교 전환 DB 함수 실행 권한이 없습니다. 마이그레이션 grant를 확인해 주세요.' }, { status: 500 });
+          return internalServerError('app/api/me/profile/route.ts', '메인 학교 전환 DB 함수 실행 권한이 없습니다. 마이그레이션 grant를 확인해 주세요.');
         }
         if (message.includes('is ambiguous')) {
-          return NextResponse.json(
-            { error: '메인 학교 전환 DB 함수 버전이 오래되었습니다. 최신 마이그레이션을 적용해 주세요.' },
-            { status: 500 },
+          return internalServerError(
+            'app/api/me/profile/route.ts',
+            '메인 학교 전환 DB 함수 버전이 오래되었습니다. 최신 마이그레이션을 적용해 주세요.',
           );
         }
         if (message.includes('등록된 학교')) {
           return NextResponse.json({ error: message }, { status: 400 });
         }
-        return NextResponse.json({ error: message }, { status: 500 });
+        return internalServerError('app/api/me/profile/route.ts', message);
       }
     }
 
@@ -255,6 +256,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ profile: data });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'my profile update failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/me/profile/route.ts', message);
   }
 }

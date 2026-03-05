@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getRegionCentroid } from '@/lib/server/region-centroids';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
     });
 
     if (rpcError) {
-      return NextResponse.json({ error: rpcError.message }, { status: 500 });
+      return internalServerError('app/api/votes/top-schools-by-region/route.ts', rpcError.message);
     }
 
     const markers: TopSchoolMarker[] = [];
@@ -132,6 +133,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ markers });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'top schools by region failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/top-schools-by-region/route.ts', message);
   }
 }

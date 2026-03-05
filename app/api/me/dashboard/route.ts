@@ -6,6 +6,7 @@ import { calculatePersonaPowerFromCounts, normalizePersonaTag } from '@/lib/serv
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -419,7 +420,7 @@ export async function GET(request: Request) {
 
     if (queryErrors.length > 0) {
       const firstError = queryErrors[0];
-      return NextResponse.json({ error: firstError?.message ?? '대시보드 조회에 실패했습니다.' }, { status: 500 });
+      return internalServerError('app/api/me/dashboard/route.ts', firstError?.message ?? '대시보드 조회에 실패했습니다.');
     }
 
     const { data: myPersonaVoteRowsRaw, error: myPersonaVoteError } = await supabase
@@ -428,7 +429,7 @@ export async function GET(request: Request) {
       .eq('user_id', user.id);
 
     if (myPersonaVoteError) {
-      return NextResponse.json({ error: myPersonaVoteError.message }, { status: 500 });
+      return internalServerError('app/api/me/dashboard/route.ts', myPersonaVoteError.message);
     }
 
     let myRegionPersonaVoteRowsRaw: PersonaVoteRow[] = [];
@@ -445,7 +446,7 @@ export async function GET(request: Request) {
 
       const { data: regionVoteRows, error: regionVoteError } = await regionVotesQuery;
       if (regionVoteError) {
-        return NextResponse.json({ error: regionVoteError.message }, { status: 500 });
+        return internalServerError('app/api/me/dashboard/route.ts', regionVoteError.message);
       }
       myRegionPersonaVoteRowsRaw = (regionVoteRows ?? []) as PersonaVoteRow[];
     }
@@ -467,7 +468,7 @@ export async function GET(request: Request) {
         .in('topic_id', personaTopicIds);
 
       if (personaOptionError) {
-        return NextResponse.json({ error: personaOptionError.message }, { status: 500 });
+        return internalServerError('app/api/me/dashboard/route.ts', personaOptionError.message);
       }
 
       personaTagByVoteKey = new Map(
@@ -534,7 +535,7 @@ export async function GET(request: Request) {
         : ({ data: [], error: null } as const);
 
     if (poolSchoolsResult.error) {
-      return NextResponse.json({ error: poolSchoolsResult.error.message }, { status: 500 });
+      return internalServerError('app/api/me/dashboard/route.ts', poolSchoolsResult.error.message);
     }
 
     const schoolRowsById = new Map<string, SchoolProfileRow>();
@@ -751,6 +752,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'my dashboard fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/me/dashboard/route.ts', message);
   }
 }

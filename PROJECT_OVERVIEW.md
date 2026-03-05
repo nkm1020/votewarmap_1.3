@@ -97,8 +97,10 @@
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_APP_ORIGIN` (예: `https://votewarmap.com`)
 
 ### 선택/운영
+- `GUEST_FINGERPRINT_SECRET` (게스트 세션/게스트 투표 fingerprint HMAC 전용 키, 미설정 시 `SUPABASE_SERVICE_ROLE_KEY`를 fallback으로 사용)
 - `KAKAO_REST_API_KEY` (역지오코딩/지오코딩 정확도 향상)
 - `NEIS_API_KEY` (중/고교 검색)
 - `GEOCODER_USER_AGENT`

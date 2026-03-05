@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { GameFactsResponse, RegionFact, SchoolFact, TopicMeta } from '@/lib/game/types';
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,7 +114,7 @@ export async function GET(request: Request) {
 
     const { data: topicRows, error: topicError } = await topicsQuery;
     if (topicError) {
-      return NextResponse.json({ error: topicError.message }, { status: 500 });
+      return internalServerError('app/api/game/facts/route.ts', topicError.message);
     }
 
     const topics = (topicRows ?? []) as VoteTopicRow[];
@@ -139,7 +140,7 @@ export async function GET(request: Request) {
       .order('position', { ascending: true });
 
     if (optionError) {
-      return NextResponse.json({ error: optionError.message }, { status: 500 });
+      return internalServerError('app/api/game/facts/route.ts', optionError.message);
     }
 
     const optionsByTopic = new Map<string, VoteOptionRow[]>();
@@ -180,7 +181,7 @@ export async function GET(request: Request) {
         });
 
         if (regionError) {
-          return NextResponse.json({ error: regionError.message }, { status: 500 });
+          return internalServerError('app/api/game/facts/route.ts', regionError.message);
         }
 
         const rows = (Array.isArray(regionRows) ? regionRows : []) as RegionStatsRpcRow[];
@@ -232,7 +233,7 @@ export async function GET(request: Request) {
       });
 
       if (schoolError) {
-        return NextResponse.json({ error: schoolError.message }, { status: 500 });
+        return internalServerError('app/api/game/facts/route.ts', schoolError.message);
       }
 
       ((Array.isArray(schoolRows) ? schoolRows : []) as TopSchoolRpcRow[]).forEach((row) => {
@@ -273,6 +274,6 @@ export async function GET(request: Request) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'game facts fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/facts/route.ts', message);
   }
 }

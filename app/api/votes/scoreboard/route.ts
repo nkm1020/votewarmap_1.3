@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -87,7 +88,7 @@ export async function GET(request: Request) {
       p_country_code: countryCode,
     });
     if (scoreboardError) {
-      return NextResponse.json({ error: scoreboardError.message }, { status: 500 });
+      return internalServerError('app/api/votes/scoreboard/route.ts', scoreboardError.message);
     }
 
     const rankedRows = (Array.isArray(scoreboardRows) ? scoreboardRows : []) as TopicScoreRow[];
@@ -112,7 +113,7 @@ export async function GET(request: Request) {
 
     const { data: topicRows, error: topicsError } = await topicRowsQuery;
     if (topicsError) {
-      return NextResponse.json({ error: topicsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/scoreboard/route.ts', topicsError.message);
     }
 
     const topicById = new Map<string, VoteTopicRow>();
@@ -161,6 +162,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ items });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'scoreboard fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/scoreboard/route.ts', message);
   }
 }

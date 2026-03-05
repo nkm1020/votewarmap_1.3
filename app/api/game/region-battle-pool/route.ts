@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
 
     const { data: topicRows, error: topicError } = await topicsQuery;
     if (topicError) {
-      return NextResponse.json({ error: topicError.message }, { status: 500 });
+      return internalServerError('app/api/game/region-battle-pool/route.ts', topicError.message);
     }
 
     const topics = (topicRows ?? []) as VoteTopicRow[];
@@ -125,7 +126,7 @@ export async function GET(request: Request) {
       .order('position', { ascending: true });
 
     if (optionError) {
-      return NextResponse.json({ error: optionError.message }, { status: 500 });
+      return internalServerError('app/api/game/region-battle-pool/route.ts', optionError.message);
     }
 
     const optionsByTopic = new Map<string, VoteOptionRow[]>();
@@ -153,7 +154,7 @@ export async function GET(request: Request) {
         p_level: 'sigungu',
       });
       if (sigunguResult.error) {
-        return NextResponse.json({ error: sigunguResult.error.message }, { status: 500 });
+        return internalServerError('app/api/game/region-battle-pool/route.ts', sigunguResult.error.message);
       }
 
       let rows = (Array.isArray(sigunguResult.data) ? sigunguResult.data : []) as RegionStatsRpcRow[];
@@ -165,7 +166,7 @@ export async function GET(request: Request) {
           p_level: 'sido',
         });
         if (sidoResult.error) {
-          return NextResponse.json({ error: sidoResult.error.message }, { status: 500 });
+          return internalServerError('app/api/game/region-battle-pool/route.ts', sidoResult.error.message);
         }
         rows = (Array.isArray(sidoResult.data) ? sidoResult.data : []) as RegionStatsRpcRow[];
         level = 'sido';
@@ -225,6 +226,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'region battle pool failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/region-battle-pool/route.ts', message);
   }
 }

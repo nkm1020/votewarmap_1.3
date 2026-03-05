@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
     const { data: scopedTopicRows, error: scopedTopicError } = await scopedTopicRowsQuery;
 
     if (scopedTopicError) {
-      return NextResponse.json({ error: scopedTopicError.message }, { status: 500 });
+      return internalServerError('app/api/votes/top-topics-by-region/route.ts', scopedTopicError.message);
     }
 
     const scopedTopicIds = (scopedTopicRows ?? [])
@@ -93,7 +94,7 @@ export async function GET(request: Request) {
       .in('topic_id', scopedTopicIds);
 
     if (voteError) {
-      return NextResponse.json({ error: voteError.message }, { status: 500 });
+      return internalServerError('app/api/votes/top-topics-by-region/route.ts', voteError.message);
     }
 
     const cutoffIso = new Date(Date.now() - 90 * 1000).toISOString();
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
       .limit(1000);
 
     if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+      return internalServerError('app/api/votes/top-topics-by-region/route.ts', sessionError.message);
     }
 
     let guestRows: GuestVoteRow[] = [];
@@ -121,7 +122,7 @@ export async function GET(request: Request) {
         .in('topic_id', scopedTopicIds);
 
       if (guestVoteError) {
-        return NextResponse.json({ error: guestVoteError.message }, { status: 500 });
+        return internalServerError('app/api/votes/top-topics-by-region/route.ts', guestVoteError.message);
       }
 
       guestRows = (guestVoteRows ?? []) as GuestVoteRow[];
@@ -197,6 +198,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'top topics by region failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/top-topics-by-region/route.ts', message);
   }
 }

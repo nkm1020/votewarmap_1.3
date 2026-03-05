@@ -2,9 +2,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { resolveCountryRegionFromPoint } from '@/lib/server/country-region-geo';
+import { checkRateLimit, resolveClientIp } from '@/lib/server/request-rate-limit';
 import { reverseGeocodeRegion } from '@/lib/server/reverse-region';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
+const RATE_LIMIT_MAX_REQUESTS = 60;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 const requestSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -13,6 +17,25 @@ const requestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const rateLimit = await checkRateLimit({
+      scope: 'reverse-region',
+      key: resolveClientIp(request),
+      maxRequests: RATE_LIMIT_MAX_REQUESTS,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+    });
+
+    if (rateLimit.limited) {
+      return NextResponse.json(
+        { error: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfterSec),
+          },
+        },
+      );
+    }
+
     const countryCode = resolveCountryCodeFromRequest(request);
 
     const rawBody = (await request.json()) as unknown;
@@ -44,7 +67,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'reverse region failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/location/reverse-region/route.ts', error);
   }
 }

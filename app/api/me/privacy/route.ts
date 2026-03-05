@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -58,7 +59,7 @@ export async function PATCH(request: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalServerError('app/api/me/privacy/route.ts', error.message);
     }
 
     return NextResponse.json({
@@ -70,6 +71,6 @@ export async function PATCH(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'my privacy update failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/me/privacy/route.ts', message);
   }
 }

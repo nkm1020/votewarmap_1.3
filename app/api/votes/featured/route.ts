@@ -5,6 +5,7 @@ import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
     });
 
     if (scoreboardError) {
-      return NextResponse.json({ error: scoreboardError.message }, { status: 500 });
+      return internalServerError('app/api/votes/featured/route.ts', scoreboardError.message);
     }
 
     const rankedRows = (Array.isArray(scoreboardRows) ? scoreboardRows : []) as TopicScoreRow[];
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
     const { data: topicRows, error: topicsError } = await topicRowsQuery;
 
     if (topicsError) {
-      return NextResponse.json({ error: topicsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/featured/route.ts', topicsError.message);
     }
 
     const { data: optionRows, error: optionsError } = await supabase
@@ -114,7 +115,7 @@ export async function GET(request: Request) {
       .order('position', { ascending: true });
 
     if (optionsError) {
-      return NextResponse.json({ error: optionsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/featured/route.ts', optionsError.message);
     }
 
     const topicById = new Map<string, VoteTopicRow>();
@@ -179,6 +180,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ topic: null });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'featured topic fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/featured/route.ts', message);
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -262,7 +263,7 @@ export async function GET(request: Request) {
     let rows: LeaderboardRpcRow[] = [];
     if (leaderboardError) {
       if (!isMissingFunctionError(leaderboardError.code, leaderboardError.message)) {
-        return NextResponse.json({ error: leaderboardError.message }, { status: 500 });
+        return internalServerError('app/api/game/region-battle-leaderboard/route.ts', leaderboardError.message);
       }
 
       const fallbackResult = await loadRowsFallback(supabase, period, limit);
@@ -270,7 +271,7 @@ export async function GET(request: Request) {
         if (isMissingTableError(fallbackResult.error.code, fallbackResult.error.message)) {
           rows = [];
         } else {
-          return NextResponse.json({ error: fallbackResult.error.message }, { status: 500 });
+          return internalServerError('app/api/game/region-battle-leaderboard/route.ts', fallbackResult.error.message);
         }
       } else {
         rows = fallbackResult.rows;
@@ -294,7 +295,7 @@ export async function GET(request: Request) {
         .select('id, nickname, full_name, email, privacy_show_leaderboard_name')
         .in('id', userIds);
       if (usersError) {
-        return NextResponse.json({ error: usersError.message }, { status: 500 });
+        return internalServerError('app/api/game/region-battle-leaderboard/route.ts', usersError.message);
       }
       usersById = new Map(((userRows ?? []) as UserRow[]).map((row) => [row.id, row]));
     }
@@ -324,6 +325,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'region battle leaderboard fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/region-battle-leaderboard/route.ts', message);
   }
 }

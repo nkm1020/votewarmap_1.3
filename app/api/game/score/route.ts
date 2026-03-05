@@ -3,13 +3,18 @@ import { z } from 'zod';
 import { getGameFormatById, isGameFormatId } from '@/lib/game/formats';
 import type { GameScoreSubmitRequest, GameScoreSubmitResponse } from '@/lib/game/types';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { validateGameRunSession } from '@/lib/server/game-run-session';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 export const revalidate = 0;
 const SCORE_SUBMIT_LIMIT_PER_MINUTE = 20;
+const RUN_SESSION_MIN_ELAPSED_MS = 5_000;
+const RAW_SCORE_BASE_ALLOWANCE = 50;
+const RAW_SCORE_PER_SECOND_LIMIT = 5;
 
 const bodySchema = z.object({
   runId: z.string().uuid(),
@@ -62,6 +67,34 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const runValidation = await validateGameRunSession({
+      supabase,
+      userId: user.id,
+      runId: payload.runId,
+      modeId: payload.modeId,
+    });
+    if (!runValidation.ok) {
+      return NextResponse.json({ error: runValidation.message }, { status: runValidation.status });
+    }
+
+    if (runValidation.elapsedMs < RUN_SESSION_MIN_ELAPSED_MS) {
+      return NextResponse.json(
+        { error: '플레이 시간이 너무 짧아 점수를 저장할 수 없습니다. 다시 시도해 주세요.' },
+        { status: 400 },
+      );
+    }
+
+    const maxAllowedRawScore = Math.min(
+      9999,
+      RAW_SCORE_BASE_ALLOWANCE + Math.trunc((runValidation.elapsedMs / 1000) * RAW_SCORE_PER_SECOND_LIMIT),
+    );
+    if (payload.rawScore > maxAllowedRawScore) {
+      return NextResponse.json(
+        { error: '비정상 점수로 감지되어 저장할 수 없습니다. 게임을 다시 시작해 주세요.' },
+        { status: 400 },
+      );
+    }
+
     const rateLimitWindowIso = new Date(Date.now() - 60 * 1000).toISOString();
     const { count: recentSubmitCount, error: rateLimitError } = await supabase
       .from('game_mode_scores')
@@ -70,7 +103,7 @@ export async function POST(request: Request) {
       .gte('played_at', rateLimitWindowIso);
 
     if (rateLimitError) {
-      return NextResponse.json({ error: rateLimitError.message }, { status: 500 });
+      return internalServerError('app/api/game/score/route.ts', rateLimitError.message);
     }
 
     if ((recentSubmitCount ?? 0) >= SCORE_SUBMIT_LIMIT_PER_MINUTE) {
@@ -96,7 +129,7 @@ export async function POST(request: Request) {
       if (duplicateCode || duplicateMessage) {
         duplicated = true;
       } else {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
+        return internalServerError('app/api/game/score/route.ts', insertError.message);
       }
     }
 
@@ -110,7 +143,7 @@ export async function POST(request: Request) {
       .limit(1);
 
     if (modeBestError) {
-      return NextResponse.json({ error: modeBestError.message }, { status: 500 });
+      return internalServerError('app/api/game/score/route.ts', modeBestError.message);
     }
 
     const { data: globalBestRows, error: globalBestError } = await supabase
@@ -119,7 +152,7 @@ export async function POST(request: Request) {
       .eq('user_id', user.id);
 
     if (globalBestError) {
-      return NextResponse.json({ error: globalBestError.message }, { status: 500 });
+      return internalServerError('app/api/game/score/route.ts', globalBestError.message);
     }
 
     const perModeBest = new Map<string, number>();
@@ -149,6 +182,6 @@ export async function POST(request: Request) {
     return NextResponse.json(responseBody);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'game score save failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/score/route.ts', message);
   }
 }
