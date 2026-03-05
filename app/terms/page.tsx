@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 const EFFECTIVE_DATE = '2026-02-27';
-const UPDATED_DATE = '2026-02-27';
+const UPDATED_DATE = '2026-03-03';
 
 export default function TermsPage() {
   return (
@@ -57,6 +57,16 @@ export default function TermsPage() {
               <li>서비스는 원칙적으로 연중무휴 24시간 제공을 목표로 합니다.</li>
               <li>점검, 장애, 네트워크 이슈, 운영상 필요에 따라 서비스 일부 또는 전부를 변경/중단할 수 있습니다.</li>
               <li>서비스의 기능, 화면, 정책은 운영상 필요에 따라 변경될 수 있습니다.</li>
+            </ul>
+          </div>
+
+          <div>
+            <h2 className="text-base font-bold text-white">제4-1조 (후원 결제 및 권한 부여)</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>서비스는 1회성 후원 결제 기능을 제공할 수 있습니다.</li>
+              <li>결제 완료 시 후원자 배지 권한이 부여될 수 있으며, 세부 기준은 서비스 내 안내를 따릅니다.</li>
+              <li>결제 취소/환불로 유효한 완료 결제가 없는 경우 후원자 배지는 회수될 수 있습니다.</li>
+              <li>후원 결제는 로그인 완료 회원만 이용할 수 있습니다.</li>
             </ul>
           </div>
 

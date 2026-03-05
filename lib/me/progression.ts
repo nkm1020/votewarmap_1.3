@@ -22,6 +22,7 @@ type BadgeInput = {
   myRegionMatchRate: number;
   nationwideMatchRate: number;
   regionNationalFlow: number;
+  hasSupporterBadge: boolean;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -91,6 +92,7 @@ function buildBadge(id: string, label: string, current: number, target: number):
 
 export function computeBadges(input: BadgeInput): Badge[] {
   return [
+    buildBadge('supporter_badge', '후원자 배지', input.hasSupporterBadge ? 1 : 0, 1),
     buildBadge('first_vote', '첫 투표', input.totalVotes, 1),
     buildBadge('vote_100', '백표 달성', input.totalVotes, 100),
     buildBadge('game_300', '게임 누적 300', input.totalGameScore, 300),

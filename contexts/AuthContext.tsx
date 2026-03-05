@@ -39,6 +39,7 @@ type UserProfile = {
   privacy_show_leaderboard_name: boolean;
   privacy_show_region: boolean;
   privacy_show_activity_history: boolean;
+  has_supporter_badge: boolean;
 };
 
 type UserSyncPayload = {
@@ -128,6 +129,7 @@ function profilePayloadFromUser(user: User): UserProfile {
     privacy_show_leaderboard_name: true,
     privacy_show_region: false,
     privacy_show_activity_history: false,
+    has_supporter_badge: false,
   };
 }
 
@@ -172,6 +174,22 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   const fullSelect =
     'id, email, full_name, nickname, username, avatar_url, avatar_preset, provider, birth_year, gender, school_id, country_code, sido_code, sigungu_code, signup_completed_at, privacy_show_leaderboard_name, privacy_show_region, privacy_show_activity_history';
 
+  const fetchSupporterBadge = async () => {
+    const { data: entitlement, error: entitlementError } = await supabase
+      .from('user_entitlements')
+      .select('revoked_at')
+      .eq('user_id', userId)
+      .eq('entitlement_key', 'supporter_badge')
+      .maybeSingle();
+
+    if (entitlementError) {
+      console.error('[auth] failed to fetch supporter entitlement:', entitlementError.message);
+      return false;
+    }
+
+    return Boolean(entitlement && !entitlement.revoked_at);
+  };
+
   const { data, error } = await supabase
     .from('users')
     .select(fullSelect)
@@ -197,6 +215,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     const legacyCountryCode = normalizeProfileCountryCode(
       (legacyData as { country_code?: string | null }).country_code,
     );
+    const hasSupporterBadge = await fetchSupporterBadge();
 
     return {
       ...legacyData,
@@ -208,6 +227,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
       privacy_show_leaderboard_name: true,
       privacy_show_region: false,
       privacy_show_activity_history: false,
+      has_supporter_badge: hasSupporterBadge,
     };
   }
 
@@ -220,9 +240,12 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     return null;
   }
 
+  const hasSupporterBadge = await fetchSupporterBadge();
+
   return {
     ...data,
     country_code: normalizeProfileCountryCode((data as { country_code?: string | null }).country_code),
+    has_supporter_badge: hasSupporterBadge,
   };
 }
 
