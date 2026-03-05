@@ -1,13 +1,18 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { validateGameRunSession } from '@/lib/server/game-run-session';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 export const revalidate = 0;
 const SCORE_SUBMIT_LIMIT_PER_MINUTE = 20;
+const RUN_SESSION_MIN_ELAPSED_MS = 8_000;
+const SCORE_BASE_ALLOWANCE = 30;
+const SCORE_PER_SECOND_LIMIT = 2.5;
 
 const bodySchema = z.object({
   runId: z.string().uuid(),
@@ -47,6 +52,34 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseServiceRoleClient();
     const { runId, score } = parsed.data;
+    const runValidation = await validateGameRunSession({
+      supabase,
+      userId: user.id,
+      runId,
+      modeId: 'region_battle',
+    });
+    if (!runValidation.ok) {
+      return NextResponse.json({ error: runValidation.message }, { status: runValidation.status });
+    }
+
+    if (runValidation.elapsedMs < RUN_SESSION_MIN_ELAPSED_MS) {
+      return NextResponse.json(
+        { error: '플레이 시간이 너무 짧아 점수를 저장할 수 없습니다. 다시 시도해 주세요.' },
+        { status: 400 },
+      );
+    }
+
+    const maxAllowedScore = Math.min(
+      9999,
+      SCORE_BASE_ALLOWANCE + Math.trunc((runValidation.elapsedMs / 1000) * SCORE_PER_SECOND_LIMIT),
+    );
+    if (score > maxAllowedScore) {
+      return NextResponse.json(
+        { error: '비정상 점수로 감지되어 저장할 수 없습니다. 게임을 다시 시작해 주세요.' },
+        { status: 400 },
+      );
+    }
+
     const rateLimitWindowIso = new Date(Date.now() - 60 * 1000).toISOString();
     const { count: recentSubmitCount, error: rateLimitError } = await supabase
       .from('region_battle_game_scores')
@@ -55,7 +88,7 @@ export async function POST(request: Request) {
       .gte('played_at', rateLimitWindowIso);
 
     if (rateLimitError) {
-      return NextResponse.json({ error: rateLimitError.message }, { status: 500 });
+      return internalServerError('app/api/game/region-battle-score/route.ts', rateLimitError.message);
     }
 
     if ((recentSubmitCount ?? 0) >= SCORE_SUBMIT_LIMIT_PER_MINUTE) {
@@ -78,7 +111,7 @@ export async function POST(request: Request) {
       if (duplicateCode || duplicateMessage) {
         duplicated = true;
       } else {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
+        return internalServerError('app/api/game/region-battle-score/route.ts', insertError.message);
       }
     }
 
@@ -91,7 +124,7 @@ export async function POST(request: Request) {
       .limit(1);
 
     if (bestError) {
-      return NextResponse.json({ error: bestError.message }, { status: 500 });
+      return internalServerError('app/api/game/region-battle-score/route.ts', bestError.message);
     }
 
     const bestScoreAllTime = normalizeInt(((bestRows ?? []) as BestScoreRow[])[0]?.score);
@@ -102,6 +135,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'region battle score save failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/game/region-battle-score/route.ts', message);
   }
 }

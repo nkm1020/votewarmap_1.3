@@ -20,7 +20,6 @@ import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
 import { ADSENSE_SLOTS } from '@/lib/adsense';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { clearPendingGameScore, readPendingGameScore, writePendingGameScore } from '@/lib/vote/client-storage';
 
 type Choice = 'A' | 'B' | 'TIE';
 type LeaderboardPeriod = 'daily' | 'weekly' | 'all';
@@ -82,6 +81,14 @@ type RegionBattleScoreSubmitResponse = {
   saved: true;
   duplicated?: boolean;
   bestScoreAllTime: number;
+  error?: string;
+};
+
+type GameRunSessionResponse = {
+  accepted?: boolean;
+  runId?: string;
+  modeId?: string;
+  expiresAt?: string;
   error?: string;
 };
 
@@ -212,6 +219,8 @@ export function HigherLowerGamePage() {
   const [gamePhase, setGamePhase] = useState<'intro' | 'playing'>('intro');
   const [bestScore, setBestScore] = useState(0);
   const [currentRunId, setCurrentRunId] = useState<string>(() => createRunId());
+  const [isRunSessionReady, setIsRunSessionReady] = useState(false);
+  const [runStartedWithAuth, setRunStartedWithAuth] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'game' | 'me'>('game');
 
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>('all');
@@ -426,57 +435,67 @@ export function HigherLowerGamePage() {
     return json;
   }, []);
 
+  const prepareRunSession = useCallback(async (runId: string) => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      throw new Error('로그인 세션을 불러올 수 없습니다.');
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token ?? null;
+    if (!accessToken) {
+      throw new Error('로그인이 필요합니다.');
+    }
+
+    const response = await fetch('/api/game/run-session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        runId,
+        modeId: 'region_battle',
+      }),
+    });
+
+    const json = (await response.json()) as GameRunSessionResponse;
+    if (!response.ok) {
+      throw new Error(json.error ?? '게임 실행 정보를 준비하지 못했습니다.');
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isAuthenticated) {
-      return;
-    }
-
-    const pending = readPendingGameScore();
-    if (!pending) {
-      return;
-    }
-
-    if (savedRunIdsRef.current.has(pending.runId)) {
-      clearPendingGameScore();
+    if (!isAuthenticated || !runStartedWithAuth || gamePhase !== 'playing' || isGameOver) {
+      setIsRunSessionReady(false);
       return;
     }
 
     let cancelled = false;
 
-    const persistPendingScore = async () => {
-      setSaveState('saving');
+    const prepare = async () => {
+      setIsRunSessionReady(false);
       try {
-        const result = await submitScore({
-          runId: pending.runId,
-          score: normalizeScoreForServer(pending.score),
-        });
-
-        if (cancelled) {
-          return;
+        await prepareRunSession(currentRunId);
+        if (!cancelled) {
+          setIsRunSessionReady(true);
         }
-
-        savedRunIdsRef.current.add(pending.runId);
-        clearPendingGameScore();
-        setBestScore((prev) => Math.max(prev, result.bestScoreAllTime));
-        setSaveState('saved');
-        await loadLeaderboard(leaderboardPeriod);
       } catch {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setIsRunSessionReady(false);
         }
-        setSaveState('error');
       }
     };
 
-    void persistPendingScore();
+    void prepare();
 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, leaderboardPeriod, loadLeaderboard, submitScore]);
+  }, [currentRunId, gamePhase, isAuthenticated, isGameOver, prepareRunSession, runStartedWithAuth]);
 
   useEffect(() => {
-    if (!isGameOver || !isAuthenticated) {
+    if (!isGameOver || !isAuthenticated || !runStartedWithAuth) {
       return;
     }
 
@@ -489,6 +508,13 @@ export function HigherLowerGamePage() {
     const persistCurrentScore = async () => {
       setSaveState('saving');
       try {
+        if (!isRunSessionReady) {
+          await prepareRunSession(currentRunId);
+          if (!cancelled) {
+            setIsRunSessionReady(true);
+          }
+        }
+
         const result = await submitScore({
           runId: currentRunId,
           score: normalizeScoreForServer(score),
@@ -515,7 +541,7 @@ export function HigherLowerGamePage() {
     return () => {
       cancelled = true;
     };
-  }, [currentRunId, isAuthenticated, isGameOver, leaderboardPeriod, loadLeaderboard, score, submitScore]);
+  }, [currentRunId, isAuthenticated, isGameOver, isRunSessionReady, leaderboardPeriod, loadLeaderboard, prepareRunSession, runStartedWithAuth, score, submitScore]);
 
   const handlePick = useCallback(
     (choice: Choice) => {
@@ -557,11 +583,13 @@ export function HigherLowerGamePage() {
     setGamePhase('playing');
     setHasCelebratedRecordInRun(false);
     setSaveState('idle');
+    setIsRunSessionReady(false);
+    setRunStartedWithAuth(isAuthenticated);
     setShareNotice(null);
     setFrameFeedbackFlash(null);
     setCurrentRunId(createRunId());
     drawNextQuestion(true);
-  }, [drawNextQuestion]);
+  }, [drawNextQuestion, isAuthenticated]);
 
   useEffect(() => {
     if (!isRevealed || isGameOver) {
@@ -615,13 +643,8 @@ export function HigherLowerGamePage() {
       return;
     }
 
-    writePendingGameScore({
-      runId: currentRunId,
-      score: normalizeScoreForServer(score),
-      createdAt: new Date().toISOString(),
-    });
-    router.push('/auth?next=%2Fgame&intent=save-score');
-  }, [currentRunId, isGameOver, router, score]);
+    router.push('/auth?next=%2Fgame&intent=ranked-play');
+  }, [isGameOver, router]);
 
   const handleBottomTabClick = useCallback(
     (tab: 'home' | 'map' | 'game' | 'me') => {
@@ -915,7 +938,7 @@ export function HigherLowerGamePage() {
                     {saveStatusText || '저장 준비 중...'}
                   </p>
                 ) : (
-                  <p className="mt-1 text-[12px] text-white/80">로그인 후 점수를 리더보드에 저장할 수 있어요.</p>
+                  <p className="mt-1 text-[12px] text-white/80">로그인 후 새 게임 점수부터 리더보드에 저장할 수 있어요.</p>
                 )}
               </div>
 
@@ -942,7 +965,7 @@ export function HigherLowerGamePage() {
                   onClick={handleLoginAndSave}
                   className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-[12px] border border-[#ff9f0a66] bg-[#ff6b00] px-3 text-[13px] font-semibold text-white transition hover:bg-[#ff7b1d]"
                 >
-                  로그인하고 저장
+                  로그인하고 랭크전 시작
                 </button>
               ) : null}
 
@@ -1021,7 +1044,10 @@ export function HigherLowerGamePage() {
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setGamePhase('playing')}
+                  onClick={() => {
+                    setRunStartedWithAuth(isAuthenticated);
+                    setGamePhase('playing');
+                  }}
                   className="w-full rounded-2xl bg-[#3182F6] py-4 text-[17px] font-bold text-white transition-colors hover:brightness-110 active:scale-95"
                 >
                   게임 시작

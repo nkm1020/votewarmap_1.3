@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getOrCreateGuestSessionId, readGuestSessionId } from '@/lib/vote/client-storage';
+import { readGuestSessionId, writeGuestSessionId } from '@/lib/vote/client-storage';
 
 type HeartbeatResponse = {
   sessionId?: string;
@@ -36,28 +36,29 @@ export function useGuestSessionHeartbeat({
       return;
     }
 
-    const currentSessionId = readGuestSessionId() ?? getOrCreateGuestSessionId();
-    if (!currentSessionId) {
-      return;
-    }
+    const currentSessionId = readGuestSessionId();
 
     inFlightRef.current = true;
     try {
       const response = await fetch('/api/votes/guest-session/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: currentSessionId }),
+        body: JSON.stringify(currentSessionId ? { sessionId: currentSessionId } : {}),
       });
 
       if (!response.ok) {
-        setSessionId(currentSessionId);
+        setSessionId(currentSessionId ?? null);
         return;
       }
 
       const json = (await response.json()) as HeartbeatResponse;
-      setSessionId(json.sessionId ?? currentSessionId);
+      const resolvedSessionId = json.sessionId ?? currentSessionId ?? null;
+      if (resolvedSessionId) {
+        writeGuestSessionId(resolvedSessionId);
+      }
+      setSessionId(resolvedSessionId);
     } catch {
-      setSessionId(currentSessionId);
+      setSessionId(currentSessionId ?? null);
     } finally {
       inFlightRef.current = false;
     }

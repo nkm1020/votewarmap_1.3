@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -34,12 +35,12 @@ export async function DELETE(request: Request) {
     const supabase = getSupabaseServiceRoleClient();
     const { error } = await supabase.auth.admin.deleteUser(user.id, false);
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalServerError('app/api/me/account/route.ts', error.message);
     }
 
     return NextResponse.json({ deleted: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'account delete failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/me/account/route.ts', message);
   }
 }

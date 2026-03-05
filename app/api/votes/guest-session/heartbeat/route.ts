@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { buildGuestFingerprintHash } from '@/lib/server/guest-fingerprint';
+import { checkRateLimit } from '@/lib/server/request-rate-limit';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -14,59 +17,13 @@ const STALE_SESSION_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 30;
 
-type RateLimitBucket = {
-  count: number;
-  resetAt: number;
-};
-
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
 let lastCleanupAt = 0;
 
-function resolveClientIp(request: Request): string {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    const firstIp = forwardedFor.split(',')[0]?.trim();
-    if (firstIp) {
-      return firstIp;
-    }
-  }
-
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  if (realIp) {
-    return realIp;
-  }
-
-  return 'unknown';
-}
-
-function isRateLimited(key: string): boolean {
-  const now = Date.now();
-
-  if (rateLimitBuckets.size > 1_000) {
-    for (const [bucketKey, bucketValue] of rateLimitBuckets.entries()) {
-      if (now >= bucketValue.resetAt) {
-        rateLimitBuckets.delete(bucketKey);
-      }
-    }
-  }
-
-  const bucket = rateLimitBuckets.get(key);
-
-  if (!bucket || now >= bucket.resetAt) {
-    rateLimitBuckets.set(key, {
-      count: 1,
-      resetAt: now + RATE_LIMIT_WINDOW_MS,
-    });
-    return false;
-  }
-
-  if (bucket.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return true;
-  }
-
-  bucket.count += 1;
-  return false;
-}
+type GuestSessionRow = {
+  id: string;
+  fingerprint_hash: string | null;
+  last_seen_at?: string | null;
+};
 
 function shouldRunCleanup(): boolean {
   const now = Date.now();
@@ -89,36 +46,88 @@ export async function POST(request: Request) {
       );
     }
 
-    const rateLimitKey = `${resolveClientIp(request)}:${parsed.data.sessionId ?? 'new'}`;
-    if (isRateLimited(rateLimitKey)) {
+    const fingerprintHash = buildGuestFingerprintHash(request);
+    const rateLimit = await checkRateLimit({
+      scope: 'guest-session-heartbeat',
+      key: fingerprintHash,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+    });
+
+    if (rateLimit.limited) {
       return NextResponse.json(
         { error: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
-        { status: 429 },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfterSec),
+          },
+        },
       );
     }
 
     const supabase = getSupabaseServiceRoleClient();
-    const sessionId = parsed.data.sessionId ?? crypto.randomUUID();
     const nowIso = new Date().toISOString();
+    const staleCutoffIso = new Date(Date.now() - STALE_SESSION_CLEANUP_HOURS * 60 * 60 * 1000).toISOString();
 
-    const { error: upsertError } = await supabase
-      .from('guest_vote_sessions')
-      .upsert({ id: sessionId, last_seen_at: nowIso }, { onConflict: 'id' });
+    let sessionId: string | null = null;
+    const requestedSessionId = parsed.data.sessionId ?? null;
+
+    if (requestedSessionId) {
+      const { data: requestedSession, error: requestedSessionError } = await supabase
+        .from('guest_vote_sessions')
+        .select('id, fingerprint_hash, last_seen_at')
+        .eq('id', requestedSessionId)
+        .maybeSingle();
+
+      if (requestedSessionError) {
+        return internalServerError(
+          'app/api/votes/guest-session/heartbeat/route.ts',
+          requestedSessionError.message,
+        );
+      }
+
+      const row = (requestedSession as GuestSessionRow | null) ?? null;
+      if (row && (!row.fingerprint_hash || row.fingerprint_hash === fingerprintHash)) {
+        sessionId = row.id;
+      }
+    }
+
+    if (!sessionId) {
+      const { data: existingSession, error: existingSessionError } = await supabase
+        .from('guest_vote_sessions')
+        .select('id, fingerprint_hash, last_seen_at')
+        .eq('fingerprint_hash', fingerprintHash)
+        .gte('last_seen_at', staleCutoffIso)
+        .order('last_seen_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingSessionError) {
+        return internalServerError(
+          'app/api/votes/guest-session/heartbeat/route.ts',
+          existingSessionError.message,
+        );
+      }
+
+      sessionId = ((existingSession as GuestSessionRow | null) ?? null)?.id ?? crypto.randomUUID();
+    }
+
+    const { error: upsertError } = await supabase.from('guest_vote_sessions').upsert(
+      {
+        id: sessionId,
+        last_seen_at: nowIso,
+        fingerprint_hash: fingerprintHash,
+      },
+      { onConflict: 'id' },
+    );
 
     if (upsertError) {
-      return NextResponse.json({ error: upsertError.message }, { status: 500 });
+      return internalServerError('app/api/votes/guest-session/heartbeat/route.ts', upsertError.message);
     }
 
     if (shouldRunCleanup()) {
-      // Opportunistic cleanup to cap table growth from abandoned sessions.
-      const staleCutoffIso = new Date(
-        Date.now() - STALE_SESSION_CLEANUP_HOURS * 60 * 60 * 1000,
-      ).toISOString();
-
-      await supabase
-        .from('guest_vote_sessions')
-        .delete()
-        .lt('last_seen_at', staleCutoffIso);
+      await supabase.from('guest_vote_sessions').delete().lt('last_seen_at', staleCutoffIso);
     }
 
     return NextResponse.json({
@@ -127,6 +136,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'guest session heartbeat failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/guest-session/heartbeat/route.ts', message);
   }
 }

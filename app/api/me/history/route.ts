@@ -4,6 +4,7 @@ import { getPublicGameFormats } from '@/lib/game/formats';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getRegionNameByCodes } from '@/lib/server/region-names';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,7 +110,7 @@ export async function GET(request: Request) {
 
     if (topLevelErrors.length > 0) {
       const firstError = topLevelErrors[0];
-      return NextResponse.json({ error: firstError?.message ?? '내 활동 기록 조회에 실패했습니다.' }, { status: 500 });
+      return internalServerError('app/api/me/history/route.ts', firstError?.message ?? '내 활동 기록 조회에 실패했습니다.');
     }
 
     const voteRows = (votesResult.data ?? []) as VoteRow[];
@@ -128,11 +129,11 @@ export async function GET(request: Request) {
       ]);
 
       if (topicsError) {
-        return NextResponse.json({ error: topicsError.message }, { status: 500 });
+        return internalServerError('app/api/me/history/route.ts', topicsError.message);
       }
 
       if (optionsError) {
-        return NextResponse.json({ error: optionsError.message }, { status: 500 });
+        return internalServerError('app/api/me/history/route.ts', optionsError.message);
       }
 
       topicById = new Map(((topicRows ?? []) as VoteTopicRow[]).map((row) => [row.id, row]));
@@ -235,6 +236,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'my history fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/me/history/route.ts', message);
   }
 }

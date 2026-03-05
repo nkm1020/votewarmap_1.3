@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { normalizeCountryCode, resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (fetchError) {
-      return NextResponse.json({ error: fetchError.message }, { status: 500 });
+      return internalServerError('app/api/auth/sync-country/route.ts', fetchError.message);
     }
 
     const currentCountryCode = normalizeCountryCode(
@@ -34,13 +35,13 @@ export async function POST(request: Request) {
         .eq('id', user.id);
 
       if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 500 });
+        return internalServerError('app/api/auth/sync-country/route.ts', updateError.message);
       }
     }
 
     return NextResponse.json({ countryCode });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'country sync failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/auth/sync-country/route.ts', message);
   }
 }

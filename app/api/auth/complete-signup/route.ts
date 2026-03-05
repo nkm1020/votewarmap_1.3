@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -49,12 +50,12 @@ export async function POST(request: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalServerError('app/api/auth/complete-signup/route.ts', error.message);
     }
 
     return NextResponse.json({ profile: data });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'complete signup failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/auth/complete-signup/route.ts', message);
   }
 }

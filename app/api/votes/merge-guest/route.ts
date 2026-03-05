@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { normalizeCountryCode } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +28,60 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const { data: userRow, error: userRowError } = await supabase
+      .from('users')
+      .select('country_code')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (userRowError) {
+      console.error('[votes/merge-guest] failed to load user country:', userRowError.message);
+      return internalServerError('app/api/votes/merge-guest/route.ts', userRowError);
+    }
+
+    const userCountryCode = normalizeCountryCode((userRow as { country_code?: string | null } | null)?.country_code);
+    const { data: guestVotes, error: guestVotesError } = await supabase
+      .from('guest_votes_temp')
+      .select('topic_id')
+      .eq('session_id', parsed.data.guestSessionId);
+
+    if (guestVotesError) {
+      console.error('[votes/merge-guest] failed to load guest votes:', guestVotesError.message);
+      return internalServerError('app/api/votes/merge-guest/route.ts', guestVotesError);
+    }
+
+    const topicIds = Array.from(
+      new Set(
+        (guestVotes ?? [])
+          .map((row) => String((row as { topic_id?: string | null }).topic_id ?? '').trim())
+          .filter((id) => id.length > 0),
+      ),
+    );
+
+    if (topicIds.length > 0) {
+      const { data: topicRows, error: topicRowsError } = await supabase
+        .from('vote_topics')
+        .select('id, country_code')
+        .in('id', topicIds);
+
+      if (topicRowsError) {
+        console.error('[votes/merge-guest] failed to load topic countries:', topicRowsError.message);
+        return internalServerError('app/api/votes/merge-guest/route.ts', topicRowsError);
+      }
+
+      const hasCountryMismatch = (topicRows ?? []).some((row) => {
+        const topicCountryCode = normalizeCountryCode((row as { country_code?: string | null }).country_code);
+        return topicCountryCode !== userCountryCode;
+      });
+
+      if (hasCountryMismatch) {
+        return NextResponse.json(
+          { error: '다른 국가의 임시 투표는 병합할 수 없습니다.' },
+          { status: 403 },
+        );
+      }
+    }
+
     const { data, error } = await supabase.rpc('promote_guest_session_votes_to_user', {
       p_session_id: parsed.data.guestSessionId,
       p_user_id: user.id,
@@ -34,12 +90,12 @@ export async function POST(request: Request) {
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('[votes/merge-guest] promote_guest_session_votes_to_user failed:', error.message);
+      return internalServerError('app/api/votes/merge-guest/route.ts', error);
     }
 
     return NextResponse.json({ result: data ?? { moved: 0, skipped: 0 } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'merge failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/merge-guest/route.ts', error);
   }
 }

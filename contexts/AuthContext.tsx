@@ -150,6 +150,24 @@ function userSyncPayloadFromUser(user: User): UserSyncPayload {
   };
 }
 
+function resolveAppOrigin(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim();
+  if (!fromEnv) {
+    return window.location.origin;
+  }
+
+  try {
+    const parsed = new URL(fromEnv);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.origin;
+    }
+  } catch {
+    // Ignore invalid env and fall back to current origin.
+  }
+
+  return window.location.origin;
+}
+
 async function syncUserToPublicUsers(user: User): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
@@ -359,10 +377,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const nextPath = normalizeInternalRedirectPath(options?.redirectPath ?? null);
+    const appOrigin = resolveAppOrigin();
     const redirectTo =
       nextPath === '/'
-        ? `${window.location.origin}/auth`
-        : `${window.location.origin}/auth?next=${encodeURIComponent(nextPath)}`;
+        ? `${appOrigin}/auth`
+        : `${appOrigin}/auth?next=${encodeURIComponent(nextPath)}`;
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider,

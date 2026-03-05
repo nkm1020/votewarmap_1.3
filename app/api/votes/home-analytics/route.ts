@@ -4,6 +4,7 @@ import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { AgeBucketKey, HomeAnalyticsResponse } from '@/lib/vote/types';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalServerError('app/api/votes/home-analytics/route.ts', error.message);
     }
 
     const row = (Array.isArray(rows) ? rows[0] : null) as LiveVoteDemographicsRow | null;
@@ -127,6 +128,6 @@ export async function GET(request: Request) {
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'home analytics fetch failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/home-analytics/route.ts', message);
   }
 }

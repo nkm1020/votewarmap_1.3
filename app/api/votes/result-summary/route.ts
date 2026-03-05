@@ -5,6 +5,7 @@ import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
 import { getCountryRegionCentroid, getCountryRegionNameByCodes } from '@/lib/server/country-region-geo';
 import { calculatePersonaPowerFromCounts, normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -204,7 +205,7 @@ export async function GET(request: Request) {
       .maybeSingle();
 
     if (topicError) {
-      return NextResponse.json({ error: topicError.message }, { status: 500 });
+      return internalServerError('app/api/votes/result-summary/route.ts', topicError.message);
     }
     if (!topicRow) {
       return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
@@ -221,7 +222,7 @@ export async function GET(request: Request) {
       .order('position', { ascending: true });
 
     if (optionsError) {
-      return NextResponse.json({ error: optionsError.message }, { status: 500 });
+      return internalServerError('app/api/votes/result-summary/route.ts', optionsError.message);
     }
 
     const options = ((optionRows ?? []) as VoteOptionRow[])
@@ -236,7 +237,7 @@ export async function GET(request: Request) {
     const optionA = options.find((option) => option.position === 1);
     const optionB = options.find((option) => option.position === 2);
     if (!optionA || !optionB) {
-      return NextResponse.json({ error: '주제 선택지 구성이 올바르지 않습니다.' }, { status: 500 });
+      return internalServerError('app/api/votes/result-summary/route.ts', '주제 선택지 구성이 올바르지 않습니다.');
     }
 
     const regionStatsCache = new Map<RegionLevel, Map<string, RegionCounts>>();
@@ -289,10 +290,10 @@ export async function GET(request: Request) {
       ]);
 
       if (voteError) {
-        return NextResponse.json({ error: voteError.message }, { status: 500 });
+        return internalServerError('app/api/votes/result-summary/route.ts', voteError.message);
       }
       if (userRowError) {
-        return NextResponse.json({ error: userRowError.message }, { status: 500 });
+        return internalServerError('app/api/votes/result-summary/route.ts', userRowError.message);
       }
 
       myOptionKey = voteRow?.option_key ?? null;
@@ -320,7 +321,7 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       if (guestVoteError) {
-        return NextResponse.json({ error: guestVoteError.message }, { status: 500 });
+        return internalServerError('app/api/votes/result-summary/route.ts', guestVoteError.message);
       }
 
       myOptionKey = guestVoteRow?.option_key ?? null;
@@ -443,6 +444,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'result summary failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/votes/result-summary/route.ts', message);
   }
 }

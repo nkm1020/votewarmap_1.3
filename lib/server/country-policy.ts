@@ -13,11 +13,20 @@ export function normalizeCountryCode(raw: string | null | undefined): string {
 }
 
 export function resolveCountryCodeFromHeaders(headers: Headers): string {
-  return normalizeCountryCode(
+  const platformCountry =
     headers.get('x-vercel-ip-country') ??
-      headers.get('cf-ipcountry') ??
-      headers.get('x-country-code'),
-  );
+    headers.get('cf-ipcountry');
+
+  if (platformCountry) {
+    return normalizeCountryCode(platformCountry);
+  }
+
+  const fallbackCountry = headers.get('x-country-code');
+  if (fallbackCountry) {
+    return normalizeCountryCode(fallbackCountry);
+  }
+
+  return DEFAULT_COUNTRY_CODE;
 }
 
 export function resolveCountryCodeFromRequest(request: Request): string {

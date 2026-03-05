@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { checkRateLimit, resolveClientIp } from '@/lib/server/request-rate-limit';
 import { resolveSidoCode, resolveSigunguCode } from '@/lib/server/regions';
 import type { SchoolLevel, SchoolSearchItem } from '@/lib/vote/types';
+import { internalServerError } from '@/lib/server/api-response';
 
 export const runtime = 'nodejs';
+const RATE_LIMIT_MAX_REQUESTS = 40;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 const searchSchema = z.object({
   q: z.string().trim().min(1),
@@ -165,6 +169,25 @@ async function searchNaisSchools(params: { q: string; level: string; limit: numb
 
 export async function GET(request: Request) {
   try {
+    const rateLimit = await checkRateLimit({
+      scope: 'schools-search',
+      key: resolveClientIp(request),
+      maxRequests: RATE_LIMIT_MAX_REQUESTS,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+    });
+
+    if (rateLimit.limited) {
+      return NextResponse.json(
+        { error: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfterSec),
+          },
+        },
+      );
+    }
+
     const parsed = searchSchema.safeParse(
       Object.fromEntries(new URL(request.url).searchParams.entries()),
     );
@@ -189,7 +212,6 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ items: Array.from(deduped.values()).slice(0, limit) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'school search failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalServerError('app/api/schools/search/route.ts', error);
   }
 }
