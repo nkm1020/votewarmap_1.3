@@ -1,7 +1,7 @@
 'use client';
 
+import { ChevronLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,11 +21,6 @@ type Product = {
 
 type PaymentsProductsResponse = {
   enabled: boolean;
-  recommended: {
-    countryCode: string;
-    currency: Currency;
-    paymentMethod: PaymentMethod;
-  };
   products: Product[];
   grouped: Record<Currency, Product[]>;
 };
@@ -317,20 +312,32 @@ export default function MySupportPage() {
 
   return (
     <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
-      <section className="mx-auto w-full max-w-4xl space-y-6">
-        <header className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#ff9f0a]">Support</p>
-            <h1 className="mt-2 text-3xl font-extrabold">VoteWarMap 후원하기</h1>
-            <p className="mt-2 text-sm text-white/70">1회 후원 결제로 서비스 운영에 힘을 보태주세요.</p>
-          </div>
-          <Link
-            href="/my"
-            className="inline-flex h-10 items-center rounded-xl border border-white/20 bg-white/5 px-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+      <section className="mx-auto w-full max-w-[min(100%,1400px)] space-y-6">
+        <header className="mb-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              router.push('/my');
+            }}
+            aria-label="MY로 돌아가기"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/14 bg-[rgba(12,18,28,0.78)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,159,10,0.52)]"
           >
-            MY로 돌아가기
-          </Link>
+            <ChevronLeft size={24} />
+          </button>
+          <div className="min-w-0 flex-1 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">Support</p>
+          </div>
+          <div className="h-11 w-11" aria-hidden />
         </header>
+
+        <section className="mb-6">
+          <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-white md:text-[40px]">
+            VoteWarMap
+            <br />
+            후원하기
+          </h1>
+          <p className="mt-2 text-sm text-white/68">1회 후원 결제로 서비스 운영에 힘을 보태주세요.</p>
+        </section>
 
         {error ? (
           <p className="rounded-xl border border-[#ff7a7a]/45 bg-[#ff7a7a]/12 px-4 py-3 text-sm text-[#ffc3c3]">{error}</p>
@@ -348,9 +355,6 @@ export default function MySupportPage() {
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {sortedProducts.map((product) => {
                 const isPaying = isPayingProductId === product.id;
-                const isRecommended =
-                  productsState?.recommended.currency === product.currency &&
-                  productsState?.recommended.paymentMethod === product.paymentMethod;
 
                 return (
                   <article
@@ -359,11 +363,6 @@ export default function MySupportPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-[16px] font-bold">{product.title}</h3>
-                      {isRecommended ? (
-                        <span className="rounded-full bg-[#ff9f0a]/18 px-2.5 py-1 text-[11px] font-semibold text-[#ffc56a]">
-                          추천 결제
-                        </span>
-                      ) : null}
                     </div>
                     <p className="mt-2 text-xl font-extrabold">{formatAmount(product.currency, product.amount)}</p>
                     <p className="mt-1 text-xs text-white/70">
