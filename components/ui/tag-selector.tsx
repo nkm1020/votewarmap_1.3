@@ -4,6 +4,8 @@ import { Check, ChevronsUpDown, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getPageThemeTokens } from '@/lib/theme/pageTheme';
 
 type ClassValue = string | false | null | undefined;
 
@@ -60,6 +62,8 @@ export function TagSelector<T>({
   createTag,
   allowCreate = false,
 }: TagSelectorProps<T>) {
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
   const [open, setOpen] = useState(false);
   const [internalInputValue, setInternalInputValue] = useState('');
   const [panelPlacement, setPanelPlacement] = useState<'top' | 'bottom'>('bottom');
@@ -285,8 +289,12 @@ export function TagSelector<T>({
           }
         }}
         className={cx(
-          'flex min-h-10 w-full items-center gap-1 rounded-xl border border-white/14 bg-white/8 px-2 py-1.5 text-left text-sm text-white transition',
-          disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/10',
+          `flex min-h-10 w-full items-center gap-1 rounded-xl px-2 py-1.5 text-left text-sm transition ${theme.surfaceSoftClass} ${theme.textPrimaryClass}`,
+          disabled
+            ? 'cursor-not-allowed opacity-60'
+            : theme.isDark
+              ? 'hover:bg-white/10'
+              : 'hover:bg-slate-900/[0.08]',
         )}
       >
         {selectedTags.length > 0 ? (
@@ -295,14 +303,22 @@ export function TagSelector<T>({
               {selectedTags.map((tag) => (
                 <span
                   key={getValue(tag)}
-                  className="inline-flex items-center gap-1 rounded bg-white/15 px-2 py-1 text-xs text-white"
+                  className={cx(
+                    'inline-flex items-center gap-1 rounded px-2 py-1 text-xs',
+                    theme.isDark ? 'bg-white/15 text-white' : 'bg-slate-900/[0.08] text-slate-800',
+                  )}
                 >
                   <span className="max-w-[11rem] truncate">{getLabel(tag)}</span>
                   {allowClear ? (
                     <span
                       role="button"
                       tabIndex={0}
-                      className="cursor-pointer rounded p-0.5 text-white/85 transition hover:bg-[#ff6b0033] hover:text-[#ffd2a8]"
+                      className={cx(
+                        'cursor-pointer rounded p-0.5 transition',
+                        theme.isDark
+                          ? 'text-white/85 hover:bg-[#ff6b0033] hover:text-[#ffd2a8]'
+                          : 'text-slate-600 hover:bg-[#ff6b0018] hover:text-[#ff8a1f]',
+                      )}
                       onClick={(event) => {
                         event.stopPropagation();
                         handleRemove(getValue(tag));
@@ -324,9 +340,9 @@ export function TagSelector<T>({
             <span className="ml-auto" />
           </>
         ) : (
-          <span className="text-white/50">{placeholder}</span>
+          <span className={theme.textSubtleClass}>{placeholder}</span>
         )}
-        <ChevronsUpDown className="ml-auto h-4 w-4 text-white/50" />
+        <ChevronsUpDown className={`ml-auto h-4 w-4 ${theme.textSubtleClass}`} />
       </button>
 
       {open && typeof document !== 'undefined'
@@ -334,7 +350,7 @@ export function TagSelector<T>({
             <div
               ref={panelRef}
               className={cx(
-                'fixed z-[110] overflow-hidden rounded-xl border border-white/14 bg-[rgba(26,26,30,0.98)] shadow-[0_14px_38px_rgba(0,0,0,0.45)] backdrop-blur-xl',
+                `fixed z-[110] overflow-hidden rounded-xl ${theme.elevatedClass} backdrop-blur-xl`,
                 panelPlacement === 'top' ? 'origin-bottom' : 'origin-top',
               )}
               style={{
@@ -344,7 +360,7 @@ export function TagSelector<T>({
                 maxHeight: `${panelMaxHeight}px`,
               }}
             >
-              <div className="border-b border-white/10 p-2">
+              <div className={`border-b p-2 ${theme.borderSoftClass}`}>
                 <input
                   value={currentInputValue}
                   onChange={(event) => setNextInputValue(event.target.value)}
@@ -355,19 +371,19 @@ export function TagSelector<T>({
                     }
                   }}
                   placeholder={inputPlaceholder}
-                  className="h-9 w-full rounded-lg border border-white/14 bg-white/8 px-2.5 text-sm text-white outline-none placeholder:text-white/45 focus:border-[#ff9f0a66]"
+                  className={`h-9 w-full rounded-lg px-2.5 text-sm outline-none ${theme.inputClass}`}
                 />
               </div>
 
               <div className="overflow-y-auto p-1.5" style={{ maxHeight: `${Math.max(40, panelMaxHeight - 56)}px` }}>
-                <p className="px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                <p className={`px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide ${theme.textSubtleClass}`}>
                   {heading}
                 </p>
 
                 {isLoading ? (
-                  <p className="px-2 py-2 text-xs text-white/70">{loadingMessage}</p>
+                  <p className={`px-2 py-2 text-xs ${theme.textSecondaryClass}`}>{loadingMessage}</p>
                 ) : filteredTags.length === 0 ? (
-                  <p className="px-2 py-2 text-xs text-white/60">{emptyMessage}</p>
+                  <p className={`px-2 py-2 text-xs ${theme.textMutedClass}`}>{emptyMessage}</p>
                 ) : (
                   filteredTags.map((tag) => {
                     const value = getValue(tag);
@@ -379,7 +395,13 @@ export function TagSelector<T>({
                         onClick={() => handleSelect(value)}
                         className={cx(
                           'mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition last:mb-0',
-                          selected ? 'bg-[#ff6b0033] text-[#ffd2a8]' : 'text-white/85 hover:bg-white/10',
+                          selected
+                            ? theme.isDark
+                              ? 'bg-[#ff6b0033] text-[#ffd2a8]'
+                              : 'bg-[#ff6b0018] text-[#ff8a1f]'
+                            : theme.isDark
+                              ? 'text-white/85 hover:bg-white/10'
+                              : 'text-slate-700 hover:bg-slate-900/[0.06]',
                         )}
                       >
                         <Check className={cx('mt-0.5 h-4 w-4 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
@@ -392,14 +414,17 @@ export function TagSelector<T>({
                 )}
 
                 {canCreate ? (
-                  <div className="mt-1 border-t border-white/10 pt-1">
-                    <p className="px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                  <div className={`mt-1 border-t pt-1 ${theme.borderSoftClass}`}>
+                    <p className={`px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide ${theme.textSubtleClass}`}>
                       생성
                     </p>
                     <button
                       type="button"
                       onClick={handleCreate}
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-white/85 transition hover:bg-white/10"
+                      className={cx(
+                        'flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition',
+                        theme.isDark ? 'text-white/85 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-900/[0.06]',
+                      )}
                     >
                       <Check className="h-4 w-4 shrink-0 opacity-100" />
                       <span>Create &quot;{currentInputValue.trim()}&quot;</span>

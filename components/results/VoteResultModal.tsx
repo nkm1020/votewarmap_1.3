@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link2, MapPinned } from 'lucide-react';
+import { useTheme } from '@/contexts/ThemeContext';
 
 type VoteResultModalOption = {
   label: string;
@@ -32,7 +33,10 @@ export interface VoteResultModalProps {
   myRegion: VoteResultModalRegion;
   nationwidePersona: VoteResultModalPersona;
   myRegionPersona: VoteResultModalPersona;
-  onMapView: () => void;
+  onScopeMapView: () => void;
+  onVoteCountryMapView?: (() => void) | null;
+  scopeActionLabel?: string;
+  voteCountryActionLabel?: string;
   onShareKakao: () => Promise<void>;
   onShareLinkCopy: () => Promise<void>;
   onOpenNextTopics: () => void;
@@ -73,14 +77,19 @@ export function VoteResultModal({
   myRegion,
   nationwidePersona,
   myRegionPersona,
-  onMapView,
+  onScopeMapView,
+  onVoteCountryMapView = null,
+  scopeActionLabel = '전국 지도 보기',
+  voteCountryActionLabel = '내 지역 결과 보기',
   onShareKakao,
   onShareLinkCopy,
   onOpenNextTopics,
   reducedMotion,
   isAuthenticated = false,
 }: VoteResultModalProps) {
+  const { resolvedTheme } = useTheme();
   const modalRef = useRef<HTMLDivElement | null>(null);
+  const isDarkTheme = resolvedTheme === 'dark';
 
   useEffect(() => {
     if (!isOpen) {
@@ -187,13 +196,25 @@ export function VoteResultModal({
     return '판세를 흔드는 중이에요!';
   }, [isRegionMatch, myChoice]);
   const teamLabel = myChoice === 'A' ? 'TEAM A' : myChoice === 'B' ? 'TEAM B' : 'TEAM';
-  const teamToneTextClass = myChoice === 'A' ? 'text-[#ffad63]' : myChoice === 'B' ? 'text-[#8dbdff]' : 'text-white/85';
+  const teamToneTextClass = myChoice === 'A' ? 'text-[#ffad63]' : myChoice === 'B' ? 'text-[#8dbdff]' : isDarkTheme ? 'text-white/85' : 'text-slate-700';
   const teamHeaderGradientClass =
     myChoice === 'A'
       ? 'from-[#ff6b00] via-[#ff8f21] to-[#ffad4a]'
       : myChoice === 'B'
         ? 'from-[#2f74ff] via-[#4d92ff] to-[#78b6ff]'
         : 'from-[#607ca3] via-[#7d97b8] to-[#9ab1cc]';
+  const panelShellClass = isDarkTheme
+    ? 'border-white/14 bg-[rgba(16,20,30,0.94)] text-white shadow-[0_14px_30px_rgba(0,0,0,0.34)]'
+    : 'border-slate-200/90 bg-[rgba(255,255,255,0.97)] text-slate-900 shadow-[0_18px_34px_rgba(148,163,184,0.24)]';
+  const innerSurfaceClass = isDarkTheme
+    ? 'border-white/12 bg-white/6'
+    : 'border-slate-200/90 bg-slate-900/[0.04]';
+  const footerClass = isDarkTheme
+    ? 'border-white/12 text-white/44'
+    : 'border-slate-200/90 text-slate-500';
+  const bodySecondaryClass = isDarkTheme ? 'text-white/64' : 'text-slate-600';
+  const bodyMutedClass = isDarkTheme ? 'text-white/56' : 'text-slate-500';
+  const textPrimaryClass = isDarkTheme ? 'text-white' : 'text-slate-900';
 
   const handleShareCard = async () => {
     try {
@@ -215,7 +236,10 @@ export function VoteResultModal({
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={onClose}
         >
-          <div className="absolute inset-0 bg-[rgba(0,0,0,0.6)] backdrop-blur-[2px]" aria-hidden="true" />
+          <div
+            className={`absolute inset-0 backdrop-blur-[2px] ${isDarkTheme ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(15,23,42,0.24)]'}`}
+            aria-hidden="true"
+          />
 
           <motion.section
             ref={modalRef}
@@ -232,9 +256,9 @@ export function VoteResultModal({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="max-h-[84vh] overflow-y-auto px-2 pb-2 pt-3">
-              <div className="overflow-hidden rounded-[24px] border border-white/14 bg-[rgba(16,20,30,0.94)] text-white shadow-[0_14px_30px_rgba(0,0,0,0.34)]">
+              <div className={`overflow-hidden rounded-[24px] border ${panelShellClass}`}>
                 <header className={`bg-gradient-to-r px-5 pb-5 pt-4 text-white ${teamHeaderGradientClass}`}>
-                  <span className="inline-flex rounded-full border border-white/45 bg-white/18 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.05em]">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.05em] ${isDarkTheme ? 'border border-white/45 bg-white/18' : 'border border-white/55 bg-white/22'}`}>
                     Official Voter Card
                   </span>
                   <p className="mt-2 text-[34px] font-black italic leading-none">{teamLabel}</p>
@@ -242,14 +266,14 @@ export function VoteResultModal({
                 </header>
 
                 <div className="px-4 pb-4 pt-5">
-                  <p className="text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-white/58">Selected Choice</p>
+                  <p className={`text-center text-[10px] font-semibold uppercase tracking-[0.14em] ${isDarkTheme ? 'text-white/58' : 'text-slate-500'}`}>Selected Choice</p>
                   <p className={`mt-1 text-center text-[36px] font-black leading-none ${teamToneTextClass}`}>&quot;{myChoiceLabel}&quot;</p>
-                  <p className="mt-3 text-center text-[22px] font-black leading-tight text-white">{heroLine}</p>
+                  <p className={`mt-3 text-center text-[22px] font-black leading-tight ${textPrimaryClass}`}>{heroLine}</p>
 
-                  <div className="mt-4 rounded-2xl border border-white/12 bg-white/6 p-3">
+                  <div className={`mt-4 rounded-2xl border p-3 ${innerSurfaceClass}`}>
                     <div className="space-y-2.5">
                       <section className="space-y-1.5">
-                        <div className="text-[11px] font-semibold text-white/72">{myRegion?.name ?? '우리 지역'}</div>
+                        <div className={`text-[11px] font-semibold ${isDarkTheme ? 'text-white/72' : 'text-slate-700'}`}>{myRegion?.name ?? '우리 지역'}</div>
                         {myRegion && regionBar ? (
                           <>
                             <div className="flex items-center justify-between text-[12px]">
@@ -260,7 +284,7 @@ export function VoteResultModal({
                                 {optionB.label} {myRegion.percentB}%
                               </span>
                             </div>
-                            <div className="flex h-2.5 overflow-hidden rounded-full bg-white/12">
+                            <div className={`flex h-2.5 overflow-hidden rounded-full ${isDarkTheme ? 'bg-white/12' : 'bg-slate-900/[0.08]'}`}>
                               <motion.div
                                 className="h-full origin-left bg-[#ff6b00]"
                                 style={{ width: `${regionBar.a}%` }}
@@ -276,15 +300,15 @@ export function VoteResultModal({
                                 transition={{ duration: reducedMotion ? 0 : 0.5, ease: 'easeOut' }}
                               />
                             </div>
-                            <p className="text-[11px] font-medium text-white/64">전체 주제 기준 · {myRegionPersonaLine}</p>
+                            <p className={`text-[11px] font-medium ${bodySecondaryClass}`}>전체 주제 기준 · {myRegionPersonaLine}</p>
                           </>
                         ) : (
-                          <p className="text-[11px] text-white/56">지역 데이터 수집 중</p>
+                          <p className={`text-[11px] ${bodyMutedClass}`}>지역 데이터 수집 중</p>
                         )}
                       </section>
 
                       <section className="space-y-1.5">
-                        <div className="text-[11px] font-semibold text-white/72">전국 결과</div>
+                        <div className={`text-[11px] font-semibold ${isDarkTheme ? 'text-white/72' : 'text-slate-700'}`}>전국 결과</div>
                         <div className="flex items-center justify-between text-[12px]">
                           <span className="font-semibold text-[#ffc38e]">
                             {optionA.label} {optionA.percent}%
@@ -293,7 +317,7 @@ export function VoteResultModal({
                             {optionB.label} {optionB.percent}%
                           </span>
                         </div>
-                        <div className="flex h-2.5 overflow-hidden rounded-full bg-white/12">
+                        <div className={`flex h-2.5 overflow-hidden rounded-full ${isDarkTheme ? 'bg-white/12' : 'bg-slate-900/[0.08]'}`}>
                           <motion.div
                             className="h-full origin-left bg-[#ff6b00]"
                             style={{ width: `${nationwideBar.a}%` }}
@@ -309,28 +333,36 @@ export function VoteResultModal({
                             transition={{ duration: reducedMotion ? 0 : 0.5, ease: 'easeOut' }}
                           />
                         </div>
-                        <p className="text-[11px] font-medium text-white/64">전체 주제 기준 · {nationwidePersonaLine}</p>
+                        <p className={`text-[11px] font-medium ${bodySecondaryClass}`}>전체 주제 기준 · {nationwidePersonaLine}</p>
                       </section>
                     </div>
                   </div>
                 </div>
 
-                <footer className="flex items-center justify-between border-t border-white/12 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-white/44">
+                <footer className={`flex items-center justify-between border-t px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] ${footerClass}`}>
                   <span>VOTEWARMAP.COM</span>
                   <button
                     type="button"
                     onClick={onOpenNextTopics}
-                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/45"
+                    className={`inline-flex h-8 items-center gap-1 rounded-full px-2 transition focus-visible:outline-none focus-visible:ring-2 ${
+                      isDarkTheme
+                        ? 'hover:bg-white/10 focus-visible:ring-white/45'
+                        : 'hover:bg-slate-900/[0.06] focus-visible:ring-slate-300'
+                    }`}
                     aria-label="다음 투표 보기"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-white/30" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-white/30" />
-                    <span className="h-1.5 w-5 rounded-full bg-white/65" />
+                    <span className={`h-1.5 w-1.5 rounded-full ${isDarkTheme ? 'bg-white/30' : 'bg-slate-300'}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${isDarkTheme ? 'bg-white/30' : 'bg-slate-300'}`} />
+                    <span className={`h-1.5 w-5 rounded-full ${isDarkTheme ? 'bg-white/65' : 'bg-slate-500'}`} />
                   </button>
                 </footer>
               </div>
 
               <div className="space-y-2.5 px-2 pb-2 pt-4">
+                <p className={`px-2 text-center text-[13px] font-medium leading-relaxed ${bodySecondaryClass}`}>
+                  주변에 공유해서 열띤 토론을 해보세요.
+                </p>
+
                 <button
                   type="button"
                   onClick={() => void handleShareCard()}
@@ -340,14 +372,36 @@ export function VoteResultModal({
                   공유하기
                 </button>
 
-                <button
-                  type="button"
-                  onClick={onMapView}
-                  className="inline-flex h-12 w-full min-w-[44px] items-center justify-center gap-2 rounded-xl border border-[#4f8dff66] bg-[#2f74ff1f] text-[15px] font-semibold text-[#b6d4ff] transition hover:bg-[#2f74ff33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6ea6ff]"
-                >
-                  <MapPinned size={20} />
-                  전국 지도 보기
-                </button>
+                {onVoteCountryMapView ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onVoteCountryMapView}
+                      className="inline-flex h-12 w-full min-w-[44px] items-center justify-center gap-2 rounded-xl border border-[#ff9f0a66] bg-[#ff6b001f] text-[15px] font-semibold text-[#ffd0a0] transition hover:bg-[#ff6b0033] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb46f]"
+                    >
+                      <MapPinned size={20} />
+                      {voteCountryActionLabel}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={onScopeMapView}
+                      className="inline-flex h-12 w-full min-w-[44px] items-center justify-center gap-2 rounded-xl border border-[#4f8dff66] bg-[#2f74ff1f] text-[15px] font-semibold text-[#b6d4ff] transition hover:bg-[#2f74ff33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6ea6ff]"
+                    >
+                      <MapPinned size={20} />
+                      {scopeActionLabel}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onScopeMapView}
+                    className="inline-flex h-12 w-full min-w-[44px] items-center justify-center gap-2 rounded-xl border border-[#4f8dff66] bg-[#2f74ff1f] text-[15px] font-semibold text-[#b6d4ff] transition hover:bg-[#2f74ff33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6ea6ff]"
+                  >
+                    <MapPinned size={20} />
+                    {scopeActionLabel}
+                  </button>
+                )}
 
                 {isAuthenticated ? (
                   <section className="rounded-xl border border-[#82d47a44] bg-[#1d3a201f] p-3 text-[#ade9a4]">
@@ -358,7 +412,11 @@ export function VoteResultModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex h-11 w-full min-w-[44px] items-center justify-center text-[14px] font-medium text-white/45 transition hover:text-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                  className={`inline-flex h-11 w-full min-w-[44px] items-center justify-center text-[14px] font-medium transition focus-visible:outline-none focus-visible:ring-2 ${
+                    isDarkTheme
+                      ? 'text-white/45 hover:text-white/75 focus-visible:ring-white/40'
+                      : 'text-slate-500 hover:text-slate-700 focus-visible:ring-slate-300'
+                  }`}
                 >
                   닫기
                 </button>

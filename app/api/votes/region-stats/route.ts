@@ -56,6 +56,7 @@ async function resolveTopicVisibility(
   request: Request,
   topicId: string,
   guestSessionId: string | undefined,
+  countryCode: string,
 ): Promise<ResultVisibility> {
   const supabase = getSupabaseServiceRoleClient();
   const user = await resolveUserFromAuthorizationHeader(request.headers.get('authorization'));
@@ -66,6 +67,7 @@ async function resolveTopicVisibility(
       .select('id')
       .eq('topic_id', topicId)
       .eq('user_id', user.id)
+      .eq('country_code', countryCode)
       .maybeSingle();
 
     if (voteError) {
@@ -81,6 +83,7 @@ async function resolveTopicVisibility(
       .select('id')
       .eq('topic_id', topicId)
       .eq('session_id', guestSessionId)
+      .eq('country_code', countryCode)
       .maybeSingle();
 
     if (guestVoteError) {
@@ -120,7 +123,7 @@ export async function GET(request: Request) {
 
     const { level } = parsed.data;
     const requestedCountry = parsed.data.country ? resolveSupportedCountry(parsed.data.country) : null;
-    let countryCode = requestedCountry ?? resolveSupportedCountry(resolveCountryCodeFromRequest(request));
+    const countryCode = requestedCountry ?? resolveSupportedCountry(resolveCountryCodeFromRequest(request));
     const scope = parsed.data.scope ?? (parsed.data.topicId ? 'topic' : 'all');
     const topicId = scope === 'topic' ? parsed.data.topicId ?? null : null;
     if (scope === 'topic' && !topicId) {
@@ -131,7 +134,7 @@ export async function GET(request: Request) {
     if (scope === 'topic' && topicId) {
       const { data: topicRow, error: topicError } = await supabase
         .from('vote_topics')
-        .select('id, country_code')
+        .select('id')
         .eq('id', topicId)
         .maybeSingle();
 
@@ -141,16 +144,12 @@ export async function GET(request: Request) {
       if (!topicRow) {
         return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
       }
-
-      const topicCountry = resolveSupportedCountry((topicRow as { country_code?: string | null }).country_code);
-      if (requestedCountry && requestedCountry !== topicCountry) {
-        return NextResponse.json({ error: '요청 국가와 주제 국가가 일치하지 않습니다.' }, { status: 404 });
-      }
-      countryCode = topicCountry;
     }
 
     const visibility: ResultVisibility =
-      scope === 'topic' && topicId ? await resolveTopicVisibility(request, topicId, guestSessionId) : 'locked';
+      scope === 'topic' && topicId
+        ? await resolveTopicVisibility(request, topicId, guestSessionId, countryCode)
+        : 'locked';
 
     const accumulated = new Map<string, { total: number; countA: number; countB: number }>();
     const appendRows = (rows: RegionStatsRpcRow[]) => {
@@ -173,6 +172,7 @@ export async function GET(request: Request) {
       const { data: rpcRows, error: rpcError } = await supabase.rpc('get_region_vote_stats', {
         p_topic_id: topicId,
         p_level: level,
+        p_country_code: countryCode,
       });
 
       if (rpcError) {
@@ -182,16 +182,10 @@ export async function GET(request: Request) {
       appendRows((Array.isArray(rpcRows) ? rpcRows : []) as RegionStatsRpcRow[]);
       topicCount = 1;
     } else {
-      let topicRowsQuery = supabase
+      const topicRowsQuery = supabase
         .from('vote_topics')
         .select('id')
         .eq('status', 'LIVE');
-
-      if (countryCode === 'KR') {
-        topicRowsQuery = topicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
-      } else {
-        topicRowsQuery = topicRowsQuery.eq('country_code', countryCode);
-      }
 
       const { data: topicRows, error: topicError } = await topicRowsQuery;
 
@@ -210,6 +204,7 @@ export async function GET(request: Request) {
             supabase.rpc('get_region_vote_stats', {
               p_topic_id: id,
               p_level: level,
+              p_country_code: countryCode,
             }),
           ),
         );

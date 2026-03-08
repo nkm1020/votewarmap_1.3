@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { UsersIcon, CheckIcon, ChevronDownIcon, CircleCheckIcon } from 'lucide-react';
+import { useTheme } from '@/contexts/ThemeContext';
 
 type LiveVoteCardOption = {
   key: string | null;
@@ -91,12 +92,14 @@ export function LiveVoteCard({
   rightOption,
   className,
 }: LiveVoteCardProps) {
+  const { resolvedTheme } = useTheme();
   const prefersReducedMotion = useReducedMotion();
   const [titleOverflowPx, setTitleOverflowPx] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const isDesktopRefined = variant === 'desktop_refined';
   const isLocked = resultVisibility === 'locked';
+  const isDarkTheme = resolvedTheme === 'dark';
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -156,15 +159,40 @@ export function LiveVoteCard({
   const shouldAnimateParticipantsBadge = isMobileViewport && !prefersReducedMotion;
   const marqueeDistance = Math.max(0, titleOverflowPx + 12);
   const marqueeDuration = Math.min(18, Math.max(6, marqueeDistance / 18));
+  const cardShellClass = isDarkTheme
+    ? 'border-white/14 bg-gradient-to-br from-[rgba(10,18,30,0.9)] via-[rgba(8,14,24,0.95)] to-[rgba(6,10,18,0.96)] shadow-[0_26px_52px_rgba(0,0,0,0.45)]'
+    : 'border-slate-200/90 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(246,249,253,0.94),rgba(236,242,248,0.98))] shadow-[0_22px_44px_rgba(148,163,184,0.22)]';
+  const desktopShellClass = isDarkTheme
+    ? 'lg:rounded-[34px] lg:border-white/20 lg:bg-[linear-gradient(145deg,rgba(10,18,30,0.9),rgba(8,14,24,0.96),rgba(5,9,16,0.98))] lg:shadow-[0_34px_68px_rgba(0,0,0,0.55)]'
+    : 'lg:rounded-[34px] lg:border-slate-200/90 lg:bg-[linear-gradient(150deg,rgba(255,255,255,0.98),rgba(243,247,252,0.96),rgba(235,241,248,0.98))] lg:shadow-[0_28px_52px_rgba(148,163,184,0.22)]';
+  const titleClass = isDarkTheme ? 'text-white/95' : 'text-slate-900';
+  const bodyTextClass = isDarkTheme ? 'text-white/80' : 'text-slate-700';
+  const dividerClass = isDarkTheme ? 'border-white/10' : 'border-slate-200/90';
+  const softSurfaceClass = isDarkTheme ? 'bg-white/10 text-white' : 'bg-slate-900/[0.08] text-slate-700';
+  const optionIdleClass = isDarkTheme
+    ? 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+    : 'border-slate-200 bg-slate-900/[0.04] hover:border-slate-300 hover:bg-slate-900/[0.07]';
+  const submitDisabledClass = isDarkTheme
+    ? 'cursor-not-allowed border border-white/10 bg-white/5 text-white/30'
+    : 'cursor-not-allowed border border-slate-200 bg-slate-900/[0.04] text-slate-400';
+  const submitEnabledClass = isDarkTheme
+    ? 'bg-white text-slate-900 shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:bg-slate-100'
+    : 'bg-slate-900 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)] hover:bg-slate-800';
+  const participantsBadgeClass = isDarkTheme
+    ? 'border-[#ff9f0a4d] bg-[#ff9f0a1a] text-[#ffad33]'
+    : 'border-[#d9770633] bg-[#ffb34726] text-[#c76600] shadow-[inset_0_1px_0_rgba(255,255,255,0.56)]';
+  const participantsPulseClass = isDarkTheme ? 'bg-[#ffb34755]' : 'bg-[#ff9a3d52]';
+  const participantsDotClass = isDarkTheme ? 'bg-[#ffd089]' : 'bg-[#d96a00]';
+  const participantsCountClass = isDarkTheme
+    ? 'bg-[#ffb3472a] text-[#ffd8ad]'
+    : 'bg-[#d977061f] text-[#b85a00] shadow-[0_1px_0_rgba(255,255,255,0.68),0_4px_10px_rgba(217,119,6,0.16)]';
 
   return (
     <motion.section
       layout
       transition={cardLayoutTransition}
-      className={`pointer-events-auto relative w-full overflow-hidden rounded-[30px] border border-white/14 bg-gradient-to-br from-[rgba(10,18,30,0.9)] via-[rgba(8,14,24,0.95)] to-[rgba(6,10,18,0.96)] shadow-[0_26px_52px_rgba(0,0,0,0.45)] backdrop-blur-2xl backdrop-saturate-150 ${
-        isDesktopRefined
-          ? 'lg:rounded-[34px] lg:border-white/20 lg:bg-[linear-gradient(145deg,rgba(10,18,30,0.9),rgba(8,14,24,0.96),rgba(5,9,16,0.98))] lg:shadow-[0_34px_68px_rgba(0,0,0,0.55)]'
-          : ''
+      className={`pointer-events-auto relative w-full overflow-hidden rounded-[30px] border backdrop-blur-2xl backdrop-saturate-150 ${cardShellClass} ${
+        isDesktopRefined ? desktopShellClass : ''
       } ${className ?? ''}`}
       data-topic-id={topicId ?? undefined}
     >
@@ -172,7 +200,13 @@ export function LiveVoteCard({
         <>
           <div className="pointer-events-none absolute inset-0 hidden lg:block bg-[radial-gradient(circle_at_12%_0%,rgba(255,159,10,0.18),transparent_38%)]" />
           <div className="pointer-events-none absolute inset-0 hidden lg:block bg-[radial-gradient(circle_at_88%_92%,rgba(47,116,255,0.16),transparent_42%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 hidden h-px lg:block bg-gradient-to-r from-transparent via-white/35 to-transparent" />
+          <div
+            className={`pointer-events-none absolute inset-x-0 top-0 hidden h-px lg:block ${
+              isDarkTheme
+                ? 'bg-gradient-to-r from-transparent via-white/35 to-transparent'
+                : 'bg-gradient-to-r from-transparent via-slate-300/90 to-transparent'
+            }`}
+          />
         </>
       ) : null}
 
@@ -181,7 +215,9 @@ export function LiveVoteCard({
           <div className="flex min-w-0 flex-col">
             <div className="mb-1.5 flex items-center gap-2">
               <motion.span
-                className={`inline-flex min-h-5 items-center gap-1.5 rounded-full border border-[#ff9f0a4d] bg-[#ff9f0a1a] px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-[#ffad33] ${
+                className={`inline-flex min-h-5 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide ${
+                  participantsBadgeClass
+                } ${
                   isDesktopRefined ? 'lg:min-h-6 lg:gap-2 lg:px-3 lg:text-[11px]' : ''
                 } relative overflow-hidden`}
                 animate={
@@ -216,14 +252,14 @@ export function LiveVoteCard({
                 ) : null}
                 <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center md:hidden">
                   {shouldAnimateParticipantsBadge ? (
-                    <span className="absolute inline-flex h-3.5 w-3.5 rounded-full bg-[#ffb34755] animate-ping" />
+                    <span className={`absolute inline-flex h-3.5 w-3.5 rounded-full animate-ping ${participantsPulseClass}`} />
                   ) : null}
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#ffd089]" />
+                  <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${participantsDotClass}`} />
                 </span>
                 <UsersIcon className="relative h-3 w-3" />
                 <span className="relative">총 참여수</span>
                 <motion.span
-                  className="relative inline-flex items-center rounded-full bg-[#ffb3472a] px-1.5 py-[1px] tabular-nums text-[#ffd8ad]"
+                  className={`relative inline-flex items-center rounded-full px-1.5 py-[1px] tabular-nums ${participantsCountClass}`}
                   animate={shouldAnimateParticipantsBadge ? { scale: [1, 1.06, 1] } : undefined}
                   transition={
                     shouldAnimateParticipantsBadge
@@ -239,7 +275,7 @@ export function LiveVoteCard({
               <motion.h2
                 ref={titleRef}
                 title={title}
-                className={`text-xl font-bold leading-tight text-white/95 ${
+                className={`text-xl font-bold leading-tight ${titleClass} ${
                   isDesktopRefined ? 'lg:text-[26px] lg:leading-[1.22]' : ''
                 } ${shouldAnimateTitle ? 'whitespace-nowrap pr-3' : 'truncate'}`}
                 style={
@@ -303,17 +339,17 @@ export function LiveVoteCard({
                 }`}
               >
                 {isLocked ? (
-                  <span className="w-full text-center text-white/80">
-                    현재 격차 <span className="font-bold text-white">{resolvedLockedGapPercent}%p</span> · 총{' '}
-                    <span className="font-bold text-white">{totalParticipantsCount}표</span>
+                  <span className={`w-full text-center ${bodyTextClass}`}>
+                    현재 격차 <span className={isDarkTheme ? 'font-bold text-white' : 'font-bold text-slate-900'}>{resolvedLockedGapPercent}%p</span> · 총{' '}
+                    <span className={isDarkTheme ? 'font-bold text-white' : 'font-bold text-slate-900'}>{totalParticipantsCount}표</span>
                   </span>
                 ) : (
                   <>
                     <span className="flex items-center gap-1.5 text-[#ff8b2f]">
-                      {leftOption.label} <span className="text-white/90">{displayPercent(leftOption.percentage)}</span>
+                      {leftOption.label} <span className={isDarkTheme ? 'text-white/90' : 'text-slate-900'}>{displayPercent(leftOption.percentage)}</span>
                     </span>
                     <span className="flex items-center gap-1.5 text-[#6ea6ff]">
-                      <span className="text-white/90">{displayPercent(rightOption.percentage)}</span> {rightOption.label}
+                      <span className={isDarkTheme ? 'text-white/90' : 'text-slate-900'}>{displayPercent(rightOption.percentage)}</span> {rightOption.label}
                     </span>
                   </>
                 )}
@@ -325,8 +361,9 @@ export function LiveVoteCard({
             layout
             initial={false}
             animate={{ height: isExpanded ? 12 : 6 }}
-            className={`relative w-full overflow-hidden rounded-full bg-slate-800 shadow-inner ${
-              isDesktopRefined ? 'lg:bg-slate-900/80 lg:ring-1 lg:ring-white/14' : ''
+            className={`relative w-full overflow-hidden rounded-full shadow-inner ${
+              isDarkTheme ? 'bg-slate-800' : 'bg-slate-900/[0.08]'
+            } ${isDesktopRefined ? (isDarkTheme ? 'lg:bg-slate-900/80 lg:ring-1 lg:ring-white/14' : 'lg:bg-slate-900/[0.08] lg:ring-1 lg:ring-slate-200/80') : ''
             }`}
           >
             {isLocked ? (
@@ -347,7 +384,7 @@ export function LiveVoteCard({
                 />
               </>
             ) : (
-              <div className="absolute inset-0 bg-white/8" />
+              <div className={`absolute inset-0 ${isDarkTheme ? 'bg-white/8' : 'bg-slate-900/[0.08]'}`} />
             )}
           </motion.div>
 
@@ -363,10 +400,10 @@ export function LiveVoteCard({
               transition={cardTransition}
               className="overflow-hidden"
             >
-              <div className="mt-4 border-t border-white/10 pt-5">
+              <div className={`mt-4 border-t pt-5 ${dividerClass}`}>
                 <motion.div layout className="mb-5">
-                  <p className={`mb-3 flex items-center gap-2 text-xs font-medium text-white/50 ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>
-                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-[10px] text-white">1</span>
+                  <p className={`mb-3 flex items-center gap-2 text-xs font-medium ${isDarkTheme ? 'text-white/50' : 'text-slate-500'} ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>
+                    <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${softSurfaceClass}`}>1</span>
                     당신의 취향을 선택하세요
                   </p>
                   <div className={`grid grid-cols-2 gap-3 ${isDesktopRefined ? 'lg:gap-3.5' : ''}`}>
@@ -383,7 +420,7 @@ export function LiveVoteCard({
                       className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
                         selectedOptionKey === leftOption.key
                           ? 'border-[#ff6b00] bg-[#ff6b001a] shadow-[0_0_20px_rgba(255,107,0,0.18)]'
-                          : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                          : optionIdleClass
                       } ${isDesktopRefined ? 'lg:min-h-[124px] lg:rounded-[20px] lg:p-5' : ''} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {selectedOptionKey === leftOption.key ? (
@@ -393,12 +430,12 @@ export function LiveVoteCard({
                       ) : null}
                       <span
                         className={`mb-1 block w-full px-1 text-center text-[clamp(1.2rem,4.2vw,2rem)] font-bold leading-[1.2] text-balance [word-break:keep-all] [overflow-wrap:anywhere] ${
-                          selectedOptionKey === leftOption.key ? 'text-[#ffad33]' : 'text-white/85'
+                          selectedOptionKey === leftOption.key ? 'text-[#ffad33]' : isDarkTheme ? 'text-white/85' : 'text-slate-800'
                         }`}
                       >
                         {leftOption.label}
                       </span>
-                      <span className="min-h-[16px] text-[11px] text-white/50">{leftOption.subtext || '\u00A0'}</span>
+                      <span className={`min-h-[16px] text-[11px] ${isDarkTheme ? 'text-white/50' : 'text-slate-500'}`}>{leftOption.subtext || '\u00A0'}</span>
                     </motion.button>
 
                     <motion.button
@@ -414,7 +451,7 @@ export function LiveVoteCard({
                       className={`relative flex min-h-[108px] flex-col items-center justify-center rounded-2xl border p-4 text-center transition-all duration-200 ${
                         selectedOptionKey === rightOption.key
                           ? 'border-[#2f74ff] bg-[#2f74ff1a] shadow-[0_0_20px_rgba(47,116,255,0.18)]'
-                          : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
+                          : optionIdleClass
                       } ${isDesktopRefined ? 'lg:min-h-[124px] lg:rounded-[20px] lg:p-5' : ''} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {selectedOptionKey === rightOption.key ? (
@@ -424,19 +461,19 @@ export function LiveVoteCard({
                       ) : null}
                       <span
                         className={`mb-1 block w-full px-1 text-center text-[clamp(1.2rem,4.2vw,2rem)] font-bold leading-[1.2] text-balance [word-break:keep-all] [overflow-wrap:anywhere] ${
-                          selectedOptionKey === rightOption.key ? 'text-[#6ea6ff]' : 'text-white/85'
+                          selectedOptionKey === rightOption.key ? 'text-[#6ea6ff]' : isDarkTheme ? 'text-white/85' : 'text-slate-800'
                         }`}
                       >
                         {rightOption.label}
                       </span>
-                      <span className="min-h-[16px] text-[11px] text-white/50">{rightOption.subtext || '\u00A0'}</span>
+                      <span className={`min-h-[16px] text-[11px] ${isDarkTheme ? 'text-white/50' : 'text-slate-500'}`}>{rightOption.subtext || '\u00A0'}</span>
                     </motion.button>
                   </div>
                 </motion.div>
 
                 <motion.div layout>
-                  <p className={`mb-3 flex items-center gap-2 text-xs font-medium text-white/50 ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>
-                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-[10px] text-white">2</span>
+                  <p className={`mb-3 flex items-center gap-2 text-xs font-medium ${isDarkTheme ? 'text-white/50' : 'text-slate-500'} ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>
+                    <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${softSurfaceClass}`}>2</span>
                     선택을 확정하세요
                   </p>
                   <button
@@ -444,9 +481,7 @@ export function LiveVoteCard({
                     onClick={onSubmitVote}
                     disabled={submitDisabled}
                     className={`flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold transition-all duration-200 ${
-                      submitDisabled
-                        ? 'cursor-not-allowed border border-white/10 bg-white/5 text-white/30'
-                        : 'bg-white text-slate-900 shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:bg-slate-100'
+                      submitDisabled ? submitDisabledClass : submitEnabledClass
                     } ${isDesktopRefined ? 'lg:h-[58px] lg:rounded-[18px] lg:text-[17px]' : ''}`}
                   >
                     {submitDisabled && submitLabel === '처리 중...' ? <CheckIcon className="h-4 w-4 opacity-70" /> : null}
@@ -455,7 +490,7 @@ export function LiveVoteCard({
                 </motion.div>
 
                 {message ? (
-                  <p className={`mt-3 text-center text-xs text-white/85 ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>{message}</p>
+                  <p className={`mt-3 text-center text-xs ${isDarkTheme ? 'text-white/85' : 'text-slate-700'} ${isDesktopRefined ? 'lg:text-[13px]' : ''}`}>{message}</p>
                 ) : null}
               </div>
             </motion.div>

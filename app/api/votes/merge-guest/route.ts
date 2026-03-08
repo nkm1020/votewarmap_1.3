@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     const userCountryCode = normalizeCountryCode((userRow as { country_code?: string | null } | null)?.country_code);
     const { data: guestVotes, error: guestVotesError } = await supabase
       .from('guest_votes_temp')
-      .select('topic_id')
+      .select('country_code')
       .eq('session_id', parsed.data.guestSessionId);
 
     if (guestVotesError) {
@@ -50,36 +50,16 @@ export async function POST(request: Request) {
       return internalServerError('app/api/votes/merge-guest/route.ts', guestVotesError);
     }
 
-    const topicIds = Array.from(
-      new Set(
-        (guestVotes ?? [])
-          .map((row) => String((row as { topic_id?: string | null }).topic_id ?? '').trim())
-          .filter((id) => id.length > 0),
-      ),
-    );
+    const hasCountryMismatch = (guestVotes ?? []).some((row) => {
+      const voteCountryCode = normalizeCountryCode((row as { country_code?: string | null }).country_code);
+      return voteCountryCode !== userCountryCode;
+    });
 
-    if (topicIds.length > 0) {
-      const { data: topicRows, error: topicRowsError } = await supabase
-        .from('vote_topics')
-        .select('id, country_code')
-        .in('id', topicIds);
-
-      if (topicRowsError) {
-        console.error('[votes/merge-guest] failed to load topic countries:', topicRowsError.message);
-        return internalServerError('app/api/votes/merge-guest/route.ts', topicRowsError);
-      }
-
-      const hasCountryMismatch = (topicRows ?? []).some((row) => {
-        const topicCountryCode = normalizeCountryCode((row as { country_code?: string | null }).country_code);
-        return topicCountryCode !== userCountryCode;
-      });
-
-      if (hasCountryMismatch) {
-        return NextResponse.json(
-          { error: '다른 국가의 임시 투표는 병합할 수 없습니다.' },
-          { status: 403 },
-        );
-      }
+    if (hasCountryMismatch) {
+      return NextResponse.json(
+        { error: '다른 국가의 임시 투표는 병합할 수 없습니다.' },
+        { status: 403 },
+      );
     }
 
     const { data, error } = await supabase.rpc('promote_guest_session_votes_to_user', {

@@ -25,7 +25,7 @@ import CountryTabs from '@/components/map/CountryTabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ADSENSE_SLOTS } from '@/lib/adsense';
-import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
+import { getCountryMapConfig, resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
@@ -38,7 +38,14 @@ import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
 import { LOCAL_STORAGE_KEYS } from '@/lib/vote/constants';
 import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
+import {
+  buildViewerVoteState,
+  type ResultVisibility,
+  type VoteResultSummaryResponse,
+  type VoteResultViewer,
+} from '@/lib/vote/result-summary';
 import type { HomeAnalyticsResponse, SchoolSearchItem, VoteRegionInput, VoteTopic } from '@/lib/vote/types';
+import { VoteResultScopeChooser } from '@/components/vote/VoteResultScopeChooser';
 
 const BaseCountryAdminMap = dynamic(() => import('@/components/map/BaseCountryAdminMap'), { ssr: false });
 
@@ -56,7 +63,6 @@ const REGION_MODAL_GPS_ONLY_HINT = '학교 미설정 계정은 정확한 위치 
 const REGION_MODAL_KR_SCHOOL_ONLY_HINT = '국내 사용자는 GPS 위치 기능이 출시 예정이라 학교 위치로만 투표할 수 있어요.';
 const KR_SCHOOL_REQUIRED_FOR_MEMBER_MESSAGE = '국내 사용자는 학교 등록 후 투표할 수 있어요. MY에서 학교를 등록해 주세요.';
 const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
-const CROSS_COUNTRY_VIEW_ONLY_MESSAGE = '다른 국가 주제는 조회만 가능하며 투표는 소속 국가에서만 가능합니다.';
 const PREFERRED_COUNTRY_STORAGE_KEY = 'preferred-country';
 const DESKTOP_LEFT_PANEL_MAP_FOCUS_OFFSET_X = 140;
 
@@ -66,7 +72,6 @@ type MainMapHomeProps = {
 
 type TopicCategory = 'food' | 'relationship' | 'work' | 'imagination';
 type TopicTab = 'all' | TopicCategory;
-type ResultVisibility = 'locked' | 'unlocked';
 type FeaturedTopicMetrics = {
   totalVotes: number;
   realtimeVotes: number;
@@ -74,14 +79,14 @@ type FeaturedTopicMetrics = {
   lastVoteAt: string | null;
 };
 
-type FeaturedResultSummaryResponse = {
-  viewer?: {
-    hasVote?: boolean;
-  };
-  visibility?: ResultVisibility;
-  myChoice?: {
-    optionKey?: string | null;
-  } | null;
+type FeaturedResultSummaryResponse = VoteResultSummaryResponse;
+type TopicVoteViewerState = VoteResultViewer;
+
+type ResultScopeChooserState = {
+  topicId: string;
+  topicTitle: string;
+  scopeCountryCode: SupportedCountry;
+  voteCountryCode: SupportedCountry;
 };
 
 type RegionHotTopic = {
@@ -395,7 +400,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
   const [featuredTopic, setFeaturedTopic] = useState<VoteTopic | null>(null);
   const [featuredMetrics, setFeaturedMetrics] = useState<FeaturedTopicMetrics | null>(null);
   const [isFeaturedLoading, setIsFeaturedLoading] = useState(true);
-  const [featuredHasVoted, setFeaturedHasVoted] = useState(false);
+  const [featuredVoteViewer, setFeaturedVoteViewer] = useState<TopicVoteViewerState>(() =>
+    buildViewerVoteState(resolveSupportedCountry(initialCountryCode)),
+  );
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [voteMessage, setVoteMessage] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
@@ -414,7 +421,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
   const [expandedHotTopicId, setExpandedHotTopicId] = useState<string | null>(null);
   const [hotTopicVoteMessage, setHotTopicVoteMessage] = useState<string | null>(null);
   const [isHotTopicSubmittingVote, setIsHotTopicSubmittingVote] = useState(false);
-  const [hotTopicVotedById, setHotTopicVotedById] = useState<Record<string, boolean>>({});
+  const [hotTopicViewerById, setHotTopicViewerById] = useState<Record<string, TopicVoteViewerState>>({});
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isSchoolSearching, setIsSchoolSearching] = useState(false);
   const [schoolResults, setSchoolResults] = useState<SchoolSearchItem[]>([]);
@@ -426,9 +433,32 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
   const [profileModalMessage, setProfileModalMessage] = useState<string | null>(null);
   const [voteAfterProfile, setVoteAfterProfile] = useState(false);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
+  const [resultScopeChooser, setResultScopeChooser] = useState<ResultScopeChooserState | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<SupportedCountry>(() =>
     resolveSupportedCountry(initialCountryCode),
   );
+  const buildResultHref = useCallback((
+    topicId: string,
+    country: SupportedCountry = selectedCountry,
+    extraParams?: Record<string, string | undefined>,
+  ) => {
+    const query = new URLSearchParams({
+      country,
+    });
+    Object.entries(extraParams ?? {}).forEach(([key, value]) => {
+      if (value) {
+        query.set(key, value);
+      }
+    });
+    return `/results/${topicId}?${query.toString()}`;
+  }, [selectedCountry]);
+  const pushResultPage = useCallback((
+    topicId: string,
+    country?: SupportedCountry,
+    extraParams?: Record<string, string | undefined>,
+  ) => {
+    router.push(buildResultHref(topicId, country, extraParams));
+  }, [buildResultHref, router]);
   const [selectedRegion, setSelectedRegion] = useState<{
     code: string;
     name: string;
@@ -469,15 +499,52 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
   const dockTouchStartYRef = useRef<number | null>(null);
   const dockTouchLastYRef = useRef<number | null>(null);
   const dockTouchMovedRef = useRef(false);
+  const manualCountrySelectionRef = useRef(false);
+  const previousViewerCountryRef = useRef<SupportedCountry | null>(null);
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
   const { isAuthenticated, profile, requiresSignupCompletion } = useAuth();
   const { resolvedTheme } = useTheme();
   const isDarkTheme = resolvedTheme === 'dark';
+  const mobileTopicHintPalette = isDarkTheme
+    ? {
+      textColor: '#ffd2a6',
+      textShadow: '0 2px 10px rgba(255, 107, 0, 0.18)',
+      svgFilter: 'drop-shadow(0 0 10px rgba(255, 159, 10, 0.2))',
+      chevronStrokePrimary: '#ff9f0a',
+      chevronStrokeSecondary: 'rgba(255, 167, 64, 0.95)',
+      chevronStrokeTertiary: 'rgba(255, 189, 120, 0.88)',
+      chevronStrokeWidth: 3,
+    }
+    : {
+      textColor: '#c76600',
+      textShadow: '0 1px 0 rgba(255, 255, 255, 0.72), 0 4px 12px rgba(255, 122, 0, 0.24)',
+      svgFilter: 'drop-shadow(0 0 8px rgba(255, 145, 0, 0.22)) drop-shadow(0 4px 16px rgba(255, 145, 0, 0.18))',
+      chevronStrokePrimary: '#d96a00',
+      chevronStrokeSecondary: 'rgba(244, 130, 24, 0.98)',
+      chevronStrokeTertiary: 'rgba(255, 168, 84, 0.94)',
+      chevronStrokeWidth: 3.4,
+    };
+  const topicPickerPalette = isDarkTheme
+    ? {
+      activeTabClass: 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]',
+      actionPillClass: 'border-[#ff9f0a55] bg-[#ff9f0a26] text-[#ffd2a6]',
+      expandedCardClass: 'border-[#ff9f0a55] bg-[color:var(--app-surface-soft-strong)]',
+      optionASelectedClass: 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]',
+      helperTextClass: 'text-[#ffd0a6]',
+      submitClass: 'border-[#ff9f0a66] bg-[#ff6b00] text-white hover:bg-[#ff7b1d]',
+    }
+    : {
+      activeTabClass: 'border-[#d9770659] bg-[#ffb34733] text-[#b85a00] shadow-[inset_0_1px_0_rgba(255,255,255,0.76),0_8px_16px_rgba(217,119,6,0.1)]',
+      actionPillClass: 'border-[#d9770666] bg-[#ffb34730] text-[#b85a00] shadow-[inset_0_1px_0_rgba(255,255,255,0.74),0_4px_10px_rgba(217,119,6,0.08)]',
+      expandedCardClass: 'border-[#d9770645] bg-[color:var(--app-surface-soft-strong)]',
+      optionASelectedClass: 'border-[#d9770673] bg-[#ffb3472e] text-[#a94f00] shadow-[inset_0_1px_0_rgba(255,255,255,0.74),0_6px_14px_rgba(217,119,6,0.08)]',
+      helperTextClass: 'text-[#a94f00]',
+      submitClass: 'border-[#d9770666] bg-[#d96a00] text-white hover:bg-[#e17a18]',
+    };
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const viewerCountryCode = (isAuthenticated ? profile?.country_code : initialCountryCode) ?? 'KR';
   const viewerSupportedCountry = resolveSupportedCountry(viewerCountryCode);
-  const isViewingOwnCountry = selectedCountry === viewerSupportedCountry;
   const isKoreaSelected = selectedCountry === 'KR';
   const canUseGpsForViewer = viewerCountryCode.toUpperCase() !== 'KR';
   const hasSavedSchool = Boolean(profile?.school_id);
@@ -489,10 +556,112 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     : isGpsOnlyVoteMode
       ? REGION_MODAL_GPS_ONLY_HINT
       : REGION_MODAL_HINT;
+  const buildFallbackViewerState = useCallback((hasTopicVote: boolean): TopicVoteViewerState => ({
+    ...buildViewerVoteState(viewerSupportedCountry),
+    type: isAuthenticated ? 'user' : guestSessionId ? 'guest' : 'anonymous',
+    hasVote: hasTopicVote,
+    hasTopicVote,
+    hasVoteInScope: hasTopicVote && selectedCountry === viewerSupportedCountry,
+    countryCode: viewerSupportedCountry,
+    voteCountryCode: hasTopicVote ? viewerSupportedCountry : null,
+  }), [guestSessionId, isAuthenticated, selectedCountry, viewerSupportedCountry]);
+  const openResultScopeChooser = useCallback(
+    (topicId: string, topicTitle: string, voteCountryCode: string | null | undefined) => {
+      const normalizedVoteCountry = voteCountryCode
+        ? resolveSupportedCountry(voteCountryCode)
+        : viewerSupportedCountry;
+      setResultScopeChooser({
+        topicId,
+        topicTitle,
+        scopeCountryCode: selectedCountry,
+        voteCountryCode: normalizedVoteCountry,
+      });
+    },
+    [selectedCountry, viewerSupportedCountry],
+  );
+  const closeResultScopeChooser = useCallback(() => {
+    setResultScopeChooser(null);
+  }, []);
+  const handleOpenScopeResult = useCallback(() => {
+    if (!resultScopeChooser) {
+      return;
+    }
+    pushResultPage(resultScopeChooser.topicId, resultScopeChooser.scopeCountryCode);
+    setResultScopeChooser(null);
+  }, [pushResultPage, resultScopeChooser]);
+  const handleOpenVoteCountryResult = useCallback(() => {
+    if (!resultScopeChooser) {
+      return;
+    }
+    pushResultPage(resultScopeChooser.topicId, resultScopeChooser.voteCountryCode, {
+      entry: 'history',
+      view: 'map',
+    });
+    setResultScopeChooser(null);
+  }, [pushResultPage, resultScopeChooser]);
+  const normalizeViewerState = useCallback((summary?: FeaturedResultSummaryResponse | null): TopicVoteViewerState => {
+    const fallback = buildFallbackViewerState(false);
+    const viewer = summary?.viewer;
+    if (!viewer) {
+      return fallback;
+    }
+
+    const hasTopicVote = Boolean(viewer.hasTopicVote ?? viewer.hasVote);
+    const voteCountryCode = viewer.voteCountryCode
+      ? resolveSupportedCountry(viewer.voteCountryCode)
+      : hasTopicVote
+        ? viewerSupportedCountry
+        : null;
+
+    return {
+      type: viewer.type ?? fallback.type,
+      hasVote: hasTopicVote,
+      hasTopicVote,
+      hasVoteInScope: Boolean(viewer.hasVoteInScope ?? (hasTopicVote && voteCountryCode === selectedCountry)),
+      countryCode: viewer.countryCode ? resolveSupportedCountry(viewer.countryCode) : viewerSupportedCountry,
+      voteCountryCode,
+    };
+  }, [buildFallbackViewerState, selectedCountry, viewerSupportedCountry]);
 
   useEffect(() => {
-    setSelectedCountry(viewerSupportedCountry);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedCountry = window.localStorage.getItem(PREFERRED_COUNTRY_STORAGE_KEY)?.trim();
+    if (!storedCountry) {
+      return;
+    }
+
+    manualCountrySelectionRef.current = true;
+    setSelectedCountry((prev) => {
+      const nextCountry = resolveSupportedCountry(storedCountry);
+      return prev === nextCountry ? prev : nextCountry;
+    });
+  }, []);
+
+  useEffect(() => {
+    setSelectedCountry((prev) => {
+      const previousViewerCountry = previousViewerCountryRef.current;
+      previousViewerCountryRef.current = viewerSupportedCountry;
+
+      if (manualCountrySelectionRef.current) {
+        if (previousViewerCountry === null) {
+          return prev;
+        }
+        if (prev !== previousViewerCountry) {
+          return prev;
+        }
+      }
+
+      return prev === viewerSupportedCountry ? prev : viewerSupportedCountry;
+    });
   }, [viewerSupportedCountry]);
+
+  const handleCountryTabSelect = useCallback((nextCountry: SupportedCountry) => {
+    manualCountrySelectionRef.current = true;
+    setSelectedCountry((prev) => (prev === nextCountry ? prev : nextCountry));
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -656,6 +825,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         );
       },
       onActiveCountryChange: (nextCountry: SupportedCountry) => {
+        if (nextCountry !== viewerSupportedCountry) {
+          manualCountrySelectionRef.current = true;
+        }
         setSelectedCountry((prev) => (prev === nextCountry ? prev : nextCountry));
       },
       countryFocusOffsetPx: [
@@ -671,6 +843,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       mapTheme,
       mergedMapStats,
       selectedCountry,
+      viewerSupportedCountry,
     ],
   );
   const ensureDesktopRegionHotTopics = useCallback((level: 'sido' | 'sigungu', code: string) => {
@@ -758,29 +931,29 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       const isLoading = Boolean(apiLevel) && (!cacheEntry || cacheEntry.status === 'loading');
 
       return (
-        <div className="w-[min(360px,calc(100vw-48px))] rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+        <div className="w-[min(360px,calc(100vw-48px))] rounded-[20px] border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-3.5 shadow-[var(--app-card-shadow)] backdrop-blur-2xl">
           <div className="flex items-center justify-between">
-            <h4 className="truncate text-[15px] font-semibold text-white">{context.name || context.code}</h4>
-            <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+            <h4 className="truncate text-[15px] font-semibold text-[color:var(--app-text-primary)]">{context.name || context.code}</h4>
+            <span className="rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--app-text-muted)]">
               {formatRegionLevelLabel(context.level)}
             </span>
           </div>
 
-          <p className="mt-2 text-[12px] text-white/68">
-            현재 격차 <span className="font-semibold text-white">{gapPercent}%p</span> · 총{' '}
-            <span className="font-semibold text-white">{totalVotes.toLocaleString()}표</span>
+          <p className="mt-2 text-[12px] text-[color:var(--app-text-secondary)]">
+            현재 격차 <span className="font-semibold text-[color:var(--app-text-primary)]">{gapPercent}%p</span> · 총{' '}
+            <span className="font-semibold text-[color:var(--app-text-primary)]">{totalVotes.toLocaleString()}표</span>
           </p>
 
-          <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
-            <p className="text-[12px] font-semibold text-white/84">이 지역에서 가장 활발한 주제 TOP 3</p>
+          <div className="mt-2.5 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-2.5">
+            <p className="text-[12px] font-semibold text-[color:var(--app-text-primary)]">이 지역에서 가장 활발한 주제 TOP 3</p>
 
             {!apiLevel ? (
-              <p className="mt-2 text-[12px] text-white/62">이 레벨에서는 KR 인기 주제 프리뷰를 제공하지 않습니다.</p>
+              <p className="mt-2 text-[12px] text-[color:var(--app-text-muted)]">이 레벨에서는 KR 인기 주제 프리뷰를 제공하지 않습니다.</p>
             ) : isLoading ? (
               <div className="mt-2.5 space-y-2">
-                <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
+                <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
+                <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
               </div>
             ) : cacheEntry && cacheEntry.status === 'success' && cacheEntry.topics.length > 0 ? (
               <div className="mt-2 space-y-1.5">
@@ -788,14 +961,14 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                   <button
                     key={topic.topicId}
                     type="button"
-                    onClick={() => router.push(`/results/${topic.topicId}`)}
-                    className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55"
+                    onClick={() => pushResultPage(topic.topicId)}
+                    className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-2.5 text-left transition hover:bg-[color:var(--app-surface-soft-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55"
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
+                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft-strong)] text-[11px] font-bold text-[color:var(--app-text-primary)]">
                         {index + 1}
                       </span>
-                      <span className="truncate text-[12px] font-medium text-white/88">{topic.title}</span>
+                      <span className="truncate text-[12px] font-medium text-[color:var(--app-text-primary)]">{topic.title}</span>
                     </div>
                     <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff]">
                       {topic.voteCount.toLocaleString()}표
@@ -804,7 +977,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-[12px] text-white/62">
+              <p className="mt-2 text-[12px] text-[color:var(--app-text-muted)]">
                 {cacheEntry?.error ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'}
               </p>
             )}
@@ -812,7 +985,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         </div>
       );
     },
-    [desktopRegionHotTopicsCache, router],
+    [desktopRegionHotTopicsCache, pushResultPage],
   );
   const ageDistributionRows = useMemo(() => {
     if (!homeAnalytics) {
@@ -893,9 +1066,12 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
   }, [expandedHotTopicId, popularTopics]);
 
   useEffect(() => {
-    const topicIds = popularTopics.map((topic) => topic.topicId);
+    const topicIds = Array.from(new Set([
+      ...popularTopics.map((topic) => topic.topicId),
+      ...availableTopics.map((topic) => topic.id),
+    ]));
     if (topicIds.length === 0) {
-      setHotTopicVotedById({});
+      setHotTopicViewerById({});
       return;
     }
 
@@ -904,12 +1080,12 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     const run = async () => {
       if (!isAuthenticated && !guestSessionId) {
         const pendingVotes = new Set(readPendingVotes());
-        const fallbackState = topicIds.reduce<Record<string, boolean>>((acc, topicId) => {
-          acc[topicId] = pendingVotes.has(topicId);
+        const fallbackState = topicIds.reduce<Record<string, TopicVoteViewerState>>((acc, topicId) => {
+          acc[topicId] = buildFallbackViewerState(pendingVotes.has(topicId));
           return acc;
         }, {});
         if (!cancelled) {
-          setHotTopicVotedById(fallbackState);
+          setHotTopicViewerById(fallbackState);
         }
         return;
       }
@@ -936,12 +1112,12 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
               headers,
             });
             if (!response.ok) {
-              return [topicId, false] as const;
+              return [topicId, buildFallbackViewerState(false)] as const;
             }
             const json = (await response.json()) as FeaturedResultSummaryResponse;
-            return [topicId, Boolean(json.viewer?.hasVote)] as const;
+            return [topicId, normalizeViewerState(json)] as const;
           } catch {
-            return [topicId, false] as const;
+            return [topicId, buildFallbackViewerState(false)] as const;
           }
         }),
       );
@@ -950,11 +1126,11 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         return;
       }
 
-      const nextState = resultRows.reduce<Record<string, boolean>>((acc, [topicId, hasVote]) => {
-        acc[topicId] = hasVote;
+      const nextState = resultRows.reduce<Record<string, TopicVoteViewerState>>((acc, [topicId, viewerState]) => {
+        acc[topicId] = viewerState;
         return acc;
       }, {});
-      setHotTopicVotedById(nextState);
+      setHotTopicViewerById(nextState);
     };
 
     void run();
@@ -962,7 +1138,15 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     return () => {
       cancelled = true;
     };
-  }, [guestSessionId, isAuthenticated, popularTopics, selectedCountry]);
+  }, [
+    availableTopics,
+    buildFallbackViewerState,
+    guestSessionId,
+    isAuthenticated,
+    normalizeViewerState,
+    popularTopics,
+    selectedCountry,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -974,7 +1158,6 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       try {
         const query = new URLSearchParams({
           status: 'LIVE',
-          country: selectedCountry,
         });
         const response = await fetch(`/api/votes/topics?${query.toString()}`, { cache: 'no-store' });
         const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
@@ -1009,7 +1192,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     return () => {
       cancelled = true;
     };
-  }, [selectedCountry]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1453,14 +1636,15 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     const syncFeaturedVoteState = async () => {
       const topicId = featuredTopic?.id;
       if (!topicId) {
-        setFeaturedHasVoted(false);
+        setFeaturedVoteViewer(buildFallbackViewerState(false));
         setFeaturedResultVisibility('locked');
         return;
       }
 
       if (!isAuthenticated && !guestSessionId) {
-        setFeaturedHasVoted(guestHasVoted);
-        setFeaturedResultVisibility(guestHasVoted ? 'unlocked' : 'locked');
+        const fallbackViewerState = buildFallbackViewerState(guestHasVoted);
+        setFeaturedVoteViewer(fallbackViewerState);
+        setFeaturedResultVisibility(fallbackViewerState.hasVoteInScope ? 'unlocked' : 'locked');
         return;
       }
 
@@ -1486,8 +1670,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
 
         if (!response.ok) {
           if (!cancelled) {
-            setFeaturedHasVoted(!isAuthenticated && guestHasVoted);
-            setFeaturedResultVisibility('locked');
+            const fallbackViewerState = buildFallbackViewerState(!isAuthenticated && guestHasVoted);
+            setFeaturedVoteViewer(fallbackViewerState);
+            setFeaturedResultVisibility(fallbackViewerState.hasVoteInScope ? 'unlocked' : 'locked');
           }
           return;
         }
@@ -1497,18 +1682,19 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           return;
         }
 
-        const hasVote = Boolean(json.viewer?.hasVote);
-        setFeaturedHasVoted(hasVote || (!isAuthenticated && guestHasVoted));
-        setFeaturedResultVisibility(json.visibility ?? (hasVote ? 'unlocked' : 'locked'));
+        const viewerState = normalizeViewerState(json);
+        setFeaturedVoteViewer(viewerState);
+        setFeaturedResultVisibility(json.visibility ?? (viewerState.hasVoteInScope ? 'unlocked' : 'locked'));
 
         const votedOptionKey = json.myChoice?.optionKey ?? null;
-        if (hasVote && votedOptionKey) {
+        if (viewerState.hasVoteInScope && votedOptionKey) {
           setSelectedOption(votedOptionKey);
         }
       } catch {
         if (!cancelled) {
-          setFeaturedHasVoted(!isAuthenticated && guestHasVoted);
-          setFeaturedResultVisibility('locked');
+          const fallbackViewerState = buildFallbackViewerState(!isAuthenticated && guestHasVoted);
+          setFeaturedVoteViewer(fallbackViewerState);
+          setFeaturedResultVisibility(fallbackViewerState.hasVoteInScope ? 'unlocked' : 'locked');
         }
       }
     };
@@ -1518,14 +1704,22 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     return () => {
       cancelled = true;
     };
-  }, [featuredTopic?.id, guestHasVoted, guestSessionId, isAuthenticated, selectedCountry]);
+  }, [
+    buildFallbackViewerState,
+    featuredTopic?.id,
+    guestHasVoted,
+    guestSessionId,
+    isAuthenticated,
+    normalizeViewerState,
+    selectedCountry,
+  ]);
 
   const canOpenFeaturedResult = useMemo(() => {
     if (!featuredTopic?.id) {
       return false;
     }
-    return isAuthenticated ? featuredHasVoted : guestHasVoted;
-  }, [featuredHasVoted, featuredTopic?.id, guestHasVoted, isAuthenticated]);
+    return featuredVoteViewer.hasTopicVote;
+  }, [featuredTopic?.id, featuredVoteViewer.hasTopicVote]);
 
   useEffect(() => {
     if (!isKoreaSelected || !isDesktopViewport || !desktopTooltipRegion) {
@@ -1903,17 +2097,35 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           body: JSON.stringify({
             topicId,
             optionKey,
+            countryCode: viewerSupportedCountry,
+            scopeCountryCode: selectedCountry,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
-        const json = (await response.json()) as { error?: string };
+        const json = (await response.json()) as {
+          error?: string;
+          voteCountryCode?: string;
+          isCrossCountryVote?: boolean;
+        };
         if (!response.ok) {
           if (response.status === 409) {
             setVoteMessage('이미 해당 주제에 투표했습니다.');
             if (!isAuthenticated) {
               setGuestHasVoted(true);
+            }
+            const existingVoteCountryCode = featuredVoteViewer.voteCountryCode ?? viewerSupportedCountry;
+            setFeaturedVoteViewer({
+              ...buildFallbackViewerState(true),
+              voteCountryCode: existingVoteCountryCode,
+              hasVoteInScope: existingVoteCountryCode === selectedCountry,
+            });
+            setFeaturedResultVisibility(existingVoteCountryCode === selectedCountry ? 'unlocked' : 'locked');
+            if (selectedCountry !== existingVoteCountryCode) {
+              openResultScopeChooser(topicId, featuredTopic?.title ?? '결과 보기', existingVoteCountryCode);
+            } else {
+              pushResultPage(topicId);
             }
             return;
           }
@@ -1926,11 +2138,19 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           setGuestHasVoted(true);
         }
 
+        const voteCountryCode = json.voteCountryCode ? resolveSupportedCountry(json.voteCountryCode) : viewerSupportedCountry;
+        const shouldOptimisticallyUpdateCurrentScope = selectedCountry === voteCountryCode;
+        setFeaturedVoteViewer({
+          ...buildFallbackViewerState(true),
+          voteCountryCode,
+          hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+        });
+
         const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
         const optimisticSidoCode = optimisticRegion.sidoCode;
         const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
-        if (optimisticSidoCode || optimisticSigunguCode) {
+        if (shouldOptimisticallyUpdateCurrentScope && (optimisticSidoCode || optimisticSigunguCode)) {
           let optimisticMap = mapStats;
           if (optimisticSidoCode) {
             optimisticMap = bumpRegionStat(optimisticMap, optimisticSidoCode, optionKey, optionAKey, optionBKey);
@@ -1964,9 +2184,17 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           );
         }
 
-        setFeaturedResultVisibility('unlocked');
-        setVoteMessage('투표가 반영되었습니다.');
-        router.push(`/results/${topicId}`);
+        setFeaturedResultVisibility(shouldOptimisticallyUpdateCurrentScope ? 'unlocked' : 'locked');
+        setVoteMessage(
+          shouldOptimisticallyUpdateCurrentScope
+            ? '투표가 반영되었습니다.'
+            : `${viewerSupportedCountry} 기준으로 투표가 반영되었습니다.`,
+        );
+        if (selectedCountry !== voteCountryCode || json.isCrossCountryVote) {
+          openResultScopeChooser(topicId, featuredTopic?.title ?? '결과 보기', voteCountryCode);
+        } else {
+          pushResultPage(topicId);
+        }
         return;
       } catch {
         setVoteMessage('투표 처리 중 오류가 발생했습니다.');
@@ -1982,20 +2210,25 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       homeMapCacheKey,
       isAuthenticated,
       mapStats,
+      openResultScopeChooser,
+      featuredTopic?.title,
+      featuredVoteViewer.voteCountryCode,
+      buildFallbackViewerState,
+      pushResultPage,
       resolveOptimisticRegionCodes,
-      router,
       selectedOption,
+      selectedCountry,
+      viewerSupportedCountry,
     ],
   );
 
   const handleVote = useCallback(async () => {
     if (canOpenFeaturedResult && featuredTopic?.id) {
-      router.push(`/results/${featuredTopic.id}`);
-      return;
-    }
-
-    if (!isViewingOwnCountry) {
-      setVoteMessage(CROSS_COUNTRY_VIEW_ONLY_MESSAGE);
+      if (selectedCountry !== viewerSupportedCountry) {
+        openResultScopeChooser(featuredTopic.id, featuredTopic.title, featuredVoteViewer.voteCountryCode);
+      } else {
+        pushResultPage(featuredTopic.id);
+      }
       setIsVoteCardCollapsed(false);
       return;
     }
@@ -2046,13 +2279,17 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     featuredTopic,
     canSkipLocationPrompt,
     canUseGpsForViewer,
+    featuredVoteViewer.voteCountryCode,
     hasSavedSchool,
     isAuthenticated,
-    isViewingOwnCountry,
+    openResultScopeChooser,
+    pushResultPage,
     requiresSignupCompletion,
     router,
+    selectedCountry,
     selectedOption,
     submitVote,
+    viewerSupportedCountry,
   ]);
 
   const submitTopicPickerVote = useCallback(
@@ -2084,20 +2321,40 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           body: JSON.stringify({
             topicId,
             optionKey,
+            countryCode: viewerSupportedCountry,
+            scopeCountryCode: selectedCountry,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
-        const json = (await response.json()) as { error?: string };
+        const json = (await response.json()) as {
+          error?: string;
+          voteCountryCode?: string;
+          isCrossCountryVote?: boolean;
+        };
         if (!response.ok) {
           if (response.status === 409) {
             setPickerVoteMessage('이미 투표한 주제입니다. 결과 페이지로 이동합니다.');
             if (!isAuthenticated) {
               setGuestHasVoted(true);
             }
+            const existingVoteCountryCode =
+              hotTopicViewerById[topicId]?.voteCountryCode ?? viewerSupportedCountry;
+            setHotTopicViewerById((prev) => ({
+              ...prev,
+              [topicId]: {
+                ...buildFallbackViewerState(true),
+                voteCountryCode: existingVoteCountryCode,
+                hasVoteInScope: existingVoteCountryCode === selectedCountry,
+              },
+            }));
             setIsTopicPickerOpen(false);
-            router.push(`/results/${topicId}`);
+            if (selectedCountry !== existingVoteCountryCode) {
+              openResultScopeChooser(topicId, topicById.get(topicId)?.title ?? '결과 보기', existingVoteCountryCode);
+            } else {
+              pushResultPage(topicId);
+            }
             return;
           }
           setPickerVoteMessage(json.error ?? '투표 처리 중 오류가 발생했습니다.');
@@ -2109,11 +2366,22 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           setGuestHasVoted(true);
         }
 
+        const voteCountryCode = json.voteCountryCode ? resolveSupportedCountry(json.voteCountryCode) : viewerSupportedCountry;
+        const shouldOptimisticallyUpdateCurrentScope = selectedCountry === voteCountryCode;
+        setHotTopicViewerById((prev) => ({
+          ...prev,
+          [topicId]: {
+            ...buildFallbackViewerState(true),
+            voteCountryCode,
+            hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+          },
+        }));
+
         const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
         const optimisticSidoCode = optimisticRegion.sidoCode;
         const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
-        if (optimisticSidoCode || optimisticSigunguCode) {
+        if (shouldOptimisticallyUpdateCurrentScope && (optimisticSidoCode || optimisticSigunguCode)) {
           let optimisticMap = mapStats;
           if (optimisticSidoCode) {
             optimisticMap = bumpRegionStat(optimisticMap, optimisticSidoCode, optionKey, optionAKey, optionBKey);
@@ -2150,9 +2418,26 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           }
         }
 
-        setPickerVoteMessage('투표가 반영되었습니다. 결과 페이지로 이동합니다.');
+        if (featuredTopic?.id === topicId) {
+          setFeaturedVoteViewer({
+            ...buildFallbackViewerState(true),
+            voteCountryCode,
+            hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+          });
+          setFeaturedResultVisibility(shouldOptimisticallyUpdateCurrentScope ? 'unlocked' : 'locked');
+        }
+
+        setPickerVoteMessage(
+          shouldOptimisticallyUpdateCurrentScope
+            ? '투표가 반영되었습니다. 결과 페이지로 이동합니다.'
+            : `${viewerSupportedCountry} 기준으로 투표가 반영되었습니다.`,
+        );
         setIsTopicPickerOpen(false);
-        router.push(`/results/${topicId}`);
+        if (selectedCountry !== voteCountryCode || json.isCrossCountryVote) {
+          openResultScopeChooser(topicId, topicById.get(topicId)?.title ?? '결과 보기', voteCountryCode);
+        } else {
+          pushResultPage(topicId);
+        }
       } catch {
         setPickerVoteMessage('투표 처리 중 오류가 발생했습니다.');
       } finally {
@@ -2160,20 +2445,31 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       }
     },
     [
-      featuredTopic?.id,
       guestSessionId,
       homeMapCacheKey,
       isAuthenticated,
       mapStats,
+      hotTopicViewerById,
+      buildFallbackViewerState,
+      featuredTopic,
+      openResultScopeChooser,
+      pushResultPage,
       resolveOptimisticRegionCodes,
-      router,
+      selectedCountry,
+      topicById,
+      viewerSupportedCountry,
     ],
   );
 
   const handleTopicPickerVoteSubmit = useCallback(
     async (topic: VoteTopic) => {
-      if (!isViewingOwnCountry) {
-        setPickerVoteMessage(CROSS_COUNTRY_VIEW_ONLY_MESSAGE);
+      const topicViewer = hotTopicViewerById[topic.id];
+      if (topicViewer?.hasTopicVote) {
+        if ((topicViewer.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry) {
+          openResultScopeChooser(topic.id, topic.title, topicViewer.voteCountryCode ?? viewerSupportedCountry);
+        } else {
+          pushResultPage(topic.id);
+        }
         return;
       }
 
@@ -2229,59 +2525,18 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       canSkipLocationPrompt,
       canUseGpsForViewer,
       hasSavedSchool,
+      hotTopicViewerById,
       isAuthenticated,
-      isViewingOwnCountry,
+      openResultScopeChooser,
       pickerSelectedOptionKey,
+      pushResultPage,
       requiresSignupCompletion,
       router,
+      selectedCountry,
       submitTopicPickerVote,
+      viewerSupportedCountry,
     ],
   );
-
-  const handleSaveRegionOnly = useCallback(async () => {
-    const payload = buildPendingRegionInput();
-    if (!payload) {
-      if (pendingPickerVote) {
-        setPickerVoteMessage(regionModalHintText);
-      } else if (pendingHotTopicVote) {
-        setHotTopicVoteMessage(regionModalHintText);
-      } else {
-        setVoteMessage(regionModalHintText);
-      }
-      return;
-    }
-
-    setShowProfileModal(false);
-
-    if (pendingPickerVote) {
-      const pendingVote = pendingPickerVote;
-      setPendingPickerVote(null);
-      await submitTopicPickerVote(pendingVote, payload);
-      return;
-    }
-
-    if (pendingHotTopicVote) {
-      const pendingVote = pendingHotTopicVote;
-      setPendingHotTopicVote(null);
-      await submitTopicPickerVote(pendingVote, payload);
-      return;
-    }
-
-    if (voteAfterProfile) {
-      setVoteAfterProfile(false);
-      await submitVote(payload);
-    } else {
-      setVoteMessage('지역 정보가 저장되었습니다.');
-    }
-  }, [
-    buildPendingRegionInput,
-    pendingPickerVote,
-    pendingHotTopicVote,
-    regionModalHintText,
-    submitTopicPickerVote,
-    submitVote,
-    voteAfterProfile,
-  ]);
 
   const handleTopicPickerClose = useCallback(() => {
     setIsTopicPickerOpen(false);
@@ -2335,20 +2590,39 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           body: JSON.stringify({
             topicId,
             optionKey,
+            countryCode: viewerSupportedCountry,
+            scopeCountryCode: selectedCountry,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
-        const json = (await response.json()) as { error?: string };
+        const json = (await response.json()) as {
+          error?: string;
+          voteCountryCode?: string;
+          isCrossCountryVote?: boolean;
+        };
         if (!response.ok) {
           if (response.status === 409) {
-            setHotTopicVotedById((prev) => ({ ...prev, [topicId]: true }));
             setHotTopicVoteMessage('이미 투표한 주제입니다. 결과 페이지로 이동합니다.');
             if (!isAuthenticated) {
               setGuestHasVoted(true);
             }
-            router.push(`/results/${topicId}`);
+            const existingVoteCountryCode =
+              hotTopicViewerById[topicId]?.voteCountryCode ?? viewerSupportedCountry;
+            setHotTopicViewerById((prev) => ({
+              ...prev,
+              [topicId]: {
+                ...buildFallbackViewerState(true),
+                voteCountryCode: existingVoteCountryCode,
+                hasVoteInScope: existingVoteCountryCode === selectedCountry,
+              },
+            }));
+            if (selectedCountry !== existingVoteCountryCode) {
+              openResultScopeChooser(topicId, topicById.get(topicId)?.title ?? '결과 보기', existingVoteCountryCode);
+            } else {
+              pushResultPage(topicId);
+            }
             return;
           }
           setHotTopicVoteMessage(json.error ?? '투표 처리 중 오류가 발생했습니다.');
@@ -2360,13 +2634,22 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           setGuestHasVoted(true);
         }
 
-        setHotTopicVotedById((prev) => ({ ...prev, [topicId]: true }));
+        const voteCountryCode = json.voteCountryCode ? resolveSupportedCountry(json.voteCountryCode) : viewerSupportedCountry;
+        const shouldOptimisticallyUpdateCurrentScope = selectedCountry === voteCountryCode;
+        setHotTopicViewerById((prev) => ({
+          ...prev,
+          [topicId]: {
+            ...buildFallbackViewerState(true),
+            voteCountryCode,
+            hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+          },
+        }));
 
         const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
         const optimisticSidoCode = optimisticRegion.sidoCode;
         const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
-        if (optimisticSidoCode || optimisticSigunguCode) {
+        if (shouldOptimisticallyUpdateCurrentScope && (optimisticSidoCode || optimisticSigunguCode)) {
           let optimisticMap = mapStats;
           if (optimisticSidoCode) {
             optimisticMap = bumpRegionStat(optimisticMap, optimisticSidoCode, optionKey, optionAKey, optionBKey);
@@ -2399,13 +2682,26 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                 countB: prev.countB + (optionKey === optionBKey ? 1 : 0),
               }, 'unlocked'),
             );
-            setFeaturedResultVisibility('unlocked');
+            setFeaturedVoteViewer({
+              ...buildFallbackViewerState(true),
+              voteCountryCode,
+              hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+            });
+            setFeaturedResultVisibility(shouldOptimisticallyUpdateCurrentScope ? 'unlocked' : 'locked');
           }
         }
 
         setExpandedHotTopicId(null);
-        setHotTopicVoteMessage('투표가 반영되었습니다. 결과 페이지로 이동합니다.');
-        router.push(`/results/${topicId}`);
+        setHotTopicVoteMessage(
+          shouldOptimisticallyUpdateCurrentScope
+            ? '투표가 반영되었습니다. 결과 페이지로 이동합니다.'
+            : `${viewerSupportedCountry} 기준으로 투표가 반영되었습니다.`,
+        );
+        if (selectedCountry !== voteCountryCode || json.isCrossCountryVote) {
+          openResultScopeChooser(topicId, topicById.get(topicId)?.title ?? '결과 보기', voteCountryCode);
+        } else {
+          pushResultPage(topicId);
+        }
       } catch {
         setHotTopicVoteMessage('투표 처리 중 오류가 발생했습니다.');
       } finally {
@@ -2418,15 +2714,76 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       homeMapCacheKey,
       isAuthenticated,
       mapStats,
+      hotTopicViewerById,
+      buildFallbackViewerState,
+      openResultScopeChooser,
+      pushResultPage,
       resolveOptimisticRegionCodes,
-      router,
+      selectedCountry,
+      topicById,
+      viewerSupportedCountry,
     ],
   );
 
+  const handleSaveRegionOnly = useCallback(async () => {
+    const payload = buildPendingRegionInput();
+    if (!payload) {
+      if (pendingPickerVote) {
+        setPickerVoteMessage(regionModalHintText);
+      } else if (pendingHotTopicVote) {
+        setHotTopicVoteMessage(regionModalHintText);
+      } else {
+        setVoteMessage(regionModalHintText);
+      }
+      return;
+    }
+
+    setShowProfileModal(false);
+
+    if (pendingPickerVote) {
+      const pendingVote = pendingPickerVote;
+      setPendingPickerVote(null);
+      await submitTopicPickerVote(pendingVote, payload);
+      return;
+    }
+
+    if (pendingHotTopicVote) {
+      const pendingVote = pendingHotTopicVote;
+      setPendingHotTopicVote(null);
+      await submitHotTopicVote(pendingVote, payload);
+      return;
+    }
+
+    if (voteAfterProfile) {
+      setVoteAfterProfile(false);
+      await submitVote(payload);
+    } else {
+      setVoteMessage('지역 정보가 저장되었습니다.');
+    }
+  }, [
+    buildPendingRegionInput,
+    pendingPickerVote,
+    pendingHotTopicVote,
+    regionModalHintText,
+    submitHotTopicVote,
+    submitTopicPickerVote,
+    submitVote,
+    voteAfterProfile,
+  ]);
+
   const handleHotTopicImmediateVote = useCallback(
     async (targetVote: PendingTopicPickerVote) => {
-      if (!isViewingOwnCountry) {
-        setHotTopicVoteMessage(CROSS_COUNTRY_VIEW_ONLY_MESSAGE);
+      const topicViewer = hotTopicViewerById[targetVote.topicId];
+      if (topicViewer?.hasTopicVote) {
+        if ((topicViewer.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry) {
+          openResultScopeChooser(
+            targetVote.topicId,
+            topicById.get(targetVote.topicId)?.title ?? '결과 보기',
+            topicViewer.voteCountryCode ?? viewerSupportedCountry,
+          );
+        } else {
+          pushResultPage(targetVote.topicId);
+        }
         return;
       }
 
@@ -2463,11 +2820,16 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
       canSkipLocationPrompt,
       canUseGpsForViewer,
       hasSavedSchool,
+      hotTopicViewerById,
       isAuthenticated,
-      isViewingOwnCountry,
+      openResultScopeChooser,
+      pushResultPage,
       requiresSignupCompletion,
       router,
+      selectedCountry,
       submitHotTopicVote,
+      topicById,
+      viewerSupportedCountry,
     ],
   );
 
@@ -2621,12 +2983,12 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
     setVoteMessage(null);
     setHotTopicVoteMessage(null);
     setPickerVoteMessage(null);
-    setFeaturedHasVoted(false);
+    setFeaturedVoteViewer(buildFallbackViewerState(false));
     setGuestHasVoted(false);
-    setHotTopicVotedById({});
+    setHotTopicViewerById({});
     setExpandedHotTopicId(null);
     setExpandedPickerTopicId(null);
-  }, [selectedCountry]);
+  }, [buildFallbackViewerState, selectedCountry]);
 
   return (
     <div
@@ -2670,7 +3032,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
               <>
                 <CountryTabs
                   selectedCountry={selectedCountry}
-                  onSelectCountry={setSelectedCountry}
+                  onSelectCountry={handleCountryTabSelect}
                   compact
                 />
                 <AccountMenuButton />
@@ -2684,7 +3046,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                 type="button"
                 onClick={() => setIsVoteCardCollapsed(false)}
                 aria-label="투표 섹션 열기"
-                className="pointer-events-auto hidden lg:flex lg:min-h-[116px] lg:w-[68px] lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:rounded-2xl lg:border lg:border-white/18 lg:bg-[rgba(10,18,30,0.86)] lg:text-white/86 lg:shadow-[0_16px_34px_rgba(0,0,0,0.38)] lg:transition-all lg:duration-200 lg:hover:border-[#ff9f0a]/45 lg:hover:bg-[rgba(13,20,34,0.95)] lg:hover:text-white lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#ff9f0a]/60"
+                className="pointer-events-auto hidden lg:flex lg:min-h-[116px] lg:w-[68px] lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:rounded-2xl lg:border lg:border-[color:var(--app-border)] lg:bg-[color:var(--app-surface)] lg:text-[color:var(--app-text-secondary)] lg:shadow-[var(--app-card-shadow)] lg:transition-all lg:duration-200 lg:hover:border-[#ff9f0a]/45 lg:hover:bg-[color:var(--app-surface-strong)] lg:hover:text-[color:var(--app-text-primary)] lg:focus-visible:outline-none lg:focus-visible:ring-2 lg:focus-visible:ring-[#ff9f0a]/60"
               >
                 <span className="text-center text-[12px] font-semibold leading-tight">
                   투표
@@ -2711,8 +3073,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
               submitDisabled={
                 canOpenFeaturedResult
                   ? false
-                  : !isViewingOwnCountry ||
-                  !selectedOption ||
+                  : !selectedOption ||
                   !featuredTopic ||
                   !featuredOptionAKey ||
                   !featuredOptionBKey ||
@@ -2724,12 +3085,14 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                 isSubmittingVote
                   ? '처리 중...'
                   : canOpenFeaturedResult
-                    ? '이미 투표완료하셨습니다 · 결과보기'
-                    : !isViewingOwnCountry
-                      ? '타국 조회 모드 · 투표 불가'
+                    ? selectedCountry === viewerSupportedCountry
+                      ? '이미 투표완료하셨습니다 · 결과보기'
+                      : '이미 투표완료하셨습니다 · 결과 보기 선택'
                       : !selectedOption
                       ? '선택 후 투표하기'
-                      : '투표 제출하기'
+                      : selectedCountry === viewerSupportedCountry
+                        ? '투표 제출하기'
+                        : '투표하기 · 내 국가 기준 반영'
               }
               message={voteMessage}
               isStatsLoading={isStatsLoading}
@@ -2752,39 +3115,39 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
             {selectedRegion ? (
               <section
                 ref={selectedRegionPanelRef}
-                className={`pointer-events-auto shrink-0 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl lg:rounded-[24px] lg:border-white/20 lg:bg-[linear-gradient(150deg,rgba(11,18,29,0.86),rgba(8,13,22,0.94))] lg:p-4 lg:shadow-[0_20px_42px_rgba(0,0,0,0.4)] ${isVoteCardCollapsed ? 'lg:hidden' : ''
+                className={`pointer-events-auto shrink-0 rounded-[20px] border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-3.5 shadow-[var(--app-card-shadow)] backdrop-blur-2xl lg:rounded-[24px] lg:p-4 lg:shadow-[var(--app-modal-shadow)] ${isVoteCardCollapsed ? 'lg:hidden' : ''
                   }`}
               >
                 <div className="flex items-center justify-between">
-                  <h4 className="truncate text-[15px] font-semibold text-white lg:text-[17px]">
+                  <h4 className="truncate text-[15px] font-semibold text-[color:var(--app-text-primary)] lg:text-[17px]">
                     {selectedRegion.name || selectedRegion.code}
                   </h4>
-                  <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75 lg:border-white/22 lg:bg-white/[0.1] lg:px-3 lg:text-xs">
+                  <span className="rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--app-text-muted)] lg:px-3 lg:text-xs">
                     {formatRegionLevelLabel(selectedRegion.level)}
                   </span>
                 </div>
 
-                <p className="mt-2 text-[12px] text-white/68 lg:mt-2.5 lg:text-[13px]">
+                <p className="mt-2 text-[12px] text-[color:var(--app-text-secondary)] lg:mt-2.5 lg:text-[13px]">
                   현재 격차{' '}
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold text-[color:var(--app-text-primary)]">
                     {Math.max(0, Math.round(selectedRegionStat?.gapPercent ?? 0))}%p
                   </span>{' '}
                   · 총{' '}
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold text-[color:var(--app-text-primary)]">
                     {((selectedRegionStat?.total ?? 0) || 0).toLocaleString()}표
                   </span>
                 </p>
 
-                <div className="mt-2.5 rounded-xl border border-white/14 bg-white/[0.03] px-3 py-2.5">
-                  <p className="text-[12px] font-semibold text-white/84 lg:text-[13px]">
+                <div className="mt-2.5 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-2.5">
+                  <p className="text-[12px] font-semibold text-[color:var(--app-text-primary)] lg:text-[13px]">
                     {isKoreaSelected ? '이 지역에서 가장 활발한 주제 TOP 3' : '이 지역의 핵심 지표'}
                   </p>
 
                   {isKoreaSelected && isRegionHotTopicsLoading ? (
                     <div className="mt-2.5 space-y-2">
-                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
-                      <div className="h-9 animate-pulse rounded-lg bg-white/8" />
+                      <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
+                      <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
+                      <div className="h-9 animate-pulse rounded-lg bg-[color:var(--app-surface-soft-strong)]" />
                     </div>
                   ) : isKoreaSelected && regionHotTopics.length > 0 ? (
                     <div className="mt-2 space-y-1.5">
@@ -2792,14 +3155,14 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                         <button
                           key={topic.topicId}
                           type="button"
-                          onClick={() => router.push(`/results/${topic.topicId}`)}
-                          className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-white/12 bg-white/[0.04] px-2.5 text-left transition hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55 lg:h-12 lg:rounded-xl lg:border-white/16 lg:bg-white/[0.05] lg:hover:bg-white/[0.11]"
+                    onClick={() => pushResultPage(topic.topicId)}
+                          className="inline-flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-2.5 text-left transition hover:bg-[color:var(--app-surface-soft-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/55 lg:h-12 lg:rounded-xl"
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[11px] font-bold text-white/86">
+                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft-strong)] text-[11px] font-bold text-[color:var(--app-text-primary)]">
                               {index + 1}
                             </span>
-                            <span className="truncate text-[12px] font-medium text-white/88 lg:text-[13px]">{topic.title}</span>
+                            <span className="truncate text-[12px] font-medium text-[color:var(--app-text-primary)] lg:text-[13px]">{topic.title}</span>
                           </div>
                           <span className="ml-2 shrink-0 text-[11px] font-semibold text-[#8fb8ff] lg:text-xs">
                             {topic.voteCount.toLocaleString()}표
@@ -2808,7 +3171,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-[12px] text-white/62">
+                    <p className="mt-2 text-[12px] text-[color:var(--app-text-muted)]">
                       {isKoreaSelected
                         ? regionHotTopicsError ?? '이 지역의 인기 주제 데이터가 아직 충분하지 않습니다.'
                         : '현재 이 국가는 지역 인기 주제 TOP 3를 준비 중입니다.'}
@@ -2853,7 +3216,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                   <button
                     type="button"
                     disabled
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white/72 opacity-80"
+                    className="hidden h-10 w-10 items-center justify-center rounded-full text-[color:var(--app-text-muted)] opacity-80 min-[1281px]:inline-flex"
                     aria-label="검색"
                   >
                     <Search className="h-5 w-5" />
@@ -2861,16 +3224,20 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                   <button
                     type="button"
                     onClick={() => setIsDesktopRightPanelOpen((prev) => !prev)}
-                    className={`inline-flex h-10 items-center rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] ${isDesktopRightPanelOpen
+                    className={`inline-flex h-10 shrink-0 items-center whitespace-nowrap rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] max-[1100px]:h-9 max-[1100px]:w-9 max-[1100px]:justify-center max-[1100px]:px-0 ${isDesktopRightPanelOpen
                         ? 'border border-[#ff9f0a88] bg-[#ff6b00] text-white hover:bg-[#ff7a1f]'
-                        : 'border border-white/20 bg-white/6 text-white/88 hover:bg-white/12 hover:text-white'
+                        : 'border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] text-[color:var(--app-text-primary)] hover:bg-[color:var(--app-surface-soft-strong)] hover:text-[color:var(--app-text-primary)]'
                       }`}
+                    aria-label="결과 분석"
+                    title="결과 분석"
                   >
-                    결과 분석
+                    <BarChart2 className="h-4 w-4 min-[1101px]:hidden" />
+                    <span className="max-[1100px]:sr-only min-[1101px]:inline">결과 분석</span>
                   </button>
                   <CountryTabs
                     selectedCountry={selectedCountry}
-                    onSelectCountry={setSelectedCountry}
+                    onSelectCountry={handleCountryTabSelect}
+                    desktopExpandable
                   />
                   <AccountMenuButton />
                 </>
@@ -2956,7 +3323,10 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                             ) : (
                               popularTopics.map((topic) => {
                                 const isExpanded = expandedHotTopicId === topic.topicId;
-                                const hasVoted = Boolean(hotTopicVotedById[topic.topicId]);
+                                const topicViewer = hotTopicViewerById[topic.topicId];
+                                const hasVoted = Boolean(topicViewer?.hasTopicVote);
+                                const opensCrossCountryChoice =
+                                  hasVoted && (topicViewer?.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry;
                                 const canShowDetailedDistribution = hasVoted && topic.hasDistribution;
                                 const topicMeta = topicById.get(topic.topicId);
                                 const optionA = topicMeta?.options.find((option) => option.position === 1) ?? null;
@@ -3028,11 +3398,10 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                         <button
                                           type="button"
                                           onClick={() => handleDesktopHotTopicToggle(topic.topicId)}
-                                          disabled={!isViewingOwnCountry}
-                                          className="w-full rounded-[12px] py-2.5 text-[13px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                                          className="w-full rounded-[12px] py-2.5 text-[13px] font-bold transition-colors"
                                           style={{ backgroundColor: desktopColors.buttonBg, color: desktopColors.textPrimary }}
                                         >
-                                          {isViewingOwnCountry ? '투표하기' : '조회 전용'}
+                                          투표하기
                                         </button>
                                       ) : null}
 
@@ -3050,7 +3419,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                                     optionBKey: optionB.key,
                                                   })
                                                 }
-                                                disabled={isHotTopicSubmittingVote || !isViewingOwnCountry}
+                                                disabled={isHotTopicSubmittingVote}
                                                 className="rounded-[12px] bg-[#ff6b00]/10 py-3 text-[14px] font-bold text-[#ffad63] transition-colors hover:bg-[#ff6b00]/22 disabled:cursor-not-allowed disabled:opacity-60"
                                               >
                                                 {optionA.label}
@@ -3065,7 +3434,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                                     optionBKey: optionB.key,
                                                   })
                                                 }
-                                                disabled={isHotTopicSubmittingVote || !isViewingOwnCountry}
+                                                disabled={isHotTopicSubmittingVote}
                                                 className="rounded-[12px] bg-[#2f74ff]/10 py-3 text-[14px] font-bold text-[#8dbdff] transition-colors hover:bg-[#2f74ff]/22 disabled:cursor-not-allowed disabled:opacity-60"
                                               >
                                                 {optionB.label}
@@ -3077,9 +3446,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                             </p>
                                           )}
 
-                                          {!isViewingOwnCountry ? (
+                                          {selectedCountry !== viewerSupportedCountry ? (
                                             <p className="mt-2 text-xs" style={{ color: desktopColors.red }}>
-                                              {CROSS_COUNTRY_VIEW_ONLY_MESSAGE}
+                                              지금 투표하면 {viewerSupportedCountry} 기준 결과에 반영됩니다.
                                             </p>
                                           ) : hotTopicVoteMessage ? (
                                             <p className="mt-2 text-xs" style={{ color: desktopColors.red }}>
@@ -3092,7 +3461,17 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                       {hasVoted ? (
                                         <button
                                           type="button"
-                                          onClick={() => router.push(`/results/${topic.topicId}`)}
+                                          onClick={() => {
+                                            if (opensCrossCountryChoice) {
+                                              openResultScopeChooser(
+                                                topic.topicId,
+                                                topic.title,
+                                                topicViewer?.voteCountryCode ?? viewerSupportedCountry,
+                                              );
+                                              return;
+                                            }
+                                            pushResultPage(topic.topicId);
+                                          }}
                                           className="mt-3 w-full rounded-[12px] border py-2.5 text-center text-[13px] font-bold transition-colors"
                                           style={{
                                             borderColor: 'rgba(47,116,255,0.42)',
@@ -3100,7 +3479,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                             color: '#8dbdff',
                                           }}
                                         >
-                                          결과보기
+                                          {opensCrossCountryChoice ? '결과 보기 선택' : '결과보기'}
                                         </button>
                                       ) : null}
                                     </div>
@@ -3314,11 +3693,11 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
             onTouchMove={handleBottomDockTouchMove}
             onTouchEnd={handleBottomDockTouchEnd}
             onTouchCancel={handleBottomDockTouchEnd}
-            className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
+            className="pointer-events-auto border-t border-[color:var(--app-border)] bg-[color:var(--app-dock-bg)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[var(--app-dock-shadow)] backdrop-blur-2xl"
             style={{ touchAction: 'pan-y' }}
           >
             <div className="mx-auto max-w-[430px] px-3">
-              <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+              <section className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-dock-inner)] px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                     광고
@@ -3337,7 +3716,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           className="pointer-events-none absolute inset-x-0 z-20 transition-opacity duration-200 md:hidden"
           style={{ bottom: `${bottomAdHeight}px` }}
         >
-          <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <nav className="pointer-events-auto rounded-t-[24px] border-t border-[color:var(--app-border)] bg-[color:var(--app-dock-bg)] pb-2 pt-2 shadow-[var(--app-dock-shadow)] backdrop-blur-2xl">
             <div ref={bottomMenuGridRef} className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
               {[
                 { id: 'home' as const, label: '홈' },
@@ -3350,7 +3729,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                   type="button"
                   ref={tab.id === 'map' ? mapTabButtonRef : undefined}
                   onClick={() => handleBottomTabClick(tab.id)}
-                  className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
+                  className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${activeTab === tab.id ? 'bg-[color:var(--app-dock-inner)] text-[#ff9f0a]' : 'text-[color:var(--app-text-muted)] hover:text-[color:var(--app-text-primary)]'
                     }`}
                 >
                   {tab.label}
@@ -3372,11 +3751,18 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                 style={{ left: `${topicHintAnchorPercent}%` }}
               >
                 <div className="flex flex-col items-center leading-none">
-                  <span className="whitespace-nowrap text-[11px] font-semibold tracking-[-0.01em] text-[#ffd2a6]">
+                  <span
+                    className="whitespace-nowrap text-[11px] font-semibold tracking-[-0.01em]"
+                    style={{
+                      color: mobileTopicHintPalette.textColor,
+                      textShadow: mobileTopicHintPalette.textShadow,
+                    }}
+                  >
                     여기서 다른 주제를 선택하세요
                   </span>
                   <svg
                     className="home-chevron mt-0.5"
+                    style={{ filter: mobileTopicHintPalette.svgFilter }}
                     width="30"
                     height="36"
                     viewBox="0 0 100 130"
@@ -3388,8 +3774,8 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                       <polyline
                         id="home-chevron-shape"
                         points="38,8 50,24 62,8"
-                        stroke="#ff9f0a"
-                        strokeWidth="3"
+                        stroke={mobileTopicHintPalette.chevronStrokePrimary}
+                        strokeWidth={mobileTopicHintPalette.chevronStrokeWidth}
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
@@ -3408,29 +3794,29 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
 
         {isTopicPickerOpen ? (
           <div
-            className="fixed inset-0 z-40 flex items-center justify-center bg-black/58 p-4"
+            className="fixed inset-0 z-40 flex items-center justify-center bg-[color:var(--app-overlay)] p-4"
             onClick={handleTopicPickerClose}
           >
             <section
               role="dialog"
               aria-modal="true"
               aria-labelledby="home-topic-picker-title"
-              className="w-full max-w-[860px] overflow-hidden rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.96)] shadow-2xl backdrop-blur-2xl"
+              className="w-full max-w-[860px] overflow-hidden rounded-[28px] border border-[color:var(--app-border)] bg-[color:var(--app-surface-elevated)] shadow-[var(--app-modal-shadow)] backdrop-blur-2xl"
               style={{ maxHeight: 'calc(100dvh - 2rem)' }}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 pb-3 pt-4">
+              <div className="flex items-start justify-between gap-3 border-b border-[color:var(--app-border)] px-5 pb-3 pt-4">
                 <div>
-                  <h4 id="home-topic-picker-title" className="text-[20px] font-semibold text-white">
+                  <h4 id="home-topic-picker-title" className="text-[20px] font-semibold text-[color:var(--app-text-primary)]">
                     다른 주제 선택
                   </h4>
-                  <p className="mt-1 text-xs text-white/60">선택하면 바로 투표 카드가 펼쳐집니다.</p>
+                  <p className="mt-1 text-xs text-[color:var(--app-text-muted)]">선택하면 바로 투표 카드가 펼쳐집니다.</p>
                 </div>
                 <button
                   type="button"
                   aria-label="주제 선택 팝업 닫기"
                   onClick={handleTopicPickerClose}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/14 bg-white/6 text-lg text-white/80 transition hover:bg-white/12 hover:text-white"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] text-lg text-[color:var(--app-text-secondary)] transition hover:bg-[color:var(--app-surface-soft-strong)] hover:text-[color:var(--app-text-primary)]"
                 >
                   ×
                 </button>
@@ -3438,11 +3824,11 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
 
               <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
                 {isTopicsLoading ? (
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                  <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-3 text-sm text-[color:var(--app-text-secondary)]">
                     주제 불러오는 중...
                   </div>
                 ) : availableTopics.length === 0 ? (
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                  <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-3 text-sm text-[color:var(--app-text-secondary)]">
                     LIVE 주제가 없습니다.
                   </div>
                 ) : (
@@ -3456,8 +3842,8 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                             type="button"
                             onClick={() => setActiveTopicTab(tab.id)}
                             className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${isActive
-                                ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
-                                : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
+                                ? topicPickerPalette.activeTabClass
+                                : 'border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] text-[color:var(--app-text-muted)] hover:bg-[color:var(--app-surface-soft-strong)] hover:text-[color:var(--app-text-primary)]'
                               }`}
                           >
                             {tab.label}
@@ -3476,7 +3862,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                       }}
                     >
                       {filteredTopics.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
+                        <div className="rounded-xl border border-dashed border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-3 text-sm text-[color:var(--app-text-muted)]">
                           이 카테고리에 표시할 주제가 없습니다.
                         </div>
                       ) : (
@@ -3485,27 +3871,28 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                             const optionA = topic.options.find((option) => option.position === 1) ?? null;
                             const optionB = topic.options.find((option) => option.position === 2) ?? null;
                             const isExpanded = expandedPickerTopicId === topic.id;
+                            const topicViewer = hotTopicViewerById[topic.id];
+                            const hasTopicVote = Boolean(topicViewer?.hasTopicVote);
                             const isSelectionReady = Boolean(
                               pickerSelectedOptionKey &&
                                 optionA &&
                                 optionB &&
-                                !isPickerSubmittingVote &&
-                                isViewingOwnCountry,
+                                !isPickerSubmittingVote,
                             );
 
                             return (
                               <div
                                 key={topic.id}
-                                className={`rounded-xl border bg-white/5 transition-colors duration-300 ${isExpanded ? 'border-[#ff9f0a55] bg-white/[0.07]' : 'border-white/14'
+                                className={`rounded-xl border bg-[color:var(--app-surface-soft)] transition-colors duration-300 ${isExpanded ? topicPickerPalette.expandedCardClass : 'border-[color:var(--app-border)]'
                                   }`}
                               >
                                 <button
                                   type="button"
                                   onClick={() => handleTopicPickerToggle(topic.id)}
-                                  className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-white/84 transition hover:bg-white/6"
+                                  className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-[color:var(--app-text-primary)] transition hover:bg-[color:var(--app-surface-soft)]"
                                 >
                                   <p className="line-clamp-1 text-[14px] font-medium leading-5">{topic.title}</p>
-                                  <span className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2 text-[11px] font-semibold text-[#ffd2a6]">
+                                  <span className={`inline-flex h-6 shrink-0 items-center justify-center rounded-full border px-2 text-[11px] font-semibold ${topicPickerPalette.actionPillClass}`}>
                                     {isExpanded ? '닫기' : '투표'}
                                   </span>
                                 </button>
@@ -3514,8 +3901,8 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                   className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] ${isExpanded ? 'max-h-[320px] opacity-100 translate-y-0' : 'pointer-events-none max-h-0 -translate-y-1 opacity-0'
                                     }`}
                                 >
-                                  <div className="border-t border-white/10 px-3 pb-3 pt-2.5">
-                                    <p className="text-[12px] text-white/66">선택지를 고르고 바로 투표하세요.</p>
+                                  <div className="border-t border-[color:var(--app-border)] px-3 pb-3 pt-2.5">
+                                    <p className="text-[12px] text-[color:var(--app-text-muted)]">선택지를 고르고 바로 투표하세요.</p>
                                     {optionA && optionB ? (
                                       <>
                                         <div className="mt-2 grid grid-cols-2 gap-2">
@@ -3526,8 +3913,8 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                               setPickerVoteMessage(null);
                                             }}
                                             className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${pickerSelectedOptionKey === optionA.key
-                                                ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]'
-                                                : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                ? topicPickerPalette.optionASelectedClass
+                                                : 'border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] text-[color:var(--app-text-muted)] hover:bg-[color:var(--app-surface-soft-strong)]'
                                               }`}
                                           >
                                             {optionA.label}
@@ -3540,27 +3927,31 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                             }}
                                             className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${pickerSelectedOptionKey === optionB.key
                                                 ? 'border-[#4ea1ff88] bg-[#2f7cff2e] text-[#cfe2ff]'
-                                                : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                : 'border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] text-[color:var(--app-text-muted)] hover:bg-[color:var(--app-surface-soft-strong)]'
                                               }`}
                                           >
                                             {optionB.label}
                                           </button>
                                         </div>
-                                        {!isViewingOwnCountry ? (
-                                          <p className="mt-2 text-xs text-[#ffd0a6]">{CROSS_COUNTRY_VIEW_ONLY_MESSAGE}</p>
+                                        {selectedCountry !== viewerSupportedCountry ? (
+                                          <p className={`mt-2 text-xs ${topicPickerPalette.helperTextClass}`}>
+                                            지금 투표하면 {viewerSupportedCountry} 기준 결과에 반영됩니다.
+                                          </p>
                                         ) : pickerVoteMessage ? (
-                                          <p className="mt-2 text-xs text-[#ffd0a6]">{pickerVoteMessage}</p>
+                                          <p className={`mt-2 text-xs ${topicPickerPalette.helperTextClass}`}>{pickerVoteMessage}</p>
                                         ) : null}
                                         <button
                                           type="button"
                                           onClick={() => void handleTopicPickerVoteSubmit(topic)}
                                           disabled={!isSelectionReady}
-                                          className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b00] text-[13px] font-bold text-white transition hover:bg-[#ff7b1d] disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-white/45"
+                                          className={`mt-2 inline-flex h-11 w-full items-center justify-center rounded-xl border text-[13px] font-bold transition ${topicPickerPalette.submitClass} disabled:cursor-not-allowed disabled:border-[color:var(--app-border)] disabled:bg-[color:var(--app-surface-soft)] disabled:text-[color:var(--app-text-subtle)]`}
                                         >
                                           {isPickerSubmittingVote
                                             ? '처리 중...'
-                                            : !isViewingOwnCountry
-                                              ? '조회 전용'
+                                            : hasTopicVote && (topicViewer?.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry
+                                              ? '결과 보기 선택'
+                                              : hasTopicVote
+                                                ? '결과 보기'
                                               : '투표 후 결과 보기'}
                                         </button>
                                       </>
@@ -3585,10 +3976,10 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         ) : null}
 
         {showProfileModal ? (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-4 sm:items-center">
-            <div className="w-full max-w-[430px] rounded-[28px] border border-white/12 bg-[rgba(22,22,26,0.95)] p-5 shadow-2xl backdrop-blur-2xl">
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-[color:var(--app-overlay)] p-4 sm:items-center">
+            <div className="w-full max-w-[430px] rounded-[28px] border border-[color:var(--app-border)] bg-[color:var(--app-surface-elevated)] p-5 shadow-[var(--app-modal-shadow)] backdrop-blur-2xl">
               <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-[20px] font-semibold text-white">최초 투표 지역 입력</h4>
+                <h4 className="text-[20px] font-semibold text-[color:var(--app-text-primary)]">최초 투표 지역 입력</h4>
                 <button
                   type="button"
                   onClick={() => {
@@ -3598,19 +3989,19 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                     setPendingHotTopicVote(null);
                     setProfileModalMessage(null);
                   }}
-                  className="rounded-lg px-2 py-1 text-sm text-white/65 hover:bg-white/10 hover:text-white"
+                  className="rounded-lg px-2 py-1 text-sm text-[color:var(--app-text-muted)] hover:bg-[color:var(--app-surface-soft)] hover:text-[color:var(--app-text-primary)]"
                 >
                   닫기
                 </button>
               </div>
 
               <div className="space-y-3">
-                <p className="text-sm leading-relaxed text-white/72">{regionModalHintText}</p>
+                <p className="text-sm leading-relaxed text-[color:var(--app-text-secondary)]">{regionModalHintText}</p>
 
                 {canSelectSchoolInModal ? (
                   <>
                     <label className="block">
-                      <span className="mb-1 block text-xs font-semibold text-white/70">학교 검색</span>
+                      <span className="mb-1 block text-xs font-semibold text-[color:var(--app-text-muted)]">학교 검색</span>
                       <input
                         value={schoolQuery}
                         onKeyDown={(event) => {
@@ -3649,17 +4040,17 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                         }}
                         placeholder="학교명을 입력하세요"
                         autoComplete="off"
-                        className="h-10 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
+                        className="h-10 w-full rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 text-sm text-[color:var(--app-text-primary)] outline-none placeholder:text-[color:var(--app-text-subtle)] transition focus:border-[#ff9f0a66]"
                       />
                       {isSchoolListVisible ? (
                         <div
                           ref={schoolResultsListRef}
-                          className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-white/14 bg-[rgba(26,26,30,0.96)] p-1.5"
+                          className="mt-2 max-h-52 overflow-y-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-strong)] p-1.5"
                         >
                           {isSchoolSearching ? (
-                            <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                            <p className="px-2 py-2 text-xs text-[color:var(--app-text-muted)]">학교 검색 중...</p>
                           ) : schoolResults.length === 0 ? (
-                            <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                            <p className="px-2 py-2 text-xs text-[color:var(--app-text-subtle)]">검색 결과가 없습니다.</p>
                           ) : (
                             schoolResults.map((school, index) => (
                               <button
@@ -3668,11 +4059,11 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                                 type="button"
                                 onMouseEnter={() => setHighlightedSchoolIndex(index)}
                                 onClick={() => handleSelectSchool(school)}
-                                className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/85 transition last:mb-0 ${index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                                className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-[color:var(--app-text-primary)] transition last:mb-0 ${index === highlightedSchoolIndex ? 'bg-[color:var(--app-surface-soft-strong)]' : 'hover:bg-[color:var(--app-surface-soft)]'
                                   }`}
                               >
                                 <p className="font-semibold">{school.schoolName}</p>
-                                <p className="mt-0.5 text-[11px] text-white/60">
+                                <p className="mt-0.5 text-[11px] text-[color:var(--app-text-subtle)]">
                                   {school.sidoName ?? '-'} · {school.schoolLevel}
                                   {school.campusType ? ` · ${school.campusType}` : ''}
                                 </p>
@@ -3691,7 +4082,7 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                               setSchoolQuery('');
                               setProfileModalMessage(null);
                             }}
-                            className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                            className="rounded-md border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-2 py-0.5 text-[11px] text-[color:var(--app-text-muted)] transition hover:bg-[color:var(--app-surface-soft-strong)]"
                           >
                             학교 선택 해제
                           </button>
@@ -3701,21 +4092,21 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
 
                     {canUseGpsForViewer ? (
                       <div className="flex items-center gap-2">
-                        <div className="h-px flex-1 bg-white/14" />
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">또는</span>
-                        <div className="h-px flex-1 bg-white/14" />
+                        <div className="h-px flex-1 bg-[color:var(--app-border)]" />
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--app-text-subtle)]">또는</span>
+                        <div className="h-px flex-1 bg-[color:var(--app-border)]" />
                       </div>
                     ) : null}
                   </>
                 ) : null}
 
                 {canUseGpsForViewer ? (
-                  <div className="space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+                  <div className="space-y-2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] p-3">
                     <button
                       type="button"
                       onClick={() => void handleUseCurrentLocation()}
                       disabled={isLocatingRegion}
-                      className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/18 bg-white/8 px-3 text-sm font-semibold text-white transition hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft-strong)] px-3 text-sm font-semibold text-[color:var(--app-text-primary)] transition hover:bg-[color:var(--app-surface-soft-strong)] disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {isLocatingRegion ? '위치 확인 중...' : '정확한 위치 사용'}
                     </button>
@@ -3733,23 +4124,23 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
                         <button
                           type="button"
                           onClick={handleClearGpsRegion}
-                          className="rounded-md border border-white/15 bg-white/8 px-2 py-0.5 text-[11px] text-white/75 transition hover:bg-white/12"
+                          className="rounded-md border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft-strong)] px-2 py-0.5 text-[11px] text-[color:var(--app-text-muted)] transition hover:bg-[color:var(--app-surface-soft-strong)]"
                         >
                           위치 선택 해제
                         </button>
                       </div>
                     ) : (
-                      <p className="text-[11px] text-white/58">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
+                      <p className="text-[11px] text-[color:var(--app-text-subtle)]">위치 허용 시 시/도·시군구 코드만 저장합니다.</p>
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-white/12 bg-white/5 p-3 text-[11px] text-white/68">
+                  <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] p-3 text-[11px] text-[color:var(--app-text-secondary)]">
                     국내 사용자의 GPS 위치 기능은 현재 출시 준비 중입니다.
                   </div>
                 )}
 
                 {profileModalMessage ? (
-                  <p className="rounded-lg border border-white/12 bg-white/6 px-3 py-2 text-xs text-white/78">
+                  <p className="rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-3 py-2 text-xs text-[color:var(--app-text-primary)]">
                     {profileModalMessage}
                   </p>
                 ) : null}
@@ -3810,17 +4201,17 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         .home-chevron-group > use:nth-child(1) {
           --base: 0px;
           animation-delay: 0s;
-          stroke: #ff9f0a;
+          stroke: ${mobileTopicHintPalette.chevronStrokePrimary};
         }
         .home-chevron-group > use:nth-child(2) {
           --base: 20px;
           animation-delay: 0.25s;
-          stroke: rgba(255, 167, 64, 0.95);
+          stroke: ${mobileTopicHintPalette.chevronStrokeSecondary};
         }
         .home-chevron-group > use:nth-child(3) {
           --base: 40px;
           animation-delay: 0.5s;
-          stroke: rgba(255, 189, 120, 0.88);
+          stroke: ${mobileTopicHintPalette.chevronStrokeTertiary};
         }
         @keyframes home-chevron-appear {
           0% {
@@ -3846,9 +4237,9 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
         }
       `}</style>
 
-      <section className="hidden border-t border-white/10 bg-[rgba(10,14,22,0.92)] py-3 md:block">
+      <section className="hidden border-t border-[color:var(--app-border)] bg-[color:var(--app-dock-bg)] py-3 md:block">
         <div className="mx-auto w-full max-w-[1280px] px-6">
-          <div className="flex items-center gap-3 rounded-[14px] border border-white/12 bg-[rgba(18,24,36,0.82)] px-4 py-3">
+          <div className="flex items-center gap-3 rounded-[14px] border border-[color:var(--app-border)] bg-[color:var(--app-dock-inner)] px-4 py-3">
             <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
               광고
             </span>
@@ -3862,6 +4253,21 @@ export default function MainMapHome({ initialCountryCode = 'KR' }: MainMapHomePr
           </div>
         </div>
       </section>
+
+      <VoteResultScopeChooser
+        isOpen={Boolean(resultScopeChooser)}
+        onClose={closeResultScopeChooser}
+        topicTitle={resultScopeChooser?.topicTitle ?? '결과 보기'}
+        scopeCountryName={
+          resultScopeChooser ? getCountryMapConfig(resultScopeChooser.scopeCountryCode).displayName : '현재 국가'
+        }
+        voteCountryName={
+          resultScopeChooser ? getCountryMapConfig(resultScopeChooser.voteCountryCode).displayName : '내 국가'
+        }
+        onOpenScopeResult={handleOpenScopeResult}
+        onOpenVoteCountryResult={handleOpenVoteCountryResult}
+        reducedMotion={false}
+      />
 
       <div>
         <SiteLegalFooter containerMaxWidthClassName="max-w-[1280px]" />

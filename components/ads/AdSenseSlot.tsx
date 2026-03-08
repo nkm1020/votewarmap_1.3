@@ -22,7 +22,7 @@ export function AdSenseSlot({
   minHeight = 50,
   className,
   fallbackText = '스폰서 배너 영역입니다.',
-  fallbackClassName = 'truncate text-[12px] font-medium text-white/80',
+  fallbackClassName = 'truncate text-[12px] font-medium text-[color:var(--app-text-secondary)]',
 }: AdSenseSlotProps) {
   const requestedRef = useRef(false);
   const normalizedSlot = useMemo(() => slot?.trim() ?? '', [slot]);

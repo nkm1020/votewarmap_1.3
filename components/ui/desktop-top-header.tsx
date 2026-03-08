@@ -59,7 +59,7 @@ function HeaderLink({
   onClick?: () => void;
 }) {
   const className = joinClasses(
-    'inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]',
+    'inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a] max-[1100px]:h-9 max-[1100px]:px-3 max-[1100px]:text-[13px]',
     active
       ? 'bg-[var(--header-active-bg)] text-[var(--header-active-text)]'
       : 'text-[color:var(--header-text-muted)] hover:bg-[var(--header-hover-bg)] hover:text-[color:var(--header-text)]',
@@ -136,7 +136,11 @@ export function DesktopTopHeader({
 }: DesktopTopHeaderProps) {
   const visibilityClass = visibleFrom === 'lg' ? 'hidden lg:block' : 'hidden md:block';
   const linksPositionClass =
-    linksPosition === 'right' ? 'justify-self-end' : linksPosition === 'left' ? 'justify-self-start' : 'justify-self-center';
+    linksPosition === 'right'
+      ? 'justify-self-end'
+      : linksPosition === 'left'
+        ? 'justify-self-start'
+        : 'justify-self-center';
 
   return (
     <header
@@ -155,11 +159,16 @@ export function DesktopTopHeader({
         <div className="min-w-0 justify-self-start">
           <Link href={brandHref} className="inline-flex min-w-0 items-center gap-2 text-[color:var(--header-text)]">
             <Grid2x2PlusIcon className="h-5 w-5" />
-            <span className="font-mono text-base font-bold">{brandLabel}</span>
+            <span className="truncate font-mono text-base font-bold">{brandLabel}</span>
           </Link>
         </div>
 
-        <div className={joinClasses('flex min-w-0 items-center gap-1 overflow-x-auto', linksPositionClass)}>
+        <div
+          className={joinClasses(
+            'flex min-w-0 items-center gap-1 overflow-x-auto',
+            linksPositionClass,
+          )}
+        >
           {links.map((link) => (
             <HeaderLink
               key={link.key}
@@ -171,7 +180,7 @@ export function DesktopTopHeader({
           ))}
         </div>
 
-        <div className="flex min-w-0 items-center gap-2 justify-self-end">
+        <div className="flex min-w-0 items-center gap-1 justify-self-end min-[1101px]:gap-2">
           <ThemeModeButton />
           {actions.map((action) => (
             <HeaderAction

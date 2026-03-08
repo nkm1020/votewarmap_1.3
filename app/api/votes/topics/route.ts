@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
-import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
@@ -21,7 +19,6 @@ type VoteTopicRow = {
   id: string;
   title: string;
   status: string;
-  country_code: string;
   created_at: string;
 };
 
@@ -54,10 +51,10 @@ function hasRequiredOptions(topic: VoteTopic): boolean {
   return hasA && hasB;
 }
 
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   try {
     const parsed = querySchema.safeParse(
-      Object.fromEntries(new URL(request.url).searchParams.entries()),
+      Object.fromEntries(new URL(_request.url).searchParams.entries()),
     );
     if (!parsed.success) {
       return NextResponse.json(
@@ -66,21 +63,14 @@ export async function GET(request: Request) {
       );
     }
 
-    const { status, ids: idsRaw, country: rawCountry } = parsed.data;
+    const { status, ids: idsRaw } = parsed.data;
     const requestedIds = parseIds(idsRaw);
-    const countryCode = resolveSupportedCountry(rawCountry ?? resolveCountryCodeFromRequest(request));
     const supabase = getSupabaseServiceRoleClient();
 
     let topicsQuery = supabase
       .from('vote_topics')
-      .select('id, title, status, country_code, created_at')
+      .select('id, title, status, created_at')
       .order('created_at', { ascending: false });
-
-    if (countryCode === 'KR') {
-      topicsQuery = topicsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
-    } else {
-      topicsQuery = topicsQuery.eq('country_code', countryCode);
-    }
 
     if (status.toUpperCase() !== 'ALL') {
       topicsQuery = topicsQuery.eq('status', status);
@@ -132,7 +122,6 @@ export async function GET(request: Request) {
         id: topic.id,
         title: topic.title,
         status: topic.status,
-        countryCode: topic.country_code,
         options: optionsByTopic.get(topic.id) ?? [],
       }))
       .filter(hasRequiredOptions);

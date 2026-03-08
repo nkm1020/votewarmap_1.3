@@ -3,9 +3,13 @@
 import { Suspense, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getPageThemeTokens } from '@/lib/theme/pageTheme';
 
 function SupportFailPageContent() {
   const searchParams = useSearchParams();
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
 
   const details = useMemo(() => {
     const code = searchParams.get('code')?.trim() || 'UNKNOWN';
@@ -20,17 +24,17 @@ function SupportFailPageContent() {
   }, [searchParams]);
 
   return (
-    <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
-      <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.86)] p-6 shadow-2xl">
+    <main className={`${theme.shellClass} min-h-screen px-4 py-10 sm:px-6 lg:px-10`}>
+      <section className={`${theme.elevatedClass} mx-auto w-full max-w-xl rounded-2xl border p-6 shadow-[var(--app-modal-shadow)]`}>
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#ff8f8f]">Payment Failed</p>
-        <h1 className="mt-2 text-2xl font-bold">후원 결제가 취소되었거나 실패했습니다</h1>
+        <h1 className={`mt-2 text-2xl font-bold ${theme.textPrimaryClass}`}>후원 결제가 취소되었거나 실패했습니다</h1>
 
         <div className="mt-4 space-y-2 rounded-xl border border-[#ff7a7a]/45 bg-[#ff7a7a]/12 p-4 text-sm">
           <p>
             오류 코드: <span className="font-semibold text-[#ffc3c3]">{details.code}</span>
           </p>
           <p className="text-[#ffc3c3]">{details.message}</p>
-          {details.orderId ? <p className="text-white/75">주문 ID: {details.orderId}</p> : null}
+          {details.orderId ? <p className={theme.textSecondaryClass}>주문 ID: {details.orderId}</p> : null}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
@@ -42,7 +46,7 @@ function SupportFailPageContent() {
           </Link>
           <Link
             href="/my"
-            className="inline-flex h-10 items-center rounded-lg border border-white/20 bg-white/5 px-4 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+            className={`${theme.surfaceSoftClass} inline-flex h-10 items-center rounded-lg border ${theme.borderClass} px-4 text-sm font-semibold ${theme.textPrimaryClass} transition hover:bg-[color:var(--app-surface-soft-strong)]`}
           >
             MY로 이동
           </Link>
@@ -53,10 +57,13 @@ function SupportFailPageContent() {
 }
 
 function SupportFailPageFallback() {
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
+
   return (
-    <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
-      <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.86)] p-6 shadow-2xl">
-        <p className="text-sm text-white/75">결제 결과를 불러오는 중입니다...</p>
+    <main className={`${theme.shellClass} min-h-screen px-4 py-10 sm:px-6 lg:px-10`}>
+      <section className={`${theme.elevatedClass} mx-auto w-full max-w-xl rounded-2xl border p-6 shadow-[var(--app-modal-shadow)]`}>
+        <p className={`text-sm ${theme.textSecondaryClass}`}>결제 결과를 불러오는 중입니다...</p>
       </section>
     </main>
   );

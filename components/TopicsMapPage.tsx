@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import { AdSenseSlot } from '@/components/ads/AdSenseSlot';
 import CountryTabs from '@/components/map/CountryTabs';
 import type { BaseCountryTooltipContext } from '@/components/map/BaseCountryAdminMap';
@@ -16,7 +16,7 @@ import { LiveVoteCard } from '@/components/vote/LiveVoteCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ADSENSE_SLOTS } from '@/lib/adsense';
-import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
+import { getCountryMapConfig, resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   addPendingVoteTopic,
@@ -28,8 +28,15 @@ import {
 import { useGuestSessionHeartbeat } from '@/lib/vote/guest-session';
 import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
 import { getOptionSubtext } from '@/lib/vote/option-subtext-map';
+import {
+  buildViewerVoteState,
+  type ResultVisibility,
+  type VoteResultSummaryResponse,
+  type VoteResultViewer,
+} from '@/lib/vote/result-summary';
 import type { SchoolSearchItem, VoteRegionInput, VoteTopic } from '@/lib/vote/types';
 import type { RegionVoteMap } from './KoreaAdminMap';
+import { VoteResultScopeChooser } from '@/components/vote/VoteResultScopeChooser';
 
 const BaseCountryAdminMap = dynamic(() => import('@/components/map/BaseCountryAdminMap'), { ssr: false });
 const TOPICS_MAP_COLORS = {
@@ -44,7 +51,6 @@ const REGION_MODAL_GPS_ONLY_HINT = '학교 미설정 계정은 정확한 위치 
 const REGION_MODAL_KR_SCHOOL_ONLY_HINT = '국내 사용자는 GPS 위치 기능이 출시 예정이라 학교 위치로만 투표할 수 있어요.';
 const KR_SCHOOL_REQUIRED_FOR_MEMBER_MESSAGE = '국내 사용자는 학교 등록 후 투표할 수 있어요. MY에서 학교를 등록해 주세요.';
 const SIGNUP_COMPLETION_REQUIRED_MESSAGE = '투표 전에 회원가입 정보를 먼저 입력해 주세요.';
-const CROSS_COUNTRY_VIEW_ONLY_MESSAGE = '다른 국가 주제는 조회만 가능하며 투표는 소속 국가에서만 가능합니다.';
 const TOPIC_SELECTOR_STACK_GAP_PX = 12;
 const PREFERRED_COUNTRY_STORAGE_KEY = 'preferred-country';
 const DESKTOP_LEFT_PANEL_MAP_FOCUS_OFFSET_X = 140;
@@ -56,7 +62,13 @@ type TopicsMapPageProps = {
   initialCountryCode?: string;
 };
 
-type ResultVisibility = 'locked' | 'unlocked';
+type TopicVoteViewerState = VoteResultViewer;
+type ResultScopeChooserState = {
+  topicId: string;
+  topicTitle: string;
+  scopeCountryCode: SupportedCountry;
+  voteCountryCode: SupportedCountry;
+};
 
 type VoteSummary = {
   totalVotes: number;
@@ -259,6 +271,23 @@ export default function TopicsMapPage({
   const [selectedCountry, setSelectedCountry] = useState<SupportedCountry>(() =>
     resolveSupportedCountry(initialCountryCode),
   );
+  const buildResultHref = useCallback(
+    (
+      nextTopicId: string,
+      extraParams?: Record<string, string | undefined>,
+    ) => {
+      const query = new URLSearchParams({
+        country: selectedCountry,
+      });
+      Object.entries(extraParams ?? {}).forEach(([key, value]) => {
+        if (value) {
+          query.set(key, value);
+        }
+      });
+      return `/results/${nextTopicId}?${query.toString()}`;
+    },
+    [selectedCountry],
+  );
   const [availableTopics, setAvailableTopics] = useState<VoteTopic[]>([]);
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => initialTopicIds);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
@@ -277,6 +306,9 @@ export default function TopicsMapPage({
     hasData: false,
   });
   const [resultVisibility, setResultVisibility] = useState<ResultVisibility>('locked');
+  const [activeTopicVoteViewer, setActiveTopicVoteViewer] = useState<TopicVoteViewerState>(() =>
+    buildViewerVoteState(resolveSupportedCountry(initialCountryCode)),
+  );
   const [selectedRegion, setSelectedRegion] = useState<{
     code: string;
     name: string;
@@ -297,10 +329,10 @@ export default function TopicsMapPage({
   const [isLocatingRegion, setIsLocatingRegion] = useState(false);
   const [profileModalMessage, setProfileModalMessage] = useState<string | null>(null);
   const [guestHasVoted, setGuestHasVoted] = useState(false);
+  const [resultScopeChooser, setResultScopeChooser] = useState<ResultScopeChooserState | null>(null);
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'game' | 'me'>('map');
   const [bottomAdHeight, setBottomAdHeight] = useState(0);
   const [bottomMenuHeight, setBottomMenuHeight] = useState(0);
-  const [topicSelectorHeight, setTopicSelectorHeight] = useState(0);
   const [isDesktopLeftPanelOpen, setIsDesktopLeftPanelOpen] = useState(true);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isTopicEditorOpen, setIsTopicEditorOpen] = useState(openTopicEditorOnMount);
@@ -313,17 +345,82 @@ export default function TopicsMapPage({
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
   const bottomMenuRef = useRef<HTMLDivElement | null>(null);
   const schoolResultsListRef = useRef<HTMLDivElement | null>(null);
-  const topicSelectorRef = useRef<HTMLElement | null>(null);
+  const selectedRegionPanelRef = useRef<HTMLElement | null>(null);
+  const pendingRegionDismissRef = useRef<number | null>(null);
+  const manualCountrySelectionRef = useRef(false);
+  const previousViewerCountryRef = useRef<SupportedCountry | null>(null);
   const bottomDockHeight = useMemo(() => bottomAdHeight + bottomMenuHeight, [bottomAdHeight, bottomMenuHeight]);
 
   const topicIdsKey = useMemo(() => initialTopicIds.join(','), [initialTopicIds]);
   const { isAuthenticated, profile, requiresSignupCompletion } = useAuth();
   const { resolvedTheme } = useTheme();
   const isDarkTheme = resolvedTheme === 'dark';
+  const panelTheme = useMemo(
+    () =>
+      isDarkTheme
+        ? {
+            aside: 'border-white/12 bg-[rgba(20,20,24,0.82)] shadow-[4px_0_24px_rgba(0,0,0,0.28)]',
+            opener: 'border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 hover:text-white',
+            panel: 'border-white/12 bg-[rgba(20,20,24,0.62)] shadow-[0_8px_24px_rgba(0,0,0,0.3)]',
+            panelStrong: 'border-white/14 bg-[rgba(18,18,22,0.72)] shadow-[0_8px_24px_rgba(0,0,0,0.3)]',
+            panelElevated:
+              'border-white/18 bg-[rgba(10,18,30,0.86)] text-white/86 shadow-[0_16px_34px_rgba(0,0,0,0.38)]',
+            mobilePanel: 'border-white/12 bg-[rgba(20,20,24,0.78)] shadow-[0_-10px_40px_rgba(0,0,0,0.6)]',
+            bottomBar: 'border-white/14 bg-[rgba(12,18,28,0.82)] shadow-[0_-8px_24px_rgba(0,0,0,0.32)]',
+            bottomBarInner: 'border-white/14 bg-[rgba(255,255,255,0.06)]',
+            chipBox: 'border-white/12 bg-[rgba(8,10,14,0.88)]',
+            chipInactive: 'border-white/16 bg-white/8 text-white/84',
+            chipInactiveIcon: 'bg-white/15 text-white/75 hover:bg-white/20 hover:text-white',
+            input: 'border-white/14 bg-white/8 text-white placeholder:text-white/45',
+            inputIcon: 'text-white/55',
+            inputClear: 'bg-white/15 text-white/70 hover:bg-white/22 hover:text-white',
+            textPrimary: 'text-white',
+            textSecondary: 'text-white/72',
+            textTertiary: 'text-white/55',
+            textMuted: 'text-white/60',
+            divider: 'border-white/10',
+            rowDivider: 'border-white/8',
+            handle: 'bg-white/20',
+            tabInactive: 'text-white/56',
+            navInactive: 'text-white/62 hover:text-white',
+          }
+        : {
+            aside:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.92)] shadow-[4px_0_24px_rgba(148,163,184,0.24)]',
+            opener:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.96)] text-slate-500 hover:text-slate-900',
+            panel:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.84)] shadow-[0_10px_24px_rgba(148,163,184,0.22)]',
+            panelStrong:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.92)] shadow-[0_10px_24px_rgba(148,163,184,0.22)]',
+            panelElevated:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.96)] text-slate-800 shadow-[0_14px_32px_rgba(148,163,184,0.28)]',
+            mobilePanel:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.94)] shadow-[0_-10px_32px_rgba(148,163,184,0.24)]',
+            bottomBar:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.92)] shadow-[0_-8px_24px_rgba(148,163,184,0.2)]',
+            bottomBarInner: 'border-slate-200/90 bg-slate-900/[0.04]',
+            chipBox: 'border-slate-200/90 bg-[rgba(255,255,255,0.98)]',
+            chipInactive: 'border-slate-200 bg-slate-900/[0.04] text-slate-700',
+            chipInactiveIcon: 'bg-slate-900/[0.08] text-slate-500 hover:bg-slate-900/[0.12] hover:text-slate-700',
+            input: 'border-slate-200 bg-slate-900/[0.04] text-slate-900 placeholder:text-slate-400',
+            inputIcon: 'text-slate-400',
+            inputClear: 'bg-slate-900/[0.08] text-slate-500 hover:bg-slate-900/[0.14] hover:text-slate-700',
+            textPrimary: 'text-slate-900',
+            textSecondary: 'text-slate-700',
+            textTertiary: 'text-slate-500',
+            textMuted: 'text-slate-600',
+            divider: 'border-slate-200/80',
+            rowDivider: 'border-slate-200/80',
+            handle: 'bg-slate-400/30',
+            tabInactive: 'text-slate-500',
+            navInactive: 'text-slate-500 hover:text-slate-700',
+          },
+    [isDarkTheme],
+  );
   const guestSessionId = useGuestSessionHeartbeat({ enabled: !isAuthenticated });
   const viewerCountryCode = (isAuthenticated ? profile?.country_code : initialCountryCode) ?? 'KR';
   const viewerSupportedCountry = resolveSupportedCountry(viewerCountryCode);
-  const isViewingOwnCountry = selectedCountry === viewerSupportedCountry;
   const isKoreaSelected = selectedCountry === 'KR';
   const canUseGpsForViewer = viewerCountryCode.toUpperCase() !== 'KR';
   const hasSavedSchool = Boolean(profile?.school_id);
@@ -335,9 +432,124 @@ export default function TopicsMapPage({
     : isGpsOnlyVoteMode
       ? REGION_MODAL_GPS_ONLY_HINT
       : REGION_MODAL_HINT;
+  const buildFallbackViewerState = useCallback((hasTopicVote: boolean): TopicVoteViewerState => ({
+    ...buildViewerVoteState(viewerSupportedCountry),
+    type: isAuthenticated ? 'user' : guestSessionId ? 'guest' : 'anonymous',
+    hasVote: hasTopicVote,
+    hasTopicVote,
+    hasVoteInScope: hasTopicVote && selectedCountry === viewerSupportedCountry,
+    countryCode: viewerSupportedCountry,
+    voteCountryCode: hasTopicVote ? viewerSupportedCountry : null,
+  }), [guestSessionId, isAuthenticated, selectedCountry, viewerSupportedCountry]);
+  const normalizeViewerState = useCallback((summary?: VoteResultSummaryResponse | null): TopicVoteViewerState => {
+    const fallback = buildFallbackViewerState(false);
+    const viewer = summary?.viewer;
+    if (!viewer) {
+      return fallback;
+    }
+
+    const hasTopicVote = Boolean(viewer.hasTopicVote ?? viewer.hasVote);
+    const voteCountryCode = viewer.voteCountryCode
+      ? resolveSupportedCountry(viewer.voteCountryCode)
+      : hasTopicVote
+        ? viewerSupportedCountry
+        : null;
+
+    return {
+      type: viewer.type ?? fallback.type,
+      hasVote: hasTopicVote,
+      hasTopicVote,
+      hasVoteInScope: Boolean(viewer.hasVoteInScope ?? (hasTopicVote && voteCountryCode === selectedCountry)),
+      countryCode: viewer.countryCode ? resolveSupportedCountry(viewer.countryCode) : viewerSupportedCountry,
+      voteCountryCode,
+    };
+  }, [buildFallbackViewerState, selectedCountry, viewerSupportedCountry]);
+  const openResultScopeChooser = useCallback(
+    (topicId: string, topicTitle: string, voteCountryCode: string | null | undefined) => {
+      const normalizedVoteCountry = voteCountryCode
+        ? resolveSupportedCountry(voteCountryCode)
+        : viewerSupportedCountry;
+      setResultScopeChooser({
+        topicId,
+        topicTitle,
+        scopeCountryCode: selectedCountry,
+        voteCountryCode: normalizedVoteCountry,
+      });
+    },
+    [selectedCountry, viewerSupportedCountry],
+  );
+  const closeResultScopeChooser = useCallback(() => {
+    setResultScopeChooser(null);
+  }, []);
+  const handleOpenScopeResult = useCallback(() => {
+    if (!resultScopeChooser) {
+      return;
+    }
+    router.push(buildResultHref(resultScopeChooser.topicId));
+    setResultScopeChooser(null);
+  }, [buildResultHref, resultScopeChooser, router]);
+  const handleOpenVoteCountryResult = useCallback(() => {
+    if (!resultScopeChooser) {
+      return;
+    }
+    router.push(
+      `/results/${resultScopeChooser.topicId}?${new URLSearchParams({
+        country: resultScopeChooser.voteCountryCode,
+        entry: 'history',
+        view: 'map',
+      }).toString()}`,
+    );
+    setResultScopeChooser(null);
+  }, [resultScopeChooser, router]);
+
+  const handleCountryTabSelect = useCallback(
+    (nextCountry: SupportedCountry) => {
+      manualCountrySelectionRef.current = true;
+      setSelectedCountry((prev) => (prev === nextCountry ? prev : nextCountry));
+
+      if (isDesktopViewport) {
+        setIsDesktopLeftPanelOpen(true);
+        setIsTopicEditorOpen(true);
+        setActiveTopicTab('all');
+        setTopicSearchQuery('');
+      }
+    },
+    [isDesktopViewport],
+  );
 
   useEffect(() => {
-    setSelectedCountry(viewerSupportedCountry);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedCountry = window.localStorage.getItem(PREFERRED_COUNTRY_STORAGE_KEY)?.trim();
+    if (!storedCountry) {
+      return;
+    }
+
+    manualCountrySelectionRef.current = true;
+    setSelectedCountry((prev) => {
+      const nextCountry = resolveSupportedCountry(storedCountry);
+      return prev === nextCountry ? prev : nextCountry;
+    });
+  }, []);
+
+  useEffect(() => {
+    setSelectedCountry((prev) => {
+      const previousViewerCountry = previousViewerCountryRef.current;
+      previousViewerCountryRef.current = viewerSupportedCountry;
+
+      if (manualCountrySelectionRef.current) {
+        if (previousViewerCountry === null) {
+          return prev;
+        }
+        if (prev !== previousViewerCountry) {
+          return prev;
+        }
+      }
+
+      return prev === viewerSupportedCountry ? prev : viewerSupportedCountry;
+    });
   }, [viewerSupportedCountry]);
 
   useEffect(() => {
@@ -414,14 +626,9 @@ export default function TopicsMapPage({
     if (isDesktopViewport) {
       return 22;
     }
-    return Math.max(22, topicSelectorHeight + TOPIC_SELECTOR_STACK_GAP_PX * 2);
-  }, [isDesktopViewport, topicSelectorHeight]);
-  const mapRegionLevelToggleAlign = useMemo<'left' | 'right'>(() => {
-    if (isDesktopViewport && isDesktopLeftPanelOpen) {
-      return 'right';
-    }
-    return 'left';
-  }, [isDesktopLeftPanelOpen, isDesktopViewport]);
+    return 12;
+  }, [isDesktopViewport]);
+  const mapRegionLevelToggleAlign = useMemo<'left' | 'right'>(() => 'right', []);
   const mapCountryFocusOffsetPx = useMemo<[number, number]>(() => {
     if (isDesktopViewport && isDesktopLeftPanelOpen) {
       return [DESKTOP_LEFT_PANEL_MAP_FOCUS_OFFSET_X, 0];
@@ -438,10 +645,16 @@ export default function TopicsMapPage({
     (context: BaseCountryTooltipContext) => {
       const breakdown = buildRegionBreakdown(context.stat, resultVisibility);
       return (
-        <div className="w-[min(340px,calc(100vw-44px))] rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.72)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+        <div className={`w-[min(340px,calc(100vw-44px))] rounded-[22px] border p-3.5 backdrop-blur-2xl ${panelTheme.panelStrong}`}>
           <div className="flex items-center justify-between">
-            <h4 className="truncate text-[15px] font-semibold text-white">{context.name || context.code}</h4>
-            <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+            <h4 className={`truncate text-[15px] font-semibold ${panelTheme.textPrimary}`}>{context.name || context.code}</h4>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                isDarkTheme
+                  ? 'border-white/18 bg-white/8 text-white/75'
+                  : 'border-slate-200 bg-slate-900/[0.04] text-slate-600'
+              }`}
+            >
               {formatRegionLevelLabel(context.level)}
             </span>
           </div>
@@ -449,13 +662,13 @@ export default function TopicsMapPage({
           {breakdown ? (
             <div className="mt-2.5">
               {breakdown.isLocked ? (
-                <p className="text-[12px] text-white/72">
-                  현재 격차 <span className="font-semibold text-white">{breakdown.gapPercent}%p</span> · 총{' '}
-                  <span className="font-semibold text-white">{breakdown.total.toLocaleString()}표</span>
+                <p className={`text-[12px] ${panelTheme.textSecondary}`}>
+                  현재 격차 <span className={`font-semibold ${panelTheme.textPrimary}`}>{breakdown.gapPercent}%p</span> · 총{' '}
+                  <span className={`font-semibold ${panelTheme.textPrimary}`}>{breakdown.total.toLocaleString()}표</span>
                 </p>
               ) : (
                 <>
-                  <div className="flex items-center justify-between text-[12px] text-white/80">
+                  <div className={`flex items-center justify-between text-[12px] ${panelTheme.textSecondary}`}>
                     <span>
                       {optionA?.label ?? 'A'} {breakdown.aPercent}%
                     </span>
@@ -463,11 +676,11 @@ export default function TopicsMapPage({
                       {optionB?.label ?? 'B'} {breakdown.bPercent}%
                     </span>
                   </div>
-                  <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
+                  <div className={`mt-1.5 flex h-2.5 overflow-hidden rounded-full ${isDarkTheme ? 'bg-white/10' : 'bg-slate-900/[0.08]'}`}>
                     <div className="h-full bg-[#ff6b00]" style={{ width: `${breakdown.aPercent}%` }} />
                     <div className="h-full bg-[#2f74ff]" style={{ width: `${breakdown.bPercent}%` }} />
                   </div>
-                  <p className="mt-2 text-[12px] text-white/65">
+                  <p className={`mt-2 text-[12px] ${panelTheme.textMuted}`}>
                     참여 {breakdown.total.toLocaleString()}표 · {optionA?.label ?? 'A'} {breakdown.countA.toLocaleString()} ·{' '}
                     {optionB?.label ?? 'B'} {breakdown.countB.toLocaleString()}
                   </p>
@@ -475,12 +688,12 @@ export default function TopicsMapPage({
               )}
             </div>
           ) : (
-            <p className="mt-2 text-[12px] text-white/60">이 지역에는 아직 투표 데이터가 없습니다.</p>
+            <p className={`mt-2 text-[12px] ${panelTheme.textMuted}`}>이 지역에는 아직 투표 데이터가 없습니다.</p>
           )}
         </div>
       );
     },
-    [optionA?.label, optionB?.label, resultVisibility],
+    [isDarkTheme, optionA?.label, optionB?.label, panelTheme.panelStrong, panelTheme.textMuted, panelTheme.textPrimary, panelTheme.textSecondary, resultVisibility],
   );
 
   useEffect(() => {
@@ -501,10 +714,46 @@ export default function TopicsMapPage({
     }
   }, [isDesktopViewport]);
 
+  const clearPendingRegionDismiss = useCallback(() => {
+    if (pendingRegionDismissRef.current !== null) {
+      clearTimeout(pendingRegionDismissRef.current);
+      pendingRegionDismissRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     setSelectedRegion(null);
     setVoteMessage(null);
   }, [selectedCountry]);
+
+  useEffect(() => {
+    if (isDesktopViewport || !selectedRegion) {
+      clearPendingRegionDismiss();
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (selectedRegionPanelRef.current?.contains(target)) {
+        return;
+      }
+      if (target instanceof Element && target.closest('.maplibregl-map')) {
+        return;
+      }
+      clearPendingRegionDismiss();
+      setSelectedRegion(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [clearPendingRegionDismiss, isDesktopViewport, selectedRegion]);
+
+  useEffect(() => () => clearPendingRegionDismiss(), [clearPendingRegionDismiss]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -655,7 +904,6 @@ export default function TopicsMapPage({
       try {
         const query = new URLSearchParams({
           status: 'LIVE',
-          country: selectedCountry,
         });
         const response = await fetch(`/api/votes/topics?${query.toString()}`, {
           cache: 'no-store',
@@ -694,7 +942,7 @@ export default function TopicsMapPage({
     return () => {
       cancelled = true;
     };
-  }, [selectedCountry]);
+  }, []);
 
   useEffect(() => {
     if (topics.length === 0) {
@@ -841,27 +1089,6 @@ export default function TopicsMapPage({
   }, []);
 
   useEffect(() => {
-    const node = topicSelectorRef.current;
-    if (!node) {
-      return;
-    }
-
-    const updateHeight = () => {
-      const next = Math.ceil(node.getBoundingClientRect().height);
-      setTopicSelectorHeight(next > 0 ? next : 0);
-    };
-
-    updateHeight();
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => updateHeight());
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [isTopicEditorOpen, topics.length]);
-
-  useEffect(() => {
     if (isAuthenticated || !activeTopicId) {
       setGuestHasVoted(false);
       return;
@@ -869,6 +1096,72 @@ export default function TopicsMapPage({
 
     setGuestHasVoted(readPendingVotes().includes(activeTopicId));
   }, [activeTopicId, isAuthenticated]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncActiveTopicVoteState = async () => {
+      if (!activeTopicId) {
+        setActiveTopicVoteViewer(buildFallbackViewerState(false));
+        return;
+      }
+
+      if (!isAuthenticated && !guestSessionId) {
+        setActiveTopicVoteViewer(buildFallbackViewerState(guestHasVoted));
+        return;
+      }
+
+      try {
+        let accessToken: string | null = null;
+        if (isAuthenticated) {
+          const supabase = getSupabaseBrowserClient();
+          if (supabase) {
+            const { data } = await supabase.auth.getSession();
+            accessToken = data.session?.access_token ?? null;
+          }
+        }
+
+        const query = new URLSearchParams({
+          topicId: activeTopicId,
+          country: selectedCountry,
+        });
+        const response = await fetch(`/api/votes/result-summary?${query.toString()}`, {
+          cache: 'no-store',
+          headers: buildVoteRequestHeaders(accessToken, isAuthenticated ? null : guestSessionId),
+        });
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setActiveTopicVoteViewer(buildFallbackViewerState(guestHasVoted));
+          }
+          return;
+        }
+
+        const json = (await response.json()) as VoteResultSummaryResponse;
+        if (!cancelled) {
+          setActiveTopicVoteViewer(normalizeViewerState(json));
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveTopicVoteViewer(buildFallbackViewerState(guestHasVoted));
+        }
+      }
+    };
+
+    void syncActiveTopicVoteState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTopicId,
+    buildFallbackViewerState,
+    guestHasVoted,
+    guestSessionId,
+    isAuthenticated,
+    normalizeViewerState,
+    selectedCountry,
+  ]);
 
   useEffect(() => {
     if (!showProfileModal || !canSelectSchoolInModal) {
@@ -1044,17 +1337,36 @@ export default function TopicsMapPage({
           body: JSON.stringify({
             topicId: activeTopicId,
             optionKey: selectedOptionKey,
+            countryCode: viewerSupportedCountry,
+            scopeCountryCode: selectedCountry,
             guestSessionId: isAuthenticated ? undefined : guestSessionId,
             ...(regionInputPayload ? { regionInput: regionInputPayload } : {}),
           }),
         });
 
-        const json = (await response.json()) as { error?: string };
+        const json = (await response.json()) as {
+          error?: string;
+          voteCountryCode?: string;
+          isCrossCountryVote?: boolean;
+        };
         if (!response.ok) {
           if (response.status === 409) {
             setVoteMessage('이미 해당 주제에 투표했습니다.');
             if (!isAuthenticated) {
               setGuestHasVoted(true);
+            }
+            const existingVoteCountryCode = activeTopicVoteViewer.voteCountryCode ?? viewerSupportedCountry;
+            setActiveTopicVoteViewer({
+              ...buildFallbackViewerState(true),
+              voteCountryCode: existingVoteCountryCode,
+              hasVoteInScope: existingVoteCountryCode === selectedCountry,
+            });
+            if (selectedCountry !== existingVoteCountryCode) {
+              openResultScopeChooser(activeTopicId, activeTopic?.title ?? '결과 보기', existingVoteCountryCode);
+            } else if (redirectResultTopicId && redirectResultTopicId === activeTopicId) {
+              router.push(buildResultHref(activeTopicId, { entry: 'history', view: 'map' }));
+            } else {
+              router.push(buildResultHref(activeTopicId));
             }
             return;
           }
@@ -1068,11 +1380,19 @@ export default function TopicsMapPage({
           setGuestHasVoted(true);
         }
 
+        const voteCountryCode = json.voteCountryCode ? resolveSupportedCountry(json.voteCountryCode) : viewerSupportedCountry;
+        const shouldOptimisticallyUpdateCurrentScope = selectedCountry === voteCountryCode;
+        setActiveTopicVoteViewer({
+          ...buildFallbackViewerState(true),
+          voteCountryCode,
+          hasVoteInScope: shouldOptimisticallyUpdateCurrentScope,
+        });
+
         const optimisticRegion = resolveOptimisticRegionCodes(regionInputPayload);
         const optimisticSidoCode = optimisticRegion.sidoCode;
         const optimisticSigunguCode = optimisticRegion.sigunguCode;
 
-        if (optimisticSidoCode || optimisticSigunguCode) {
+        if (shouldOptimisticallyUpdateCurrentScope && (optimisticSidoCode || optimisticSigunguCode)) {
           setMapStats((prev) => {
             let next = prev;
             if (optimisticSidoCode) {
@@ -1093,12 +1413,18 @@ export default function TopicsMapPage({
           );
         }
 
-        setResultVisibility('unlocked');
-        setVoteMessage('투표가 반영되었습니다.');
-        if (redirectResultTopicId && redirectResultTopicId === activeTopicId) {
-          router.push(`/results/${activeTopicId}?entry=history&view=map`);
+        setResultVisibility(shouldOptimisticallyUpdateCurrentScope ? 'unlocked' : 'locked');
+        setVoteMessage(
+          shouldOptimisticallyUpdateCurrentScope
+            ? '투표가 반영되었습니다.'
+            : `${viewerSupportedCountry} 기준으로 투표가 반영되었습니다.`,
+        );
+        if (selectedCountry !== voteCountryCode || json.isCrossCountryVote) {
+          openResultScopeChooser(activeTopicId, activeTopic?.title ?? '결과 보기', voteCountryCode);
+        } else if (redirectResultTopicId && redirectResultTopicId === activeTopicId) {
+          router.push(buildResultHref(activeTopicId, { entry: 'history', view: 'map' }));
         } else {
-          router.push(`/results/${activeTopicId}`);
+          router.push(buildResultHref(activeTopicId));
         }
         return;
       } catch {
@@ -1113,16 +1439,29 @@ export default function TopicsMapPage({
       isAuthenticated,
       optionA,
       optionB,
+      activeTopic,
+      activeTopicVoteViewer.voteCountryCode,
+      buildFallbackViewerState,
+      openResultScopeChooser,
       redirectResultTopicId,
       resolveOptimisticRegionCodes,
       router,
+      buildResultHref,
       selectedOptionKey,
+      selectedCountry,
+      viewerSupportedCountry,
     ],
   );
 
   const handleVote = useCallback(async () => {
-    if (!isViewingOwnCountry) {
-      setVoteMessage(CROSS_COUNTRY_VIEW_ONLY_MESSAGE);
+    if (activeTopicId && activeTopicVoteViewer.hasTopicVote) {
+      if ((activeTopicVoteViewer.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry) {
+        openResultScopeChooser(activeTopicId, activeTopic?.title ?? '결과 보기', activeTopicVoteViewer.voteCountryCode ?? viewerSupportedCountry);
+      } else if (redirectResultTopicId && redirectResultTopicId === activeTopicId) {
+        router.push(buildResultHref(activeTopicId, { entry: 'history', view: 'map' }));
+      } else {
+        router.push(buildResultHref(activeTopicId));
+      }
       return;
     }
 
@@ -1154,14 +1493,22 @@ export default function TopicsMapPage({
     setShowProfileModal(true);
   }, [
     buildPendingRegionInput,
+    activeTopic,
+    activeTopicId,
+    activeTopicVoteViewer.hasTopicVote,
+    activeTopicVoteViewer.voteCountryCode,
+    buildResultHref,
     canSkipLocationPrompt,
     canUseGpsForViewer,
     hasSavedSchool,
     isAuthenticated,
-    isViewingOwnCountry,
+    openResultScopeChooser,
+    redirectResultTopicId,
     requiresSignupCompletion,
     router,
+    selectedCountry,
     submitVote,
+    viewerSupportedCountry,
   ]);
 
   const handleSaveRegionOnly = useCallback(async () => {
@@ -1180,17 +1527,43 @@ export default function TopicsMapPage({
     }
   }, [buildPendingRegionInput, regionModalHintText, submitVote, voteAfterProfile]);
 
+  const handleOpenTopicEditor = useCallback(() => {
+    setIsTopicEditorOpen(true);
+    setActiveTopicTab('all');
+    setTopicSearchQuery('');
+  }, []);
+
+  const handleCloseTopicEditor = useCallback(() => {
+    setIsTopicEditorOpen(false);
+    setActiveTopicTab('all');
+    setTopicSearchQuery('');
+  }, []);
+
   const handleAddTopic = useCallback((topicId: string) => {
     setSelectedTopicIds((prev) => (prev.includes(topicId) ? prev : [...prev, topicId]));
     setActiveTopicId(topicId);
     setTopicSearchQuery('');
     setTopicsError(null);
-  }, []);
+    if (!isDesktopViewport) {
+      setIsTopicEditorOpen(false);
+    }
+  }, [isDesktopViewport]);
 
   const handleRemoveTopic = useCallback((topicId: string) => {
     setSelectedTopicIds((prev) => prev.filter((id) => id !== topicId));
     setTopicsError(null);
   }, []);
+
+  const handleMapPointerDown = useCallback(() => {
+    if (isDesktopViewport || !selectedRegion || typeof window === 'undefined') {
+      return;
+    }
+    clearPendingRegionDismiss();
+    pendingRegionDismissRef.current = window.setTimeout(() => {
+      pendingRegionDismissRef.current = null;
+      setSelectedRegion(null);
+    }, 0);
+  }, [clearPendingRegionDismiss, isDesktopViewport, selectedRegion]);
 
   const handleBottomTabClick = useCallback(
     (tab: 'home' | 'map' | 'game' | 'me') => {
@@ -1243,104 +1616,121 @@ export default function TopicsMapPage({
     window.history.replaceState(window.history.state, '', nextQuery ? `/topics-map?${nextQuery}` : '/topics-map');
   }, [selectedTopicIds]);
 
-  const renderTopicSelectorPanel = (mode: 'mobile' | 'desktop') => {
+  const renderTopicSelectorPanel = (mode: 'desktop' | 'mobile-modal') => {
     const isDesktopMode = mode === 'desktop';
-    const panelTitle = isDesktopMode ? '주제 선택' : '선택 주제 태그';
+    const showEditorControls = mode === 'mobile-modal' || isTopicEditorOpen;
+    const panelTitle = isDesktopMode ? '주제 선택' : '주제 추가';
 
     return (
       <section
-        ref={isDesktopMode ? undefined : topicSelectorRef}
         className={
           isDesktopMode
-            ? 'pointer-events-auto h-full min-h-0 w-full overflow-y-auto border-t border-white/10 bg-transparent pb-3 custom-scrollbar'
-            : 'pointer-events-auto mt-3 w-full rounded-t-[32px] border-t border-white/12 bg-[rgba(20,20,24,0.78)] pb-3 shadow-[0_-10px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl md:max-w-[560px] lg:hidden'
+            ? `pointer-events-auto h-full min-h-0 w-full overflow-y-auto border-t bg-transparent pb-3 custom-scrollbar ${panelTheme.divider}`
+            : `pointer-events-auto w-full overflow-hidden rounded-[28px] border backdrop-blur-2xl ${panelTheme.panelElevated}`
         }
       >
-        <div className="mx-auto mb-2 mt-3.5 h-1.5 w-12 rounded-full bg-white/20 lg:hidden" />
-
-        <div className="flex items-center justify-between px-6 pb-5 pt-3">
-          <h3 className="text-[20px] font-bold tracking-tight text-white">
+        {isDesktopMode ? <div className={`mx-auto mb-2 mt-3.5 h-1.5 w-12 rounded-full lg:hidden ${panelTheme.handle}`} /> : null}
+        <div className={`flex items-center justify-between ${isDesktopMode ? 'px-6 pb-5 pt-3' : 'px-5 pb-4 pt-5'}`}>
+          <h3 className={`text-[20px] font-bold tracking-tight ${panelTheme.textPrimary}`}>
             {panelTitle}{' '}
-            <span className="ml-1 text-[14px] font-medium text-white/55">{topics.length}개</span>
+            <span className={`ml-1 text-[14px] font-medium ${panelTheme.textTertiary}`}>{topics.length}개</span>
           </h3>
           <button
             type="button"
-            onClick={() => {
-              setIsTopicEditorOpen((prev) => !prev);
-              setActiveTopicTab('all');
-              setTopicSearchQuery('');
-            }}
-            className="text-[15px] font-semibold text-white/72 transition-colors hover:text-[#ffd29c]"
+            onClick={
+              isDesktopMode
+                ? () => {
+                  if (isTopicEditorOpen) {
+                    handleCloseTopicEditor();
+                    return;
+                  }
+                  handleOpenTopicEditor();
+                }
+                : handleCloseTopicEditor
+            }
+            className={`inline-flex items-center justify-center rounded-full transition-colors hover:text-[#ff9f0a] ${isDesktopMode ? `text-[15px] font-semibold ${panelTheme.textSecondary}` : `h-9 w-9 border ${panelTheme.divider} ${panelTheme.textSecondary}`}`}
+            aria-label={isDesktopMode ? (isTopicEditorOpen ? '주제 편집 닫기' : '주제 편집 열기') : '주제 추가 팝업 닫기'}
           >
-            {isTopicEditorOpen ? '닫기' : '열기'}
+            {isDesktopMode ? (isTopicEditorOpen ? '닫기' : '열기') : <X className="h-4 w-4" />}
           </button>
         </div>
 
-        <div className="mb-5 px-5">
-          <div className="flex min-h-[72px] flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/12 bg-[rgba(8,10,14,0.88)] p-2.5">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {topics.length === 0 ? (
-                <motion.div
-                  key="empty-topics"
-                  initial={shouldReduceMotion ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={shouldReduceMotion ? undefined : { opacity: 0 }}
-                  className="flex w-full flex-col items-center justify-center py-1 text-center text-white/60"
-                >
-                  <p className="text-[14px] font-medium text-white/80">선택된 주제가 없습니다</p>
-                  <p className="mt-1 text-[12px] text-white/52">아래 목록에서 원하는 LIVE 주제를 담아주세요</p>
-                </motion.div>
-              ) : (
-                <motion.div key="selected-topic-chips" layout className="flex w-full flex-wrap gap-2">
-                  {topics.map((topic) => {
-                    const active = topic.id === activeTopicId;
-                    return (
-                      <motion.div
-                        key={topic.id}
-                        layout
-                        initial={shouldReduceMotion ? false : { scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={shouldReduceMotion ? undefined : { scale: 0.8, opacity: 0 }}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] ${
-                          active
-                            ? 'border-[#ff9f0a66] bg-[#ff6b0028] text-[#ffcc99]'
-                            : 'border-white/16 bg-white/8 text-white/84'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setActiveTopicId(topic.id)}
-                          className="max-w-[11.5rem] truncate text-left font-bold"
-                          aria-label={`${topic.title} 선택`}
-                        >
-                          {topic.title}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveTopic(topic.id)}
-                          className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] transition-colors ${
+        {isDesktopMode ? (
+          <div className="mb-5 px-5">
+            <div className={`flex min-h-[72px] flex-wrap items-center justify-center gap-2 rounded-2xl border p-2.5 ${panelTheme.chipBox}`}>
+              <AnimatePresence mode="popLayout" initial={false}>
+                {topics.length === 0 ? (
+                  <motion.div
+                    key="empty-topics"
+                    initial={shouldReduceMotion ? false : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+                    className={`flex w-full flex-col items-center justify-center py-1 text-center ${panelTheme.textMuted}`}
+                  >
+                    <p className={`text-[14px] font-medium ${panelTheme.textSecondary}`}>선택된 주제가 없습니다</p>
+                    <p className={`mt-1 text-[12px] ${panelTheme.textTertiary}`}>아래 목록에서 원하는 LIVE 주제를 담아주세요</p>
+                  </motion.div>
+                ) : (
+                  <motion.div key="selected-topic-chips" layout className="flex w-full flex-wrap gap-2">
+                    {topics.map((topic) => {
+                      const active = topic.id === activeTopicId;
+                      return (
+                        <motion.div
+                          key={topic.id}
+                          layout
+                          initial={shouldReduceMotion ? false : { scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={shouldReduceMotion ? undefined : { scale: 0.8, opacity: 0 }}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] ${
                             active
-                              ? 'bg-[#ff9f0a33] text-[#ffd5ad] hover:bg-[#ff9f0a40]'
-                              : 'bg-white/15 text-white/75 hover:bg-white/20 hover:text-white'
+                              ? 'border-[#ff9f0a66] bg-[#ff6b0028] text-[#ffcc99]'
+                              : panelTheme.chipInactive
                           }`}
-                          aria-label={`${topic.title} 제거`}
                         >
-                          ✕
-                        </button>
-                      </motion.div>
-                    );
-                  })}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTopicId(topic.id)}
+                            className="max-w-[11.5rem] truncate text-left font-bold"
+                            aria-label={`${topic.title} 선택`}
+                          >
+                            {topic.title}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTopic(topic.id)}
+                            className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] transition-colors ${
+                              active
+                                ? 'bg-[#ff9f0a33] text-[#ffd5ad] hover:bg-[#ff9f0a40]'
+                                : panelTheme.chipInactiveIcon
+                            }`}
+                            aria-label={`${topic.title} 제거`}
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </motion.div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="px-5 pb-4">
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${panelTheme.chipBox}`}>
+              <p className={`font-semibold ${panelTheme.textPrimary}`}>원하는 LIVE 주제를 바로 추가하세요.</p>
+              <p className={`mt-1 text-[12px] ${panelTheme.textTertiary}`}>
+                선택 즉시 팝업이 닫히고, 아래 선택 열에 알약 형태로 쌓입니다.
+              </p>
+            </div>
+          </div>
+        )}
 
-        {isTopicEditorOpen ? (
+        {showEditorControls ? (
           <>
             <div className="mb-5 px-5">
-              <div className="flex h-[44px] items-center gap-2 rounded-xl border border-white/14 bg-white/8 px-3 transition-colors focus-within:border-[#ff9f0a66]">
-                <span aria-hidden className="text-base text-white/55">
+              <div className={`flex h-[44px] items-center gap-2 rounded-xl border px-3 transition-colors focus-within:border-[#ff9f0a66] ${panelTheme.input}`}>
+                <span aria-hidden className={`text-base ${panelTheme.inputIcon}`}>
                   🔍
                 </span>
                 <input
@@ -1348,13 +1738,13 @@ export default function TopicsMapPage({
                   value={topicSearchQuery}
                   onChange={(event) => setTopicSearchQuery(event.target.value)}
                   placeholder="추가할 주제를 검색하세요"
-                  className="w-full bg-transparent text-[15px] text-white outline-none placeholder:text-white/45"
+                  className="w-full bg-transparent text-[15px] outline-none placeholder:opacity-100"
                 />
                 {topicSearchQuery ? (
                   <button
                     type="button"
                     onClick={() => setTopicSearchQuery('')}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/15 text-[10px] text-white/70 transition hover:bg-white/22 hover:text-white"
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] transition ${panelTheme.inputClear}`}
                     aria-label="검색어 지우기"
                   >
                     ✕
@@ -1363,7 +1753,7 @@ export default function TopicsMapPage({
               </div>
             </div>
 
-            <div className="border-b border-white/10 px-5">
+            <div className={`border-b px-5 ${panelTheme.divider}`}>
               <div className="hide-scrollbar flex gap-5 overflow-x-auto scroll-smooth">
                 {TOPIC_TAB_META.map((tab) => {
                   const isActive = activeTopicTab === tab.id;
@@ -1374,11 +1764,11 @@ export default function TopicsMapPage({
                       onClick={() => setActiveTopicTab(tab.id)}
                       className="relative whitespace-nowrap pb-3 text-[15px] font-medium transition-colors"
                     >
-                      <span className={isActive ? 'font-bold text-white' : 'text-white/56'}>{tab.label}</span>
+                      <span className={isActive ? `font-bold ${panelTheme.textPrimary}` : panelTheme.tabInactive}>{tab.label}</span>
                       {isActive ? (
                         <motion.div
-                          layoutId="topic-selector-active-tab"
-                          className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-white"
+                          layoutId={`topic-selector-active-tab-${mode}`}
+                          className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-t-full bg-[#ff9f0a]"
                         />
                       ) : null}
                     </button>
@@ -1395,7 +1785,7 @@ export default function TopicsMapPage({
                     initial={shouldReduceMotion ? false : { opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={shouldReduceMotion ? undefined : { opacity: 0 }}
-                    className="py-10 text-center text-[14px] text-white/58"
+                    className={`py-10 text-center text-[14px] ${panelTheme.textMuted}`}
                   >
                     일치하는 주제가 없습니다.
                   </motion.p>
@@ -1408,9 +1798,9 @@ export default function TopicsMapPage({
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.95 }}
-                        className="group flex items-center justify-between border-b border-white/8 py-4"
+                        className={`group flex items-center justify-between border-b py-4 ${panelTheme.rowDivider}`}
                       >
-                        <span className="line-clamp-2 text-[16px] font-medium text-white/90 transition-colors group-hover:text-white">
+                        <span className={`line-clamp-2 text-[16px] font-medium transition-colors group-hover:text-[#ff9f0a] ${panelTheme.textSecondary}`}>
                           {topic.title}
                         </span>
                         <button
@@ -1430,6 +1820,81 @@ export default function TopicsMapPage({
         ) : null}
 
         {topicsError ? <p className="px-5 pt-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
+      </section>
+    );
+  };
+
+  const renderMobileSelectedTopicsRail = () => {
+    if (topics.length === 0) {
+      return null;
+    }
+
+    const railAccentButtonClass =
+      'border-[#f3c493]/65 bg-[rgba(255,214,176,0.12)] text-[#ffd5ad] shadow-[0_0_0_1px_rgba(255,214,176,0.06),0_10px_24px_rgba(255,168,94,0.12)] hover:bg-[rgba(255,214,176,0.18)]';
+    const railAccentChipClass =
+      'border-[#f3c493]/65 bg-[rgba(255,214,176,0.11)] text-[#ffd5ad] shadow-[inset_0_1px_0_rgba(255,245,232,0.16),0_8px_18px_rgba(255,168,94,0.1)]';
+    const railAccentIconClass = 'bg-[rgba(255,214,176,0.16)] text-[#ffd7b3] hover:bg-[rgba(255,214,176,0.22)]';
+
+    return (
+      <section
+        className={`pointer-events-auto shrink-0 overflow-hidden rounded-[22px] border p-2.5 backdrop-blur-xl ${
+          isDarkTheme
+            ? 'border-white/14 bg-[linear-gradient(135deg,rgba(18,28,42,0.72),rgba(12,18,28,0.52))] shadow-[0_14px_32px_rgba(0,0,0,0.26)]'
+            : 'border-white/45 bg-[linear-gradient(135deg,rgba(255,255,255,0.74),rgba(255,255,255,0.42))] shadow-[0_14px_32px_rgba(148,163,184,0.18)]'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleOpenTopicEditor}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition ${railAccentButtonClass}`}
+            aria-label="주제 추가"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <div className="hide-scrollbar min-w-0 flex-1 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-2 pr-1">
+              {topics.map((topic) => {
+                const active = topic.id === activeTopicId;
+                return (
+                  <motion.div
+                    key={topic.id}
+                    layout
+                    initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.92 }}
+                    className={`inline-flex h-11 items-center gap-1.5 rounded-full border pl-4 pr-2 text-[13px] ${
+                      active
+                        ? railAccentChipClass
+                        : panelTheme.chipInactive
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveTopicId(topic.id)}
+                      className="max-w-[12rem] truncate text-left font-bold"
+                      aria-label={`${topic.title} 선택`}
+                    >
+                      {topic.title}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTopic(topic.id)}
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                        active
+                          ? railAccentIconClass
+                          : panelTheme.chipInactiveIcon
+                      }`}
+                      aria-label={`${topic.title} 제거`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </section>
     );
   };
@@ -1459,12 +1924,18 @@ export default function TopicsMapPage({
             onRegionClick={
               isDesktopViewport
                 ? undefined
-                : (region) =>
+                : (region) => {
+                    clearPendingRegionDismiss();
                     setSelectedRegion((prev) =>
                       prev && prev.code === region.code && prev.level === region.level ? null : region,
-                    )
+                    );
+                  }
             }
+            onMapPointerDown={handleMapPointerDown}
             onActiveCountryChange={(nextCountry) => {
+              if (nextCountry !== viewerSupportedCountry) {
+                manualCountrySelectionRef.current = true;
+              }
               setSelectedCountry((prev) => (prev === nextCountry ? prev : nextCountry));
             }}
             className="h-full w-full !rounded-none !border-0"
@@ -1497,8 +1968,8 @@ export default function TopicsMapPage({
               <>
                 <CountryTabs
                   selectedCountry={selectedCountry}
-                  onSelectCountry={setSelectedCountry}
-                  compact={!isDesktopViewport}
+                  onSelectCountry={handleCountryTabSelect}
+                  desktopExpandable
                 />
                 <AccountMenuButton />
               </>
@@ -1508,11 +1979,11 @@ export default function TopicsMapPage({
           {isDesktopViewport ? (
             <div className="relative flex min-h-0 flex-1">
               {isDesktopLeftPanelOpen ? (
-                <aside className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border border-white/12 bg-[rgba(20,20,24,0.82)] shadow-[4px_0_24px_rgba(0,0,0,0.28)]">
+                <aside className={`pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border ${panelTheme.aside}`}>
                   <button
                     type="button"
                     onClick={() => setIsDesktopLeftPanelOpen(false)}
-                    className="absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                    className={`absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition ${panelTheme.opener}`}
                     aria-label="주제 선택 패널 접기"
                   >
                     <ChevronLeft className="h-5 w-5" />
@@ -1525,7 +1996,7 @@ export default function TopicsMapPage({
                 <button
                   type="button"
                   onClick={() => setIsDesktopLeftPanelOpen(true)}
-                  className="pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                  className={`pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition ${panelTheme.opener}`}
                   aria-label="주제 선택 패널 열기"
                 >
                   <ChevronRight className="h-5 w-5" />
@@ -1534,13 +2005,13 @@ export default function TopicsMapPage({
 
               <div className="ml-auto flex min-h-0 w-full max-w-[clamp(320px,28vw,460px)] flex-col gap-3">
                 {isTopicsLoading ? (
-                  <section className="pointer-events-auto rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+                  <section className={`pointer-events-auto rounded-[22px] border px-4 py-4 text-sm backdrop-blur-2xl ${panelTheme.panel} ${panelTheme.textSecondary}`}>
                     주제 목록 불러오는 중...
                   </section>
                 ) : topics.length === 0 ? (
-                  <section className="pointer-events-auto rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
-                    <h2 className="text-lg font-semibold text-white">선택된 주제가 없습니다.</h2>
-                    <p className="mt-2 text-sm text-white/70">좌측 주제 선택 패널에서 원하는 LIVE 주제를 담아주세요.</p>
+                  <section className={`pointer-events-auto rounded-[22px] border px-4 py-4 backdrop-blur-2xl ${panelTheme.panel}`}>
+                    <h2 className={`text-lg font-semibold ${panelTheme.textPrimary}`}>선택된 주제가 없습니다.</h2>
+                    <p className={`mt-2 text-sm ${panelTheme.textSecondary}`}>좌측 주제 선택 패널에서 원하는 LIVE 주제를 담아주세요.</p>
                   </section>
                 ) : (
                   <>
@@ -1549,7 +2020,7 @@ export default function TopicsMapPage({
                         type="button"
                         onClick={() => setIsVoteCardCollapsed(false)}
                         aria-label="투표 섹션 열기"
-                        className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-2xl border border-white/18 bg-[rgba(10,18,30,0.86)] px-4 text-white/86 shadow-[0_16px_34px_rgba(0,0,0,0.38)] backdrop-blur-md transition-all duration-200 hover:border-[#ff9f0a]/45 hover:bg-[rgba(13,20,34,0.95)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60"
+                        className={`pointer-events-auto inline-flex h-11 items-center gap-2 rounded-2xl border px-4 backdrop-blur-md transition-all duration-200 hover:border-[#ff9f0a]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/60 ${panelTheme.panelElevated}`}
                       >
                         <span className="text-[13px] font-semibold">투표 열기</span>
                         <ChevronRight className="h-4 w-4" />
@@ -1570,20 +2041,25 @@ export default function TopicsMapPage({
                       onSelectOption={setSelectedOptionKey}
                       onSubmitVote={() => void handleVote()}
                       submitDisabled={
-                        isSubmittingVote ||
-                        !isViewingOwnCountry ||
-                        !selectedOptionKey ||
-                        (!isAuthenticated && guestHasVoted) ||
-                        (!isAuthenticated && !guestSessionId)
+                        activeTopicVoteViewer.hasTopicVote
+                          ? false
+                          : isSubmittingVote ||
+                            !selectedOptionKey ||
+                            (!isAuthenticated && guestHasVoted) ||
+                            (!isAuthenticated && !guestSessionId)
                       }
                       submitLabel={
                         isSubmittingVote
                           ? '처리 중...'
-                          : !isViewingOwnCountry
-                            ? '타국 조회 모드 · 투표 불가'
+                          : activeTopicVoteViewer.hasTopicVote
+                            ? (activeTopicVoteViewer.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry
+                              ? '이미 투표 완료 · 결과 보기 선택'
+                              : '이미 투표 완료 · 결과 보기'
                           : !isAuthenticated && guestHasVoted
                             ? '이미 투표 완료'
-                            : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+                            : selectedCountry === viewerSupportedCountry
+                              ? `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+                              : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기 · 내 국가 반영`
                       }
                       message={voteMessage}
                       isStatsLoading={isStatsLoading}
@@ -1609,13 +2085,20 @@ export default function TopicsMapPage({
           ) : (
             <>
               {isTopicsLoading ? (
-                <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 text-sm text-white/75 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:max-w-[560px]">
+                <section className={`pointer-events-auto mt-3 rounded-[22px] border px-4 py-4 text-sm backdrop-blur-2xl md:max-w-[560px] ${panelTheme.panel} ${panelTheme.textSecondary}`}>
                   주제 목록 불러오는 중...
                 </section>
               ) : topics.length === 0 ? (
-                <section className="pointer-events-auto mt-3 rounded-[22px] border border-white/12 bg-[rgba(20,20,24,0.62)] px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:max-w-[560px]">
-                  <h2 className="text-lg font-semibold text-white">선택된 주제가 없습니다.</h2>
-                  <p className="mt-2 text-sm text-white/70">하단의 주제 선택에서 원하는 LIVE 주제를 담아주세요.</p>
+                <section className={`pointer-events-auto mt-3 rounded-[22px] border px-4 py-4 backdrop-blur-2xl md:max-w-[560px] ${panelTheme.panel}`}>
+                  <h2 className={`text-lg font-semibold ${panelTheme.textPrimary}`}>선택된 주제가 없습니다.</h2>
+                  <p className={`mt-2 text-sm ${panelTheme.textSecondary}`}>주제 선택 팝업에서 원하는 LIVE 주제를 담아주세요.</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenTopicEditor}
+                    className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl border border-[#ff9f0a66] bg-[#ff6b0025] px-4 text-[14px] font-bold text-[#ffcc99] transition hover:bg-[#ff6b0038]"
+                  >
+                    주제 선택
+                  </button>
                 </section>
               ) : (
                 <div className="mt-3 flex flex-col gap-3 md:max-w-[560px]">
@@ -1633,20 +2116,25 @@ export default function TopicsMapPage({
                     onSelectOption={setSelectedOptionKey}
                     onSubmitVote={() => void handleVote()}
                     submitDisabled={
-                      isSubmittingVote ||
-                      !isViewingOwnCountry ||
-                      !selectedOptionKey ||
-                      (!isAuthenticated && guestHasVoted) ||
-                      (!isAuthenticated && !guestSessionId)
+                      activeTopicVoteViewer.hasTopicVote
+                        ? false
+                        : isSubmittingVote ||
+                          !selectedOptionKey ||
+                          (!isAuthenticated && guestHasVoted) ||
+                          (!isAuthenticated && !guestSessionId)
                     }
                     submitLabel={
                       isSubmittingVote
                         ? '처리 중...'
-                        : !isViewingOwnCountry
-                          ? '타국 조회 모드 · 투표 불가'
+                        : activeTopicVoteViewer.hasTopicVote
+                          ? (activeTopicVoteViewer.voteCountryCode ?? viewerSupportedCountry) !== selectedCountry
+                            ? '이미 투표 완료 · 결과 보기 선택'
+                            : '이미 투표 완료 · 결과 보기'
                         : !isAuthenticated && guestHasVoted
                           ? '이미 투표 완료'
-                          : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+                          : selectedCountry === viewerSupportedCountry
+                            ? `${selectedOptionLabel ?? '선택한 항목'}에 투표하기`
+                            : `${selectedOptionLabel ?? '선택한 항목'}에 투표하기 · 내 국가 반영`
                     }
                     message={voteMessage}
                     isStatsLoading={isStatsLoading}
@@ -1665,13 +2153,24 @@ export default function TopicsMapPage({
                     }}
                   />
 
+                  {renderMobileSelectedTopicsRail()}
+
                   {selectedRegion ? (
-                    <section className="pointer-events-auto shrink-0 rounded-[22px] border border-white/12 bg-[rgba(18,18,22,0.62)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.3)] backdrop-blur-2xl">
+                    <section
+                      ref={selectedRegionPanelRef}
+                      className={`pointer-events-auto shrink-0 rounded-[22px] border p-3.5 backdrop-blur-2xl ${panelTheme.panelStrong}`}
+                    >
                       <div className="flex items-center justify-between">
-                        <h4 className="truncate text-[15px] font-semibold text-white">
+                        <h4 className={`truncate text-[15px] font-semibold ${panelTheme.textPrimary}`}>
                           {selectedRegion.name || selectedRegion.code}
                         </h4>
-                        <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                            isDarkTheme
+                              ? 'border-white/18 bg-white/8 text-white/75'
+                              : 'border-slate-200 bg-slate-900/[0.04] text-slate-600'
+                          }`}
+                        >
                           {formatRegionLevelLabel(selectedRegion.level)}
                         </span>
                       </div>
@@ -1690,21 +2189,25 @@ export default function TopicsMapPage({
                           return (
                             <div className="mt-2.5">
                               {resultVisibility === 'locked' ? (
-                                <p className="text-[12px] text-white/72">
-                                  현재 격차 <span className="font-semibold text-white">{gapPercent}%p</span> · 총{' '}
-                                  <span className="font-semibold text-white">{total.toLocaleString()}표</span>
+                                <p className={`text-[12px] ${panelTheme.textSecondary}`}>
+                                  현재 격차 <span className={`font-semibold ${panelTheme.textPrimary}`}>{gapPercent}%p</span> · 총{' '}
+                                  <span className={`font-semibold ${panelTheme.textPrimary}`}>{total.toLocaleString()}표</span>
                                 </p>
                               ) : (
                                 <>
-                                  <div className="flex items-center justify-between text-[12px] text-white/80">
+                                  <div className={`flex items-center justify-between text-[12px] ${panelTheme.textSecondary}`}>
                                     <span>{optionA?.label ?? 'A'} {aPercent}%</span>
                                     <span>{optionB?.label ?? 'B'} {bPercent}%</span>
                                   </div>
-                                  <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
+                                  <div
+                                    className={`mt-1.5 flex h-2.5 overflow-hidden rounded-full ${
+                                      isDarkTheme ? 'bg-white/10' : 'bg-slate-900/[0.08]'
+                                    }`}
+                                  >
                                     <div className="h-full bg-[#ff6b00]" style={{ width: `${aPercent}%` }} />
                                     <div className="h-full bg-[#2f74ff]" style={{ width: `${bPercent}%` }} />
                                   </div>
-                                  <p className="mt-2 text-[12px] text-white/65">
+                                  <p className={`mt-2 text-[12px] ${panelTheme.textMuted}`}>
                                     참여 {total.toLocaleString()}표 · {optionA?.label ?? 'A'} {countA.toLocaleString()} ·{' '}
                                     {optionB?.label ?? 'B'} {countB.toLocaleString()}
                                   </p>
@@ -1714,7 +2217,7 @@ export default function TopicsMapPage({
                           );
                         })()
                       ) : (
-                        <p className="mt-2 text-[12px] text-white/60">이 지역에는 아직 투표 데이터가 없습니다.</p>
+                        <p className={`mt-2 text-[12px] ${panelTheme.textMuted}`}>이 지역에는 아직 투표 데이터가 없습니다.</p>
                       )}
                     </section>
                   ) : null}
@@ -1722,16 +2225,15 @@ export default function TopicsMapPage({
               )}
 
               <div className="flex-1" />
-              {renderTopicSelectorPanel('mobile')}
               <div className="h-0" />
             </>
           )}
         </div>
 
         <div ref={bottomDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30 md:hidden">
-          <section className="pointer-events-auto border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <section className={`pointer-events-auto border-t pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-2xl ${panelTheme.bottomBar}`}>
             <div className="mx-auto max-w-[430px] px-3">
-              <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+              <section className={`rounded-xl border px-3 py-2 ${panelTheme.bottomBarInner}`}>
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                     광고
@@ -1750,7 +2252,7 @@ export default function TopicsMapPage({
           className="pointer-events-none absolute inset-x-0 z-20 md:hidden"
           style={{ bottom: `${bottomAdHeight}px` }}
         >
-          <nav className="pointer-events-auto rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <nav className={`pointer-events-auto rounded-t-[24px] border-t pb-2 pt-2 backdrop-blur-2xl ${panelTheme.bottomBar}`}>
             <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
               {[
                 { id: 'home' as const, label: '홈' },
@@ -1762,7 +2264,12 @@ export default function TopicsMapPage({
                   key={tab.id}
                   type="button"
                   onClick={() => handleBottomTabClick(tab.id)}
-                  className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${activeTab === tab.id ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
+                  className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition ${
+                    activeTab === tab.id
+                      ? isDarkTheme
+                        ? 'bg-white/14 text-[#ff9f0a]'
+                        : 'bg-slate-900/[0.08] text-[#ff9f0a]'
+                      : panelTheme.navInactive
                     }`}
                 >
                   {tab.label}
@@ -1771,6 +2278,29 @@ export default function TopicsMapPage({
             </div>
           </nav>
         </div>
+
+        <AnimatePresence>
+          {!isDesktopViewport && isTopicEditorOpen ? (
+            <motion.div
+              initial={shouldReduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8 md:hidden"
+              onClick={handleCloseTopicEditor}
+            >
+              <motion.div
+                initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.96, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.96, y: 16 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="w-full max-w-[560px]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {renderTopicSelectorPanel('mobile-modal')}
+              </motion.div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         {showProfileModal ? (
           <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 p-4 sm:items-center">
@@ -1953,6 +2483,21 @@ export default function TopicsMapPage({
           </div>
         ) : null}
       </main>
+
+      <VoteResultScopeChooser
+        isOpen={Boolean(resultScopeChooser)}
+        onClose={closeResultScopeChooser}
+        topicTitle={resultScopeChooser?.topicTitle ?? '결과 보기'}
+        scopeCountryName={
+          resultScopeChooser ? getCountryMapConfig(resultScopeChooser.scopeCountryCode).displayName : '현재 국가'
+        }
+        voteCountryName={
+          resultScopeChooser ? getCountryMapConfig(resultScopeChooser.voteCountryCode).displayName : '내 국가'
+        }
+        onOpenScopeResult={handleOpenScopeResult}
+        onOpenVoteCountryResult={handleOpenVoteCountryResult}
+        reducedMotion={Boolean(shouldReduceMotion)}
+      />
 
       <SiteLegalFooter containerMaxWidthClassName="max-w-[min(100vw-2.5rem,1920px)]" />
     </div>

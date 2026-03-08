@@ -11,7 +11,6 @@ import {
   getDefaultCountryLevel,
   getCountryMapConfig,
   SUPPORTED_COUNTRY_TABS,
-  type CountryMapConfig,
   type CountryMapLevel,
   type SupportedCountry,
 } from '@/lib/map/countryMapRegistry';
@@ -150,6 +149,20 @@ const THEME_STYLES = {
   },
 } as const;
 
+const TOGGLE_THEME_STYLES = {
+  light: {
+    wrapper:
+      'border-slate-200/90 bg-[rgba(255,255,255,0.9)] shadow-[0_10px_24px_rgba(148,163,184,0.22)] backdrop-blur-md',
+    active: 'border border-slate-300/90 bg-slate-900/[0.06] text-slate-900',
+    inactive: 'text-slate-500 hover:bg-slate-900/[0.04] hover:text-slate-800',
+  },
+  dark: {
+    wrapper: 'border-white/24 bg-[rgba(10,16,24,0.7)] shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md',
+    active: 'border border-white/30 bg-white/14 text-white',
+    inactive: 'text-white/62 hover:text-white/88',
+  },
+} as const;
+
 const LOCKED_FILL_COLOR = 'rgba(122, 142, 165, 0.52)';
 
 function emitMapMetric(event: string, payload: Record<string, unknown>): void {
@@ -258,16 +271,6 @@ function buildFillOpacityExpression(baseOpacity: number): ExpressionSpecificatio
   const safeBase = Math.max(0, Math.min(1, baseOpacity));
   const hoverOpacity = Math.max(safeBase, Math.min(1, safeBase + 0.16));
   return ['case', ['boolean', ['feature-state', 'hover'], false], hoverOpacity, safeBase] as ExpressionSpecification;
-}
-
-function levelForZoom(zoom: number, config: CountryMapConfig): CountryMapLevel {
-  if (config.levels.l3 && typeof config.zoomThresholds.l3 === 'number' && zoom >= config.zoomThresholds.l3) {
-    return 'l3';
-  }
-  if (config.levels.l2 && zoom >= config.zoomThresholds.l2) {
-    return 'l2';
-  }
-  return 'l1';
 }
 
 function resolveDefaultLevel(country: SupportedCountry, requested?: CountryMapLevel): CountryMapLevel {
@@ -612,12 +615,31 @@ export default function BaseCountryAdminMap({
         : {
             version: 8,
             glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-            sources: {},
+            sources: {
+              'carto-light': {
+                type: 'raster',
+                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'],
+                tileSize: 256,
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+              },
+            },
             layers: [
               {
                 id: 'bg',
                 type: 'background',
                 paint: { 'background-color': THEME_STYLES[theme].background },
+              },
+              {
+                id: 'carto-light',
+                type: 'raster',
+                source: 'carto-light',
+                paint: {
+                  'raster-opacity': 0.92,
+                  'raster-contrast': 0.04,
+                  'raster-saturation': -0.2,
+                  'raster-brightness-min': 0.08,
+                  'raster-brightness-max': 0.96,
+                },
               },
             ],
           };
@@ -1072,7 +1094,6 @@ export default function BaseCountryAdminMap({
     });
 
     map.on('zoomend', () => {
-      const activeConfig = getCountryMapConfig(currentCountryRef.current);
       if (enableWorldNavigation) {
         const availableLevels = getCountryLevelOrder(currentCountryRef.current);
         const showWorld = map.getZoom() < getEnterZoom(currentCountryRef.current);
@@ -1098,15 +1119,6 @@ export default function BaseCountryAdminMap({
           setLayerVisibility(BORDER_LAYER_BY_LEVEL[level], visible);
         });
       }
-
-      if (activeConfig.autoSwitchLevelByZoom === false) {
-        return;
-      }
-      const nextLevel = levelForZoom(map.getZoom(), activeConfig);
-      if (nextLevel === activeLevelRef.current) {
-        return;
-      }
-      levelSwitchRef.current?.(nextLevel);
     });
 
     map.on('moveend', () => {
@@ -1178,8 +1190,8 @@ export default function BaseCountryAdminMap({
       return;
     }
 
-    const nextDefaultLevel = resolveDefaultLevel(country, defaultRegionLevel);
-    countryApplyRef.current?.(country, nextDefaultLevel);
+    const nextLevel = resolveDefaultLevel(country, selectedLevelRef.current);
+    countryApplyRef.current?.(country, nextLevel);
   }, [country, defaultRegionLevel]);
 
   useEffect(() => {
@@ -1281,7 +1293,9 @@ export default function BaseCountryAdminMap({
 
       {showRegionLevelToggle ? (
         <div
-          className={`pointer-events-auto absolute z-10 inline-flex items-center overflow-hidden rounded-2xl border border-white/24 bg-[rgba(10,16,24,0.7)] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.32)] backdrop-blur-md ${
+          className={`pointer-events-auto absolute z-10 inline-flex items-center overflow-hidden rounded-2xl border p-1 ${
+            TOGGLE_THEME_STYLES[theme].wrapper
+          } ${
             regionLevelToggleAlign === 'right' ? 'right-3' : 'left-3'
           }`}
           style={{ bottom: `${toggleBottomOffsetPx}px` }}
@@ -1300,7 +1314,7 @@ export default function BaseCountryAdminMap({
                 aria-label={`${option.label} 보기`}
                 onClick={() => handleSelectLevel(option.value)}
                 className={`relative inline-flex h-11 min-w-[58px] items-center justify-center gap-1 rounded-xl px-2.5 text-[12px] font-semibold transition ${
-                  active ? 'border border-white/30 bg-white/14 text-white' : 'text-white/62 hover:text-white/88'
+                  active ? TOGGLE_THEME_STYLES[theme].active : TOGGLE_THEME_STYLES[theme].inactive
                 }`}
               >
                 <Icon className="h-4 w-4" />

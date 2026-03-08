@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveUserFromAuthorizationHeader } from '@/lib/server/auth';
+import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getCountryRegionCentroid, getCountryRegionNameByCodes } from '@/lib/server/country-region-geo';
 import { calculatePersonaPowerFromCounts, normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
@@ -112,11 +113,16 @@ function optionKeyToWinner(optionKey: string | null, optionAKey: string, optionB
   return null;
 }
 
-async function loadRegionStatsMap(topicId: string, level: RegionLevel): Promise<Map<string, RegionCounts>> {
+async function loadRegionStatsMap(
+  topicId: string,
+  level: RegionLevel,
+  countryCode: string,
+): Promise<Map<string, RegionCounts>> {
   const supabase = getSupabaseServiceRoleClient();
   const { data: rpcRows, error: rpcError } = await supabase.rpc('get_region_vote_stats', {
     p_topic_id: topicId,
     p_level: level,
+    p_country_code: countryCode,
   });
 
   if (rpcError) {
@@ -200,7 +206,7 @@ export async function GET(request: Request) {
 
     const { data: topicRow, error: topicError } = await supabase
       .from('vote_topics')
-      .select('id, title, status, country_code')
+      .select('id, title, status')
       .eq('id', topicId)
       .maybeSingle();
 
@@ -209,10 +215,6 @@ export async function GET(request: Request) {
     }
     if (!topicRow) {
       return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
-    }
-    const topicCountryCode = resolveSupportedCountry((topicRow as { country_code?: string | null }).country_code);
-    if (requestedCountry && requestedCountry !== topicCountryCode) {
-      return NextResponse.json({ error: '요청 국가와 주제 국가가 일치하지 않습니다.' }, { status: 404 });
     }
 
     const { data: optionRows, error: optionsError } = await supabase
@@ -240,13 +242,46 @@ export async function GET(request: Request) {
       return internalServerError('app/api/votes/result-summary/route.ts', '주제 선택지 구성이 올바르지 않습니다.');
     }
 
+    const requestCountryCode = resolveSupportedCountry(resolveCountryCodeFromRequest(request));
+    let userProfileRow:
+      | {
+          country_code: string | null;
+          sido_code: string | null;
+          sigungu_code: string | null;
+        }
+      | null = null;
+
+    if (user?.id) {
+      const { data: loadedUserRow, error: userRowError } = await supabase
+        .from('users')
+        .select('country_code, sido_code, sigungu_code')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (userRowError) {
+        return internalServerError('app/api/votes/result-summary/route.ts', userRowError.message);
+      }
+
+      userProfileRow =
+        (loadedUserRow as {
+          country_code: string | null;
+          sido_code: string | null;
+          sigungu_code: string | null;
+        } | null) ?? null;
+    }
+
+    const viewerCountryCode = user?.id
+      ? resolveSupportedCountry(userProfileRow?.country_code)
+      : requestCountryCode;
+    const scopeCountryCode = requestedCountry ?? viewerCountryCode;
+
     const regionStatsCache = new Map<RegionLevel, Map<string, RegionCounts>>();
     const getStats = async (level: RegionLevel) => {
       const cached = regionStatsCache.get(level);
       if (cached) {
         return cached;
       }
-      const loaded = await loadRegionStatsMap(topicId, level);
+      const loaded = await loadRegionStatsMap(topicId, level, scopeCountryCode);
       regionStatsCache.set(level, loaded);
       return loaded;
     };
@@ -265,57 +300,55 @@ export async function GET(request: Request) {
       totalVotes: nationalCountA + nationalCountB,
       winner: toWinner(nationalCountA, nationalCountB),
     });
-    const nationwidePersona = await loadPersonaScopeStats(topicCountryCode);
+    const nationwidePersona = await loadPersonaScopeStats(scopeCountryCode);
 
     let viewerType: 'user' | 'guest' | 'anonymous' = 'anonymous';
     let myOptionKey: string | null = null;
     let mySidoCode: string | null = null;
     let mySigunguCode: string | null = null;
+    let voteCountryCode: string | null = null;
+    let hasTopicVote = false;
+    let hasVoteInScope = false;
 
     if (user?.id) {
       viewerType = 'user';
 
-      const [{ data: voteRow, error: voteError }, { data: userRow, error: userRowError }] = await Promise.all([
-        supabase
-          .from('votes')
-          .select('option_key, sido_code, sigungu_code')
-          .eq('topic_id', topicId)
-          .eq('user_id', user.id)
-          .maybeSingle(),
-        supabase
-          .from('users')
-          .select('sido_code, sigungu_code')
-          .eq('id', user.id)
-          .maybeSingle(),
-      ]);
+      const { data: voteRow, error: voteError } = await supabase
+        .from('votes')
+        .select('option_key, sido_code, sigungu_code, country_code')
+        .eq('topic_id', topicId)
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       if (voteError) {
         return internalServerError('app/api/votes/result-summary/route.ts', voteError.message);
       }
-      if (userRowError) {
-        return internalServerError('app/api/votes/result-summary/route.ts', userRowError.message);
-      }
 
       myOptionKey = voteRow?.option_key ?? null;
+      voteCountryCode = voteRow?.country_code ? resolveSupportedCountry(voteRow.country_code) : null;
+      hasTopicVote = Boolean(voteRow);
+      hasVoteInScope = Boolean(voteRow) && voteCountryCode === scopeCountryCode;
+      const isViewingVoteSlice = Boolean(voteRow) && voteCountryCode === scopeCountryCode;
+
       // 결과 비교의 지역 기준은 "유저 프로필"이 아니라 "해당 주제 투표 당시 위치"가 우선이다.
       const voteSidoCode = voteRow?.sido_code ?? null;
       const voteSigunguCode = voteRow?.sigungu_code ?? null;
       const hasVoteRegion = Boolean(voteSidoCode || voteSigunguCode);
 
-      if (hasVoteRegion) {
+      if (isViewingVoteSlice && hasVoteRegion) {
         mySidoCode = voteSidoCode;
         mySigunguCode = voteSigunguCode;
-      } else {
+      } else if (isViewingVoteSlice) {
         // 과거 데이터 호환: 투표 행에 지역이 없는 경우에만 사용자 프로필 지역을 fallback으로 사용.
-        mySidoCode = userRow?.sido_code ?? null;
-        mySigunguCode = userRow?.sigungu_code ?? null;
+        mySidoCode = userProfileRow?.sido_code ?? null;
+        mySigunguCode = userProfileRow?.sigungu_code ?? null;
       }
     } else if (guestSessionId) {
       viewerType = 'guest';
 
       const { data: guestVoteRow, error: guestVoteError } = await supabase
         .from('guest_votes_temp')
-        .select('option_key, sido_code, sigungu_code')
+        .select('option_key, sido_code, sigungu_code, country_code')
         .eq('topic_id', topicId)
         .eq('session_id', guestSessionId)
         .maybeSingle();
@@ -325,8 +358,13 @@ export async function GET(request: Request) {
       }
 
       myOptionKey = guestVoteRow?.option_key ?? null;
-      mySidoCode = guestVoteRow?.sido_code ?? null;
-      mySigunguCode = guestVoteRow?.sigungu_code ?? null;
+      voteCountryCode = guestVoteRow?.country_code ? resolveSupportedCountry(guestVoteRow.country_code) : null;
+      hasTopicVote = Boolean(guestVoteRow);
+      hasVoteInScope = Boolean(guestVoteRow) && voteCountryCode === scopeCountryCode;
+      if (guestVoteRow && voteCountryCode === scopeCountryCode) {
+        mySidoCode = guestVoteRow.sido_code ?? null;
+        mySigunguCode = guestVoteRow.sigungu_code ?? null;
+      }
     }
 
     const myRegionLevel: RegionLevel | null = mySigunguCode ? 'sigungu' : mySidoCode ? 'sido' : null;
@@ -359,7 +397,7 @@ export async function GET(request: Request) {
       const fallbackName = myRegionLevel === 'sigungu' ? myRegionCode : mySidoCode ?? myRegionCode;
       const resolvedName =
         getCountryRegionNameByCodes({
-          countryCode: topicCountryCode,
+          countryCode: scopeCountryCode,
           sidoCode: mySidoCode,
           sigunguCode: mySigunguCode,
         }) ?? fallbackName;
@@ -370,12 +408,12 @@ export async function GET(request: Request) {
         code: myRegionCode,
         name: resolvedName,
         centroid: getCountryRegionCentroid({
-          countryCode: topicCountryCode,
+          countryCode: scopeCountryCode,
           level: myRegionLevel,
           regionCode: myRegionCode,
         }),
       };
-      myRegionPersona = await loadPersonaScopeStats(topicCountryCode, {
+      myRegionPersona = await loadPersonaScopeStats(scopeCountryCode, {
         sidoCode: mySidoCode,
         sigunguCode: mySigunguCode,
       });
@@ -388,26 +426,29 @@ export async function GET(request: Request) {
     const matchesMyRegion =
       myChoiceWinner && myRegion && myRegion.winner !== 'TIE' ? myChoiceWinner === myRegion.winner : null;
 
-    const hasVote = Boolean(myOptionKey);
-    const visibility: ResultVisibility = hasVote ? 'unlocked' : 'locked';
+    const visibility: ResultVisibility = hasVoteInScope ? 'unlocked' : 'locked';
     const preview = {
       gapPercent: toGapPercent(nationwide.countA, nationwide.countB),
       totalVotes: nationwide.totalVotes,
     };
 
     return NextResponse.json({
+      scopeCountryCode,
       topic: {
         id: topicRow.id,
         title: topicRow.title,
         status: topicRow.status,
-        countryCode: topicCountryCode,
         optionA,
         optionB,
       },
       visibility,
       viewer: {
         type: viewerType,
-        hasVote,
+        hasVote: hasTopicVote,
+        hasTopicVote,
+        hasVoteInScope,
+        countryCode: viewerCountryCode,
+        voteCountryCode,
       },
       preview: visibility === 'locked' ? preview : null,
       nationwide: visibility === 'unlocked' ? nationwide : null,

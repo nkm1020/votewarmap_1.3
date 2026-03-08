@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { BaseCountryTooltipContext, MapViewRequest } from '@/components/map/BaseCountryAdminMap';
+import CountryTabs from '@/components/map/CountryTabs';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +14,14 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { getCountryMapConfig, resolveSupportedCountry, type CountryMapLevel, type SupportedCountry } from '@/lib/map/countryMapRegistry';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { readGuestSessionId } from '@/lib/vote/client-storage';
+import {
+  hasCrossCountryTopicVote,
+  type PersonaPowerSummary,
+  type ResultVisibility,
+  type VoteResultSummaryLockedResponse,
+  type VoteResultSummaryResponse,
+  type VoteResultSummaryUnlockedResponse,
+} from '@/lib/vote/result-summary';
 import { VoteResultModal } from '@/components/results/VoteResultModal';
 import type { RegionVoteMap, VoteTopic } from '@/lib/vote/types';
 
@@ -49,74 +58,6 @@ const MANUAL_TOPIC_CATEGORY_BY_ID: Record<string, TopicCategory> = {
   'balance-work-2026': 'work',
 };
 
-type VoteSummaryStat = {
-  countA: number;
-  countB: number;
-  totalVotes: number;
-  winner: 'A' | 'B' | 'TIE';
-  aPercent: number;
-  bPercent: number;
-};
-
-type ResultVisibility = 'locked' | 'unlocked';
-type PersonaDominant = 'egen' | 'teto' | 'golden_balance' | 'none';
-type PersonaPowerSummary = {
-  egenPercent: number;
-  tetoPercent: number;
-  dominant: PersonaDominant;
-  mappedVotes: number;
-};
-
-type ResultSummaryResponse = {
-  topic: {
-    id: string;
-    title: string;
-    status: string;
-    countryCode: string;
-    optionA: { key: string; label: string; position: 1; personaTag: 'egen' | 'teto' | null };
-    optionB: { key: string; label: string; position: 2; personaTag: 'egen' | 'teto' | null };
-  };
-  viewer: {
-    type: 'user' | 'guest' | 'anonymous';
-    hasVote: boolean;
-  };
-  visibility: ResultVisibility;
-  preview: {
-    gapPercent: number;
-    totalVotes: number;
-  } | null;
-  nationwide: VoteSummaryStat | null;
-  myRegion:
-    | (VoteSummaryStat & {
-        level: 'sido' | 'sigungu';
-        code: string;
-        name: string;
-        centroid: {
-          lat: number;
-          lng: number;
-        } | null;
-      })
-    | null;
-  persona: {
-    nationwide: PersonaPowerSummary | null;
-    myRegion: PersonaPowerSummary | null;
-  };
-  myChoice:
-    | {
-        optionKey: string;
-        label: string | null;
-        matchesNationwide: boolean | null;
-        matchesMyRegion: boolean | null;
-      }
-    | null;
-};
-
-type ResultSummaryUnlockedResponse = ResultSummaryResponse & {
-  visibility: 'unlocked';
-  preview: null;
-  nationwide: VoteSummaryStat;
-};
-
 type RegionStatsResponse = {
   visibility?: ResultVisibility;
   statsByCode?: RegionVoteMap;
@@ -134,7 +75,10 @@ function toCountryMapLevel(level: ResultRegionLevel): CountryMapLevel {
   return level === 'sigungu' ? 'l2' : 'l1';
 }
 
-function buildRegionBreakdown(stat: BaseCountryTooltipContext['stat'] | null | undefined) {
+function buildRegionBreakdown(
+  stat: BaseCountryTooltipContext['stat'] | null | undefined,
+  visibility: ResultVisibility,
+) {
   if (!stat) {
     return null;
   }
@@ -142,6 +86,17 @@ function buildRegionBreakdown(stat: BaseCountryTooltipContext['stat'] | null | u
   const countA = stat.countA ?? 0;
   const countB = stat.countB ?? 0;
   const total = stat.total ?? countA + countB;
+  const gapPercent = typeof stat.gapPercent === 'number' ? Math.max(0, Math.round(stat.gapPercent)) : 0;
+  const hasCounts = typeof stat.countA === 'number' && typeof stat.countB === 'number';
+
+  if (visibility === 'locked' || !hasCounts) {
+    return {
+      total,
+      gapPercent,
+      isLocked: true as const,
+    };
+  }
+
   const aPercent = total > 0 ? Math.round((countA / total) * 100) : 0;
   const bPercent = total > 0 ? Math.max(0, 100 - aPercent) : 0;
 
@@ -151,6 +106,8 @@ function buildRegionBreakdown(stat: BaseCountryTooltipContext['stat'] | null | u
     total,
     aPercent,
     bPercent,
+    gapPercent,
+    isLocked: false as const,
   };
 }
 
@@ -212,7 +169,7 @@ function categorizeTopic(topic: VoteTopic): TopicCategory {
   return 'imagination';
 }
 
-function buildShareText(data: ResultSummaryUnlockedResponse): string {
+function buildShareText(data: VoteResultSummaryUnlockedResponse): string {
   const nationwideSummary = `${data.topic.optionA.label} ${data.nationwide.aPercent}% vs ${data.topic.optionB.label} ${data.nationwide.bPercent}%`;
   const regionName = data.myRegion?.name ?? '지역 데이터 수집 중';
   const regionSummary = data.myRegion
@@ -247,18 +204,82 @@ function buildVoteRequestHeaders(
 export function ResultComparisonPage({
   topicId,
   entryMode = 'default',
+  initialCountryCode,
 }: {
   topicId: string;
   entryMode?: ResultEntryMode;
+  initialCountryCode?: string;
 }) {
   const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const { resolvedTheme } = useTheme();
   const isDarkTheme = resolvedTheme === 'dark';
+  const panelTheme = useMemo(
+    () =>
+      isDarkTheme
+        ? {
+            aside: 'border-white/12 bg-[rgba(20,20,24,0.82)] shadow-[4px_0_24px_rgba(0,0,0,0.28)]',
+            opener: 'border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 hover:text-white',
+            divider: 'border-white/10',
+            surface: 'border-white/14 bg-[rgba(18,20,28,0.78)] shadow-[0_10px_28px_rgba(0,0,0,0.34)]',
+            surfaceSoft: 'border-white/14 bg-[rgba(18,20,28,0.76)] shadow-[0_10px_28px_rgba(0,0,0,0.34)]',
+            textPrimary: 'text-white',
+            textSecondary: 'text-white/72',
+            textMuted: 'text-white/62',
+            tabInactive: 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white',
+            cardTrack: 'bg-white/12',
+            buttonGhost: 'border-white/22 bg-white/12 text-white/92 hover:bg-white/18 focus-visible:ring-white/40',
+          }
+        : {
+            aside:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.92)] shadow-[4px_0_24px_rgba(148,163,184,0.24)]',
+            opener:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.96)] text-slate-500 hover:text-slate-900',
+            divider: 'border-slate-200/80',
+            surface:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.92)] shadow-[0_12px_28px_rgba(148,163,184,0.22)]',
+            surfaceSoft:
+              'border-slate-200/90 bg-[rgba(255,255,255,0.88)] shadow-[0_12px_28px_rgba(148,163,184,0.2)]',
+            textPrimary: 'text-slate-900',
+            textSecondary: 'text-slate-700',
+            textMuted: 'text-slate-500',
+            tabInactive: 'border-slate-200 bg-slate-900/[0.04] text-slate-600 hover:bg-slate-900/[0.08] hover:text-slate-800',
+            cardTrack: 'bg-slate-900/[0.08]',
+            buttonGhost:
+              'border-slate-200 bg-slate-900/[0.04] text-slate-800 hover:bg-slate-900/[0.08] focus-visible:ring-slate-300',
+          },
+    [isDarkTheme],
+  );
+  const topicPickerTheme = useMemo(
+    () =>
+      isDarkTheme
+        ? {
+            card: 'border-white/14 bg-white/5',
+            cardExpanded: 'border-[#ff9f0a55] bg-white/[0.07]',
+            rowButton: 'text-white/84 hover:bg-white/6',
+            subDivider: 'border-white/6',
+            helper: 'text-white/66',
+            optionIdle: 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10',
+            empty: 'border-white/10 bg-white/5 text-white/70',
+            emptyDashed: 'border-white/20 bg-white/5 text-white/65',
+          }
+        : {
+            card: 'border-slate-200/90 bg-slate-900/[0.03]',
+            cardExpanded: 'border-[#f59e0b55] bg-[#fff7ef]',
+            rowButton: 'text-slate-800 hover:bg-slate-900/[0.04]',
+            subDivider: 'border-slate-200/80',
+            helper: 'text-slate-500',
+            optionIdle: 'border-slate-200/90 bg-white text-slate-700 hover:bg-slate-900/[0.04]',
+            empty: 'border-slate-200/90 bg-slate-900/[0.03] text-slate-600',
+            emptyDashed: 'border-slate-200/90 bg-slate-900/[0.03] text-slate-500',
+          },
+    [isDarkTheme],
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ResultSummaryUnlockedResponse | null>(null);
+  const [data, setData] = useState<VoteResultSummaryUnlockedResponse | null>(null);
+  const [lockedSummary, setLockedSummary] = useState<VoteResultSummaryLockedResponse | null>(null);
   const [mapStats, setMapStats] = useState<RegionVoteMap>({});
   const [selectedRegion, setSelectedRegion] = useState<SelectedRegion | null>(null);
   const [isIntroSheetOpen, setIsIntroSheetOpen] = useState(false);
@@ -274,18 +295,57 @@ export function ResultComparisonPage({
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isDesktopLeftPanelOpen, setIsDesktopLeftPanelOpen] = useState(true);
+  const [selectedCountry, setSelectedCountry] = useState<SupportedCountry | null>(() =>
+    initialCountryCode ? resolveSupportedCountry(initialCountryCode) : null,
+  );
   const noticeTimerRef = useRef<number | null>(null);
   const selectedRegionPanelRef = useRef<HTMLElement | null>(null);
   const openSheetRef = useRef<HTMLElement | null>(null);
   const hasAutoOpenedIntroRef = useRef(false);
+  const hasAutoFocusedMapRef = useRef(false);
+  const activeSummary = data ?? lockedSummary;
   const activeCountry = useMemo(
-    () => resolveSupportedCountry(data?.topic.countryCode),
-    [data?.topic.countryCode],
+    () => resolveSupportedCountry(selectedCountry ?? activeSummary?.scopeCountryCode),
+    [activeSummary?.scopeCountryCode, selectedCountry],
   );
   const activeCountryConfig = useMemo(
     () => getCountryMapConfig(activeCountry || DEFAULT_COUNTRY),
     [activeCountry],
   );
+  const buildResultHref = useCallback(
+    (
+      nextTopicId: string,
+      country: SupportedCountry = activeCountry,
+      extraParams?: Record<string, string | undefined>,
+    ) => {
+      const query = new URLSearchParams({
+        country,
+      });
+      if (entryMode === 'map') {
+        query.set('entry', 'history');
+        query.set('view', 'map');
+      }
+      Object.entries(extraParams ?? {}).forEach(([key, value]) => {
+        if (value) {
+          query.set(key, value);
+        }
+      });
+      return `/results/${nextTopicId}?${query.toString()}`;
+    },
+    [activeCountry, entryMode],
+  );
+
+  useEffect(() => {
+    setSelectedCountry(initialCountryCode ? resolveSupportedCountry(initialCountryCode) : null);
+    setSelectedRegion(null);
+    hasAutoFocusedMapRef.current = false;
+  }, [initialCountryCode, topicId]);
+
+  useEffect(() => {
+    if (!selectedCountry && activeSummary?.scopeCountryCode) {
+      setSelectedCountry(resolveSupportedCountry(activeSummary.scopeCountryCode));
+    }
+  }, [activeSummary?.scopeCountryCode, selectedCountry]);
 
   const showNotice = useCallback((message: string) => {
     setNoticeMessage(message);
@@ -330,29 +390,28 @@ export function ResultComparisonPage({
 
       const guestSessionId = !isAuthenticated ? readGuestSessionId() : null;
       const query = new URLSearchParams({ topicId });
+      if (selectedCountry) {
+        query.set('country', selectedCountry);
+      }
 
       const response = await fetch(`/api/votes/result-summary?${query.toString()}`, {
         cache: 'no-store',
         headers: buildVoteRequestHeaders(accessToken, guestSessionId),
       });
 
-      const json = (await response.json()) as ResultSummaryResponse & { error?: string };
+      const json = (await response.json()) as VoteResultSummaryResponse & { error?: string };
       if (!response.ok) {
         if (!silent) {
           setError(json.error ?? '결과 정보를 불러오지 못했습니다.');
           setData(null);
+          setLockedSummary(null);
         }
         return;
       }
 
       if (json.visibility === 'locked') {
-        const redirectQuery = new URLSearchParams({
-          topics: topicId,
-          openTopicEditor: '1',
-          redirectResultTopicId: topicId,
-        });
-        router.replace(`/topics-map?${redirectQuery.toString()}`);
         setData(null);
+        setLockedSummary(json as VoteResultSummaryLockedResponse);
         if (!silent) {
           setError(null);
         }
@@ -363,22 +422,25 @@ export function ResultComparisonPage({
         if (!silent) {
           setError('결과 정보를 불러오지 못했습니다.');
           setData(null);
+          setLockedSummary(null);
         }
         return;
       }
 
-      setData(json as ResultSummaryUnlockedResponse);
+      setData(json as VoteResultSummaryUnlockedResponse);
+      setLockedSummary(null);
     } catch {
       if (!silent) {
         setError('결과 정보를 불러오지 못했습니다.');
         setData(null);
+        setLockedSummary(null);
       }
     } finally {
       if (!silent) {
         setIsLoading(false);
       }
     }
-  }, [isAuthenticated, router, topicId]);
+  }, [isAuthenticated, selectedCountry, topicId]);
 
   const loadMapStats = useCallback(async () => {
     try {
@@ -482,49 +544,71 @@ export function ResultComparisonPage({
   }, [mapStats, selectedRegion]);
 
   const selectedRegionBreakdown = useMemo(() => {
-    return buildRegionBreakdown(selectedRegionStat);
-  }, [selectedRegionStat]);
+    return buildRegionBreakdown(selectedRegionStat, activeSummary?.visibility ?? 'locked');
+  }, [activeSummary?.visibility, selectedRegionStat]);
   const renderRegionTooltipContent = useCallback(
     (context: BaseCountryTooltipContext) => {
-      const breakdown = buildRegionBreakdown(context.stat);
+      const breakdown = buildRegionBreakdown(context.stat, activeSummary?.visibility ?? 'locked');
       return (
-        <div className="w-[min(340px,calc(100vw-44px))] rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.78)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+        <div className={`w-[min(340px,calc(100vw-44px))] rounded-[20px] border p-3.5 backdrop-blur-2xl ${panelTheme.surface}`}>
           <div className="flex items-center justify-between">
-            <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{context.name || context.code}</h4>
-            <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+            <h4 className={`truncate pr-2 text-[15px] font-semibold ${panelTheme.textPrimary}`}>{context.name || context.code}</h4>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                isDarkTheme
+                  ? 'border-white/18 bg-white/8 text-white/75'
+                  : 'border-slate-200 bg-slate-900/[0.04] text-slate-600'
+              }`}
+            >
               {formatCountryLevel(context.level, context.levelLabel)}
             </span>
           </div>
 
-          {data ? (
+          {activeSummary ? (
             breakdown ? (
               <>
-                <p className="mt-2 text-[12px] text-white/68">
-                  누적 투표수 <span className="font-semibold text-white">{breakdown.total.toLocaleString()}표</span>
+                <p className={`mt-2 text-[12px] ${panelTheme.textSecondary}`}>
+                  누적 투표수 <span className={`font-semibold ${panelTheme.textPrimary}`}>{breakdown.total.toLocaleString()}표</span>
                 </p>
-                <div className="mt-2 flex items-center justify-between text-xs text-white/84">
-                  <span>
-                    {data.topic.optionA.label} {breakdown.aPercent}%
-                  </span>
-                  <span>
-                    {data.topic.optionB.label} {breakdown.bPercent}%
-                  </span>
-                </div>
-                <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/12">
-                  <div className="h-full bg-[#ff6b00]" style={{ width: `${breakdown.aPercent}%` }} />
-                  <div className="h-full bg-[#2f74ff]" style={{ width: `${breakdown.bPercent}%` }} />
-                </div>
+                {breakdown.isLocked ? (
+                  <p className={`mt-1.5 text-xs ${panelTheme.textSecondary}`}>
+                    현재 격차 {breakdown.gapPercent}%p · 결과는 투표한 국가에서만 열립니다.
+                  </p>
+                ) : (
+                  <>
+                    <div className={`mt-2 flex items-center justify-between text-xs ${panelTheme.textSecondary}`}>
+                      <span>
+                        {activeSummary.topic.optionA.label} {breakdown.aPercent}%
+                      </span>
+                      <span>
+                        {activeSummary.topic.optionB.label} {breakdown.bPercent}%
+                      </span>
+                    </div>
+                    <div className={`mt-1.5 flex h-2.5 overflow-hidden rounded-full ${panelTheme.cardTrack}`}>
+                      <div className="h-full bg-[#ff6b00]" style={{ width: `${breakdown.aPercent}%` }} />
+                      <div className="h-full bg-[#2f74ff]" style={{ width: `${breakdown.bPercent}%` }} />
+                    </div>
+                  </>
+                )}
               </>
             ) : (
-              <p className="mt-2 text-xs text-white/62">투표 데이터가 아직 없습니다.</p>
+              <p className={`mt-2 text-xs ${panelTheme.textMuted}`}>투표 데이터가 아직 없습니다.</p>
             )
           ) : (
-            <p className="mt-2 text-xs text-white/62">결과 정보를 불러오는 중입니다.</p>
+            <p className={`mt-2 text-xs ${panelTheme.textMuted}`}>결과 정보를 불러오는 중입니다.</p>
           )}
         </div>
       );
     },
-    [data],
+    [
+      activeSummary,
+      isDarkTheme,
+      panelTheme.cardTrack,
+      panelTheme.surface,
+      panelTheme.textMuted,
+      panelTheme.textPrimary,
+      panelTheme.textSecondary,
+    ],
   );
 
   const nationwideBar = useMemo(() => {
@@ -751,17 +835,22 @@ export function ResultComparisonPage({
     }
   }, [data, shareText, showNotice]);
 
-  const handleMapView = useCallback(() => {
+  const handleScopeMapView = useCallback(() => {
+    closeIntroSheet();
+    setSelectedRegion(null);
+    setMapViewRequest({
+      id: `view-${Date.now()}`,
+      center: activeCountryConfig.center,
+      zoom: activeCountryConfig.zoom,
+      reason: 'reset',
+    });
+  }, [activeCountryConfig.center, activeCountryConfig.zoom, closeIntroSheet]);
+
+  const handleVoteCountryMapView = useCallback(() => {
     closeIntroSheet();
 
     if (!data?.myRegion) {
-      setSelectedRegion(null);
-      setMapViewRequest({
-        id: `view-${Date.now()}`,
-        center: activeCountryConfig.center,
-        zoom: activeCountryConfig.zoom,
-        reason: 'reset',
-      });
+      handleScopeMapView();
       showNotice('지역 데이터 수집 중이라 전국 지도로 이동했어요.');
       return;
     }
@@ -794,7 +883,27 @@ export function ResultComparisonPage({
       zoom: targetZoom,
       reason: 'my-region-focus',
     });
-  }, [activeCountryConfig, closeIntroSheet, data, showNotice]);
+  }, [activeCountryConfig, closeIntroSheet, data, handleScopeMapView, showNotice]);
+
+  const handleOpenVoteCountryResult = useCallback(() => {
+    const voteCountryCode = activeSummary?.viewer.voteCountryCode
+      ? resolveSupportedCountry(activeSummary.viewer.voteCountryCode)
+      : null;
+    if (!voteCountryCode) {
+      handleScopeMapView();
+      return;
+    }
+
+    if (voteCountryCode === activeCountry && data) {
+      handleVoteCountryMapView();
+      return;
+    }
+
+    setSelectedCountry(voteCountryCode);
+    setSelectedRegion(null);
+    setMapViewRequest(undefined);
+    router.replace(buildResultHref(topicId, voteCountryCode, { entry: 'history', view: 'map' }));
+  }, [activeCountry, activeSummary?.viewer.voteCountryCode, buildResultHref, data, handleScopeMapView, handleVoteCountryMapView, router, topicId]);
 
   const loadPickerTopics = useCallback(async () => {
     setIsTopicsLoading(true);
@@ -802,7 +911,6 @@ export function ResultComparisonPage({
     try {
       const query = new URLSearchParams({
         status: 'LIVE',
-        country: activeCountry,
       });
       const response = await fetch(`/api/votes/topics?${query.toString()}`, { cache: 'no-store' });
       const json = (await response.json()) as { topics?: VoteTopic[]; error?: string };
@@ -820,7 +928,7 @@ export function ResultComparisonPage({
     } finally {
       setIsTopicsLoading(false);
     }
-  }, [activeCountry]);
+  }, []);
 
   const handleSelectNextTopic = useCallback(
     (nextTopicId: string) => {
@@ -832,9 +940,23 @@ export function ResultComparisonPage({
       setExpandedPickerTopicId(null);
       setPickerSelectedOptionKey(null);
       setPickerVoteMessage(null);
-      router.push(`/results/${nextTopicId}`);
+      router.push(buildResultHref(nextTopicId));
     },
-    [router, topicId],
+    [buildResultHref, router, topicId],
+  );
+
+  const handleSelectCountry = useCallback(
+    (country: SupportedCountry) => {
+      if (country === activeCountry) {
+        return;
+      }
+
+      setSelectedCountry(country);
+      setSelectedRegion(null);
+      setMapViewRequest(undefined);
+      router.replace(buildResultHref(topicId, country));
+    },
+    [activeCountry, buildResultHref, router, topicId],
   );
 
   const handleToggleBottomSheet = useCallback(() => {
@@ -880,6 +1002,23 @@ export function ResultComparisonPage({
     closeIntroSheet();
     router.push('/auth');
   }, [closeIntroSheet, router]);
+
+  const voteCountryCode = activeSummary?.viewer.voteCountryCode
+    ? resolveSupportedCountry(activeSummary.viewer.voteCountryCode)
+    : null;
+  const voteCountryConfig = voteCountryCode ? getCountryMapConfig(voteCountryCode) : null;
+  const isCrossCountryScope = hasCrossCountryTopicVote(activeSummary?.viewer, activeSummary?.scopeCountryCode);
+  const scopeCountryName = activeCountryConfig.displayName;
+  const voteCountryName = voteCountryConfig?.displayName ?? activeSummary?.viewer.countryCode ?? scopeCountryName;
+
+  useEffect(() => {
+    if (entryMode !== 'map' || !data || hasAutoFocusedMapRef.current) {
+      return;
+    }
+
+    hasAutoFocusedMapRef.current = true;
+    handleVoteCountryMapView();
+  }, [data, entryMode, handleVoteCountryMapView]);
 
   useEffect(() => {
     setIsBottomSheetExpanded(false);
@@ -979,7 +1118,7 @@ export function ResultComparisonPage({
             enableWorldNavigation={false}
             statsByCode={mapStats}
             defaultRegionLevel={mapDefaultRegionLevel}
-            fillMode="winner"
+            fillMode={data ? 'winner' : activeSummary ? 'locked' : 'winner'}
             height="100%"
             initialCenter={activeCountryConfig.center}
             initialZoom={activeCountryConfig.zoom}
@@ -1027,41 +1166,50 @@ export function ResultComparisonPage({
             actions={[{ key: 'open-intro', label: '결과 분석 보기', onClick: () => setIsIntroSheetOpen(true), variant: 'solid' }]}
           />
 
+          <div className="pointer-events-auto mt-2 flex justify-end px-1 md:mt-3 md:px-0">
+            <CountryTabs
+              selectedCountry={activeCountry}
+              onSelectCountry={handleSelectCountry}
+              compact={!isDesktopViewport}
+              desktopExpandable={isDesktopViewport}
+            />
+          </div>
+
           {isDesktopViewport ? (
             <div className="relative flex min-h-0 flex-1">
               {isDesktopLeftPanelOpen ? (
-                <aside className="pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border border-white/12 bg-[rgba(20,20,24,0.82)] shadow-[4px_0_24px_rgba(0,0,0,0.28)]">
+                <aside className={`pointer-events-auto relative flex w-[420px] min-h-0 shrink-0 flex-col overflow-visible rounded-r-[24px] border ${panelTheme.aside}`}>
                   <button
                     type="button"
                     onClick={() => setIsDesktopLeftPanelOpen(false)}
-                    className="absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                    className={`absolute -right-[33px] top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition ${panelTheme.opener}`}
                     aria-label="다른 주제 선택 패널 접기"
                   >
                     <ChevronLeft className="h-5 w-5" />
                   </button>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/10 custom-scrollbar">
-                    <div className="border-b border-white/10 px-6 py-4">
-                      <h3 className="text-[20px] font-bold tracking-tight text-white">다른 주제 선택</h3>
-                      <p className="mt-1 text-[12px] text-white/62">선택하면 바로 해당 결과 페이지로 이동합니다.</p>
+                  <div className={`min-h-0 flex-1 overflow-y-auto border-t custom-scrollbar ${panelTheme.divider}`}>
+                    <div className={`border-b px-6 py-4 ${panelTheme.divider}`}>
+                      <h3 className={`text-[20px] font-bold tracking-tight ${panelTheme.textPrimary}`}>다른 주제 선택</h3>
+                      <p className={`mt-1 text-[12px] ${panelTheme.textMuted}`}>선택하면 바로 해당 결과 페이지로 이동합니다.</p>
                     </div>
 
-                    <div className="border-b border-white/10 px-5 pb-3 pt-4">
+                    <div className={`border-b px-5 pb-3 pt-4 ${panelTheme.divider}`}>
                       <div className="hide-scrollbar flex gap-2 overflow-x-auto">
                         {TOPIC_TAB_META.map((tab) => {
                           const isActive = activeTopicTab === tab.id;
                           return (
                             <button
                               key={tab.id}
-                              type="button"
-                              onClick={() => setActiveTopicTab(tab.id)}
-                              className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
-                                isActive
-                                  ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
-                                  : 'border-white/15 bg-white/5 text-white/72 hover:bg-white/10 hover:text-white'
-                              }`}
-                            >
-                              {tab.label}
+                            type="button"
+                            onClick={() => setActiveTopicTab(tab.id)}
+                            className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition ${
+                              isActive
+                                ? 'border-[#ff9f0a66] bg-[#ff9f0a2b] text-[#ffd29c]'
+                                : panelTheme.tabInactive
+                            }`}
+                          >
+                            {tab.label}
                             </button>
                           );
                         })}
@@ -1070,11 +1218,11 @@ export function ResultComparisonPage({
 
                     <div className="px-5 pb-5 pt-4">
                       {isTopicsLoading ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                        <div className={`rounded-xl border px-3 py-3 text-sm ${topicPickerTheme.empty}`}>
                           주제 불러오는 중...
                         </div>
                       ) : availableTopics.length === 0 ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/70">
+                        <div className={`rounded-xl border px-3 py-3 text-sm ${topicPickerTheme.empty}`}>
                           LIVE 주제가 없습니다.
                         </div>
                       ) : (
@@ -1082,7 +1230,7 @@ export function ResultComparisonPage({
                           {topicsError ? <p className="mb-2 text-xs text-[#ffb4b4]">{topicsError}</p> : null}
 
                           {filteredTopics.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-white/20 bg-white/5 px-3 py-3 text-sm text-white/65">
+                            <div className={`rounded-xl border border-dashed px-3 py-3 text-sm ${topicPickerTheme.emptyDashed}`}>
                               이 카테고리에 표시할 주제가 없습니다.
                             </div>
                           ) : (
@@ -1096,14 +1244,14 @@ export function ResultComparisonPage({
                                 return (
                                   <div
                                     key={topic.id}
-                                    className={`rounded-xl border bg-white/5 transition-colors duration-300 ${
-                                      isExpanded ? 'border-[#ff9f0a55] bg-white/[0.07]' : 'border-white/14'
+                                    className={`rounded-xl border transition-colors duration-300 ${
+                                      isExpanded ? topicPickerTheme.cardExpanded : topicPickerTheme.card
                                     }`}
                                   >
                                     <button
                                       type="button"
                                       onClick={() => handleTopicPickerToggle(topic.id)}
-                                      className="flex h-11 w-full items-center justify-between gap-3 px-3 text-left text-white/84 transition hover:bg-white/6"
+                                      className={`flex h-11 w-full items-center justify-between gap-3 px-3 text-left transition ${topicPickerTheme.rowButton}`}
                                     >
                                       <p className="line-clamp-1 text-[14px] font-medium leading-5">{topic.title}</p>
                                       <span className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-[#ff9f0a55] bg-[#ff9f0a26] px-2 text-[11px] font-semibold text-[#ffd2a6]">
@@ -1118,8 +1266,8 @@ export function ResultComparisonPage({
                                           : 'pointer-events-none -translate-y-1 max-h-0 opacity-0'
                                       }`}
                                     >
-                                      <div className="border-t border-white/6 px-3 pb-3 pt-2.5">
-                                        <p className="text-[12px] text-white/66">선택지를 고르고 바로 투표하세요.</p>
+                                      <div className={`border-t px-3 pb-3 pt-2.5 ${topicPickerTheme.subDivider}`}>
+                                        <p className={`text-[12px] ${topicPickerTheme.helper}`}>선택지를 고르고 바로 투표하세요.</p>
                                         {optionA && optionB ? (
                                           <>
                                             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1132,7 +1280,7 @@ export function ResultComparisonPage({
                                                 className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
                                                   pickerSelectedOptionKey === optionA.key
                                                     ? 'border-[#ff9f0a88] bg-[#ff6b0030] text-[#ffd9b0]'
-                                                    : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                    : topicPickerTheme.optionIdle
                                                 }`}
                                               >
                                                 {optionA.label}
@@ -1146,7 +1294,7 @@ export function ResultComparisonPage({
                                                 className={`inline-flex h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-semibold transition ${
                                                   pickerSelectedOptionKey === optionB.key
                                                     ? 'border-[#4ea1ff88] bg-[#2f7cff2e] text-[#cfe2ff]'
-                                                    : 'border-white/14 bg-white/4 text-white/78 hover:bg-white/10'
+                                                    : topicPickerTheme.optionIdle
                                                 }`}
                                               >
                                                 {optionB.label}
@@ -1181,7 +1329,7 @@ export function ResultComparisonPage({
                 <button
                   type="button"
                   onClick={() => setIsDesktopLeftPanelOpen(true)}
-                  className="pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 border-white/12 bg-[rgba(20,20,24,0.9)] text-white/72 transition hover:text-white"
+                  className={`pointer-events-auto absolute left-0 top-1/2 z-20 inline-flex h-[130px] w-8 -translate-y-1/2 items-center justify-center rounded-r-[16px] border border-l-0 transition ${panelTheme.opener}`}
                   aria-label="다른 주제 선택 패널 열기"
                 >
                   <ChevronRight className="h-5 w-5" />
@@ -1189,6 +1337,42 @@ export function ResultComparisonPage({
               )}
 
               <div className="ml-auto flex min-h-0 w-full max-w-[clamp(320px,28vw,460px)] flex-col gap-3 px-3 pb-4 pt-3 lg:pr-8">
+                {lockedSummary && !isIntroSheetOpen ? (
+                  <section className="pointer-events-auto overflow-hidden rounded-[18px] border border-white/14 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">조회 전용 결과</p>
+                    <p className="mt-1 line-clamp-1 text-[14px] font-semibold text-white">{lockedSummary.topic.title}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-white/72">
+                      현재 {scopeCountryName} 결과를 보고 있습니다. 투표는 {voteCountryName} 기준으로 집계되므로 이 국가 결과는 미리보기만 제공됩니다.
+                    </p>
+                    <p className="mt-3 text-[12px] font-semibold text-white/82">
+                      격차 {lockedSummary.preview.gapPercent}%p · 총 {lockedSummary.preview.totalVotes.toLocaleString()}표
+                    </p>
+
+                    {isCrossCountryScope ? (
+                      <div className="mt-3 grid grid-cols-1 gap-2">
+                        <button
+                          type="button"
+                          onClick={handleOpenVoteCountryResult}
+                          className="inline-flex h-11 items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b001f] text-[13px] font-semibold text-[#ffd2a6] transition hover:bg-[#ff6b0030]"
+                        >
+                          내 지역 결과 보기
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleScopeMapView}
+                          className="inline-flex h-11 items-center justify-center rounded-xl border border-[#5f97ff55] bg-[#2f74ff1a] text-[13px] font-semibold text-[#c8ddff] transition hover:bg-[#2f74ff2c]"
+                        >
+                          {scopeCountryName} 지도 보기
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-[12px] text-white/62">
+                        내 국가에서 투표하면 상세 결과와 지역 비교가 열립니다.
+                      </p>
+                    )}
+                  </section>
+                ) : null}
+
                 {data && !isIntroSheetOpen ? (
                   <section className="pointer-events-auto relative overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
                     <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
@@ -1267,14 +1451,14 @@ export function ResultComparisonPage({
                 ) : null}
 
                 {isLoading ? (
-                  <section className="pointer-events-auto space-y-3 rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.76)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+                  <section className={`pointer-events-auto space-y-3 rounded-[24px] border p-4 backdrop-blur-2xl ${panelTheme.surfaceSoft}`}>
                     <div className="h-5 w-44 animate-pulse rounded bg-white/14" />
                     <div className="h-4 w-64 animate-pulse rounded bg-white/12" />
                     <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
                     <div className="h-20 animate-pulse rounded-2xl bg-white/10" />
                   </section>
                 ) : error ? (
-                  <section className="pointer-events-auto rounded-[24px] border border-white/14 bg-[rgba(18,20,28,0.78)] p-4 shadow-[0_10px_28px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+                  <section className={`pointer-events-auto rounded-[24px] border p-4 backdrop-blur-2xl ${panelTheme.surface}`}>
                     <p className="text-sm font-semibold text-[#ffb4b4]">{error}</p>
                     <button
                       type="button"
@@ -1282,7 +1466,7 @@ export function ResultComparisonPage({
                         void loadResultSummary();
                         void loadMapStats();
                       }}
-                      className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-white/22 bg-white/12 text-sm font-semibold text-white/92 transition hover:bg-white/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                      className={`mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 ${panelTheme.buttonGhost}`}
                     >
                       다시 시도
                     </button>
@@ -1292,6 +1476,42 @@ export function ResultComparisonPage({
             </div>
           ) : (
             <>
+              {lockedSummary && !isIntroSheetOpen ? (
+                <section className="pointer-events-auto absolute left-1/2 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[18px] border border-white/14 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:top-[5.2rem] lg:max-w-[min(46vw,760px)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">조회 전용 결과</p>
+                  <p className="mt-1 line-clamp-1 text-[14px] font-semibold text-white">{lockedSummary.topic.title}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-white/72">
+                    현재 {scopeCountryName} 결과를 보고 있습니다. 투표는 {voteCountryName} 기준으로 집계되므로 이 국가 결과는 미리보기만 제공됩니다.
+                  </p>
+                  <p className="mt-3 text-[12px] font-semibold text-white/82">
+                    격차 {lockedSummary.preview.gapPercent}%p · 총 {lockedSummary.preview.totalVotes.toLocaleString()}표
+                  </p>
+
+                  {isCrossCountryScope ? (
+                    <div className="mt-3 grid grid-cols-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={handleOpenVoteCountryResult}
+                        className="inline-flex h-11 items-center justify-center rounded-xl border border-[#ff9f0a66] bg-[#ff6b001f] text-[13px] font-semibold text-[#ffd2a6] transition hover:bg-[#ff6b0030]"
+                      >
+                        내 지역 결과 보기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleScopeMapView}
+                        className="inline-flex h-11 items-center justify-center rounded-xl border border-[#5f97ff55] bg-[#2f74ff1a] text-[13px] font-semibold text-[#c8ddff] transition hover:bg-[#2f74ff2c]"
+                      >
+                        {scopeCountryName} 지도 보기
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[12px] text-white/62">
+                      내 국가에서 투표하면 상세 결과와 지역 비교가 열립니다.
+                    </p>
+                  )}
+                </section>
+              ) : null}
+
               {data && !isIntroSheetOpen ? (
                 <section className="pointer-events-auto absolute left-1/2 top-[calc(0.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(145deg,rgba(14,24,40,0.92),rgba(12,18,28,0.78))] p-3.5 shadow-[0_10px_26px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:top-[5.2rem] lg:max-w-[min(46vw,760px)]">
                   <div className="pointer-events-none absolute -left-7 -top-8 h-20 w-20 rounded-full bg-[#ff6b002e] blur-2xl" />
@@ -1363,44 +1583,62 @@ export function ResultComparisonPage({
                 </section>
               ) : null}
 
-              {data && selectedRegion && !isIntroSheetOpen ? (
+              {activeSummary && selectedRegion && !isIntroSheetOpen ? (
                 <section
                   ref={selectedRegionPanelRef}
-                  className="pointer-events-auto absolute left-1/2 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[20px] border border-white/14 bg-[rgba(12,18,28,0.72)] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:top-[13rem] lg:max-w-[min(46vw,760px)]"
+                  className={`pointer-events-auto absolute left-1/2 top-[calc(8.8rem+env(safe-area-inset-top))] z-10 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-[20px] border p-3.5 backdrop-blur-2xl md:top-[13rem] lg:max-w-[min(46vw,760px)] ${panelTheme.surface}`}
                 >
                   <div className="flex items-center justify-between">
-                    <h4 className="truncate pr-2 text-[15px] font-semibold text-white">{selectedRegion.name || selectedRegion.code}</h4>
-                    <span className="rounded-full border border-white/18 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/75">
+                    <h4 className={`truncate pr-2 text-[15px] font-semibold ${panelTheme.textPrimary}`}>{selectedRegion.name || selectedRegion.code}</h4>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                        isDarkTheme
+                          ? 'border-white/18 bg-white/8 text-white/75'
+                          : 'border-slate-200 bg-slate-900/[0.04] text-slate-600'
+                      }`}
+                    >
                       {formatCountryLevel(selectedRegion.level)}
                     </span>
                   </div>
 
                   {selectedRegionBreakdown ? (
                     <>
-                      <p className="mt-2 text-[12px] text-white/68">
-                        누적 투표수 <span className="font-semibold text-white">{selectedRegionBreakdown.total.toLocaleString()}표</span>
+                      <p className={`mt-2 text-[12px] ${panelTheme.textSecondary}`}>
+                        누적 투표수 <span className={`font-semibold ${panelTheme.textPrimary}`}>{selectedRegionBreakdown.total.toLocaleString()}표</span>
                       </p>
-                      <div className="mt-2 flex items-center justify-between text-xs text-white/84">
-                        <span>
-                          {data.topic.optionA.label} {selectedRegionBreakdown.aPercent}%
-                        </span>
-                        <span>
-                          {data.topic.optionB.label} {selectedRegionBreakdown.bPercent}%
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-full bg-white/12">
-                        <div className="h-full bg-[#ff6b00]" style={{ width: `${selectedRegionBreakdown.aPercent}%` }} />
-                        <div className="h-full bg-[#2f74ff]" style={{ width: `${selectedRegionBreakdown.bPercent}%` }} />
-                      </div>
+                      {selectedRegionBreakdown.isLocked ? (
+                        <p className={`mt-2 text-xs ${panelTheme.textSecondary}`}>
+                          현재 격차 {selectedRegionBreakdown.gapPercent}%p · 이 국가 상세 결과는 조회 전용입니다.
+                        </p>
+                      ) : (
+                        <>
+                          <div className={`mt-2 flex items-center justify-between text-xs ${panelTheme.textSecondary}`}>
+                            <span>
+                              {activeSummary.topic.optionA.label} {selectedRegionBreakdown.aPercent}%
+                            </span>
+                            <span>
+                              {activeSummary.topic.optionB.label} {selectedRegionBreakdown.bPercent}%
+                            </span>
+                          </div>
+                          <div className={`mt-1.5 flex h-2.5 overflow-hidden rounded-full ${panelTheme.cardTrack}`}>
+                            <div className="h-full bg-[#ff6b00]" style={{ width: `${selectedRegionBreakdown.aPercent}%` }} />
+                            <div className="h-full bg-[#2f74ff]" style={{ width: `${selectedRegionBreakdown.bPercent}%` }} />
+                          </div>
+                        </>
+                      )}
                     </>
                   ) : (
-                    <p className="mt-2 text-xs text-white/62">투표 데이터가 아직 없습니다.</p>
+                    <p className={`mt-2 text-xs ${panelTheme.textMuted}`}>투표 데이터가 아직 없습니다.</p>
                   )}
                 </section>
               ) : null}
 
               {noticeMessage && !isIntroSheetOpen ? (
-                <div className="pointer-events-none absolute left-1/2 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-xl border border-white/18 bg-[rgba(14,18,28,0.72)] px-3 py-2 text-center text-xs font-medium text-white/86 backdrop-blur-xl md:top-[16.4rem] lg:max-w-[min(46vw,760px)]">
+                <div
+                  className={`pointer-events-none absolute left-1/2 top-[calc(12.4rem+env(safe-area-inset-top))] z-20 w-[calc(100%-1.5rem)] max-w-[560px] -translate-x-1/2 rounded-xl border px-3 py-2 text-center text-xs font-medium backdrop-blur-xl md:top-[16.4rem] lg:max-w-[min(46vw,760px)] ${panelTheme.surfaceSoft} ${
+                    isDarkTheme ? 'text-white/86' : 'text-slate-700'
+                  }`}
+                >
                   {noticeMessage}
                 </div>
               ) : null}
@@ -1432,7 +1670,7 @@ export function ResultComparisonPage({
         </div>
       </div>
 
-      {data && !isIntroSheetOpen ? (
+      {activeSummary && !isIntroSheetOpen ? (
         <motion.section
           ref={openSheetRef}
           initial={false}
@@ -1625,7 +1863,7 @@ export function ResultComparisonPage({
         </motion.section>
       ) : null}
 
-      {data && !isIntroSheetOpen ? (
+      {activeSummary && !isIntroSheetOpen ? (
         <SiteLegalFooter
           containerMaxWidthClassName="max-w-[min(100vw-2.5rem,1920px)]"
           footerClassName="z-50 border-white/8 bg-[rgba(10,14,22,0.985)]"
@@ -1660,7 +1898,10 @@ export function ResultComparisonPage({
           }
           nationwidePersona={data.persona.nationwide}
           myRegionPersona={data.persona.myRegion}
-          onMapView={handleMapView}
+          onScopeMapView={isCrossCountryScope ? handleScopeMapView : handleVoteCountryMapView}
+          onVoteCountryMapView={isCrossCountryScope ? handleOpenVoteCountryResult : null}
+          scopeActionLabel={isCrossCountryScope ? `${scopeCountryName} 지도 보기` : '내 지역 지도 보기'}
+          voteCountryActionLabel="내 지역 결과 보기"
           onShareKakao={handleKakaoShare}
           onShareLinkCopy={handleCopyShareLink}
           onOpenNextTopics={handleOpenNextTopicsFromModal}

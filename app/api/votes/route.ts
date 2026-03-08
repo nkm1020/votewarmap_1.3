@@ -52,7 +52,17 @@ const voteBodySchema = z.object({
   topicId: z.string().min(1),
   optionKey: z.string().min(1),
   guestSessionId: z.string().uuid().optional(),
+  countryCode: z.string().trim().min(2).optional(),
+  scopeCountryCode: z.string().trim().min(2).optional(),
   regionInput: regionInputSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (!value.countryCode && !value.scopeCountryCode) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['countryCode'],
+      message: 'countryCode 또는 scopeCountryCode가 필요합니다.',
+    });
+  }
 });
 
 type UserRegionRow = {
@@ -72,7 +82,7 @@ const GPS_ONLY_FOR_NO_SCHOOL_ERROR = '학교 미설정 계정은 정확한 위�
 const GPS_COMING_SOON_FOR_KR_ERROR = '국내 사용자는 GPS 위치 기능이 출시 예정입니다. 학교를 선택해 주세요.';
 const SCHOOL_REQUIRED_FOR_KR_MEMBER_ERROR = '국내 사용자는 학교 등록 후 투표할 수 있어요. MY에서 학교를 등록해 주세요.';
 const SCHOOL_ONLY_FOR_KR_GUEST_ERROR = '국내 비회원은 학교 위치로만 투표할 수 있어요. 학교를 선택해 주세요.';
-const CROSS_COUNTRY_VOTE_FORBIDDEN_ERROR = '다른 국가 주제는 조회만 가능하며 투표는 소속 국가에서만 가능합니다.';
+const INVALID_VOTE_COUNTRY_ERROR = '투표는 소속 국가 기준으로만 집계됩니다.';
 const VOTE_SUBMIT_LIMIT_PER_MINUTE = 20;
 
 export async function POST(request: Request) {
@@ -117,7 +127,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseServiceRoleClient();
     const { data: topicRow, error: topicError } = await supabase
       .from('vote_topics')
-      .select('id, country_code')
+      .select('id')
       .eq('id', body.topicId)
       .maybeSingle();
 
@@ -127,7 +137,8 @@ export async function POST(request: Request) {
     if (!topicRow) {
       return NextResponse.json({ error: '주제를 찾을 수 없습니다.' }, { status: 404 });
     }
-    const topicCountryCode = normalizeCountryCode((topicRow as { country_code?: string | null }).country_code);
+    const voteCountryCode = normalizeCountryCode(body.countryCode ?? body.scopeCountryCode);
+    const scopeCountryCode = normalizeCountryCode(body.scopeCountryCode ?? body.countryCode);
 
     const { data: option, error: optionError } = await supabase
       .from('vote_options')
@@ -209,8 +220,8 @@ export async function POST(request: Request) {
       genderSnapshot = userRegionRow?.gender ?? null;
     }
 
-    if (topicCountryCode !== resolvedCountryCode) {
-      return NextResponse.json({ error: CROSS_COUNTRY_VOTE_FORBIDDEN_ERROR }, { status: 403 });
+    if (voteCountryCode !== resolvedCountryCode) {
+      return NextResponse.json({ error: INVALID_VOTE_COUNTRY_ERROR }, { status: 403 });
     }
 
     if (body.regionInput?.source === 'gps' && !isGpsEnabled(resolvedCountryCode)) {
@@ -295,6 +306,7 @@ export async function POST(request: Request) {
         .insert({
           topic_id: body.topicId,
           option_key: body.optionKey,
+          country_code: voteCountryCode,
           user_id: voterUserId,
           guest_token: null,
           school_id: schoolId,
@@ -314,7 +326,15 @@ export async function POST(request: Request) {
         return internalServerError('app/api/votes/route.ts', voteInsertError.message);
       }
 
-      return NextResponse.json({ vote: insertedVote }, { status: 201 });
+      return NextResponse.json(
+        {
+          vote: insertedVote,
+          scopeCountryCode,
+          voteCountryCode,
+          isCrossCountryVote: scopeCountryCode !== voteCountryCode,
+        },
+        { status: 201 },
+      );
     }
 
     if (!guestSessionId) {
@@ -339,6 +359,7 @@ export async function POST(request: Request) {
         session_id: guestSessionId,
         topic_id: body.topicId,
         option_key: body.optionKey,
+        country_code: voteCountryCode,
         school_id: schoolId,
         aggregate_school_id: aggregateSchoolId,
         sido_code: sidoCode,
@@ -361,6 +382,9 @@ export async function POST(request: Request) {
           ...insertedTempVote,
           session_id: guestSessionId,
         },
+        scopeCountryCode,
+        voteCountryCode,
+        isCrossCountryVote: scopeCountryCode !== voteCountryCode,
       },
       { status: 201 },
     );

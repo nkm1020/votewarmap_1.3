@@ -6,6 +6,8 @@ import { Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getPageThemeTokens } from '@/lib/theme/pageTheme';
 import { normalizeInternalRedirectPath } from '@/lib/auth/redirect';
 
 const displayFont = Plus_Jakarta_Sans({
@@ -29,6 +31,8 @@ function SelectChevron() {
 export default function CompleteSignupPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading, requiresSignupCompletion, completeSignup } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
 
   const [nickname, setNickname] = useState('');
   const [birthYear, setBirthYear] = useState<number>(() => new Date().getFullYear() - 17);
@@ -107,8 +111,8 @@ export default function CompleteSignupPage() {
 
   if (isLoading || !isAuthenticated || !requiresSignupCompletion) {
     return (
-      <main className={`${displayFont.className} flex h-screen items-center justify-center bg-[#181410] text-white`}>
-        <p className="text-sm text-white/70">회원가입 정보를 확인하는 중...</p>
+      <main className={`${displayFont.className} ${theme.shellClass} flex h-screen items-center justify-center`}>
+        <p className={`text-sm ${theme.textSecondaryClass}`}>회원가입 정보를 확인하는 중...</p>
       </main>
     );
   }
@@ -116,8 +120,15 @@ export default function CompleteSignupPage() {
   const isFormReady = nickname.trim().length > 0 && (gender === 'male' || gender === 'female') && agreedToTerms;
 
   return (
-    <main className={`${displayFont.className} relative min-h-screen overflow-hidden bg-[#181410] text-white`}>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_70%_at_20%_15%,rgba(47,116,255,0.24),rgba(47,116,255,0)_60%),radial-gradient(80%_60%_at_80%_90%,rgba(255,103,0,0.18),rgba(255,103,0,0)_65%),linear-gradient(to_bottom,rgba(19,15,12,0.95),rgba(19,15,12,0.82))]" />
+    <main className={`${displayFont.className} ${theme.shellClass} relative min-h-screen overflow-hidden`}>
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage: theme.isDark
+            ? 'radial-gradient(90% 70% at 20% 15%, rgba(47,116,255,0.24), rgba(47,116,255,0) 60%), radial-gradient(80% 60% at 80% 90%, rgba(255,103,0,0.18), rgba(255,103,0,0) 65%), linear-gradient(to bottom, rgba(19,15,12,0.95), rgba(19,15,12,0.82))'
+            : 'radial-gradient(90% 70% at 20% 15%, rgba(47,116,255,0.14), rgba(47,116,255,0) 60%), radial-gradient(80% 60% at 80% 90%, rgba(255,103,0,0.12), rgba(255,103,0,0) 65%), linear-gradient(to bottom, rgba(248,250,253,0.96), rgba(236,242,248,0.9))',
+        }}
+      />
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1240px] flex-col px-4 py-6 sm:px-6 lg:px-10">
         <DesktopTopHeader
           links={[
@@ -134,24 +145,24 @@ export default function CompleteSignupPage() {
           <button
             type="button"
             onClick={() => router.push('/')}
-            className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+            className={`rounded-full px-4 py-2 text-xs font-semibold transition ${theme.chipClass} ${theme.isDark ? 'hover:bg-white/20' : 'hover:bg-slate-900/[0.08]'}`}
           >
             홈으로
           </button>
         </header>
 
         <div className="grid flex-1 items-center gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
-          <aside className="hidden rounded-[30px] border border-white/12 bg-[rgba(22,18,14,0.48)] p-7 shadow-2xl backdrop-blur-md lg:block">
-            <h2 className="text-3xl font-extrabold leading-tight text-white">
+          <aside className={`hidden rounded-[30px] p-7 backdrop-blur-md lg:block ${theme.surfaceStrongClass}`}>
+            <h2 className={`text-3xl font-extrabold leading-tight ${theme.textPrimaryClass}`}>
               마지막 가입 정보를 입력하면
               <br />
               개인화 기능이 활성화됩니다
             </h2>
-            <p className="mt-4 max-w-[480px] text-sm leading-relaxed text-white/70">
+            <p className={`mt-4 max-w-[480px] text-sm leading-relaxed ${theme.textSecondaryClass}`}>
               닉네임과 기본 프로필 정보는 MY 페이지/리더보드/지역 분석 표시 기준으로 사용됩니다.
               완료 즉시 원래 보려던 페이지로 이동됩니다.
             </p>
-            <ul className="mt-6 space-y-2 text-sm text-white/78">
+            <ul className={`mt-6 space-y-2 text-sm ${theme.textSecondaryClass}`}>
               <li>1. 닉네임 입력</li>
               <li>2. 출생연도 및 성별 선택</li>
               <li>3. 약관 동의 후 가입 완료</li>
@@ -160,19 +171,19 @@ export default function CompleteSignupPage() {
 
         <form
           onSubmit={(event) => void handleSubmit(event)}
-          className="mx-auto w-full max-w-[560px] rounded-[30px] border border-white/12 bg-[rgba(24,20,16,0.82)] px-6 py-7 shadow-2xl backdrop-blur-md sm:px-7"
+          className={`mx-auto w-full max-w-[560px] rounded-[30px] px-6 py-7 backdrop-blur-md sm:px-7 ${theme.elevatedClass}`}
         >
-          <h1 className="text-2xl font-extrabold leading-tight text-white sm:text-[1.75rem]">
+          <h1 className={`text-2xl font-extrabold leading-tight ${theme.textPrimaryClass} sm:text-[1.75rem]`}>
             가입을 완료하고
             <br />
             지역 비교 투표 시작하기
           </h1>
-          <p className="mt-3 text-sm leading-relaxed text-white/70">
+          <p className={`mt-3 text-sm leading-relaxed ${theme.textSecondaryClass}`}>
             닉네임, 출생연도, 성별을 입력하고 약관에 동의하면 회원가입이 완료됩니다.
           </p>
 
           <label className="mt-6 block">
-            <span className="mb-1 block text-xs font-semibold text-white/70">닉네임</span>
+            <span className={`mb-1 block text-xs font-semibold ${theme.textSecondaryClass}`}>닉네임</span>
             <input
               value={nickname}
               onChange={(event) => {
@@ -181,13 +192,13 @@ export default function CompleteSignupPage() {
               }}
               placeholder="닉네임 입력"
               maxLength={20}
-              className="h-11 w-full rounded-xl border border-white/14 bg-white/8 px-3 text-sm text-white outline-none placeholder:text-white/45 transition focus:border-[#ff9f0a66]"
+              className={`h-11 w-full rounded-xl px-3 text-sm outline-none transition ${theme.inputClass}`}
             />
           </label>
 
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-white/70">출생연도</span>
+              <span className={`mb-1 block text-xs font-semibold ${theme.textSecondaryClass}`}>출생연도</span>
               <div className="relative">
                 <select
                   value={String(birthYear)}
@@ -198,22 +209,22 @@ export default function CompleteSignupPage() {
                     }
                     setErrorMessage(null);
                   }}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/14 bg-white/8 px-3 pr-10 text-sm text-white outline-none transition focus:border-[#ff9f0a66] focus:ring-2 focus:ring-[#ff9f0a33]"
+                  className={`h-11 w-full appearance-none rounded-xl px-3 pr-10 text-sm outline-none transition ${theme.inputClass}`}
                 >
                   {birthYearOptions.map((year) => (
-                    <option key={year} value={year} className="bg-[#1f1f24] text-white">
+                    <option key={year} value={year} className={theme.isDark ? 'bg-[#1f1f24] text-white' : 'bg-white text-slate-900'}>
                       {year}년
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-white/55">
+                <span className={`pointer-events-none absolute inset-y-0 right-3 flex items-center ${theme.textMutedClass}`}>
                   <SelectChevron />
                 </span>
               </div>
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-white/70">성별</span>
+              <span className={`mb-1 block text-xs font-semibold ${theme.textSecondaryClass}`}>성별</span>
               <div className="relative">
                 <select
                   value={gender}
@@ -222,25 +233,25 @@ export default function CompleteSignupPage() {
                     setGender(next === 'male' || next === 'female' ? next : '');
                     setErrorMessage(null);
                   }}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/14 bg-white/8 px-3 pr-10 text-sm text-white outline-none transition focus:border-[#ff9f0a66] focus:ring-2 focus:ring-[#ff9f0a33]"
+                  className={`h-11 w-full appearance-none rounded-xl px-3 pr-10 text-sm outline-none transition ${theme.inputClass}`}
                 >
-                  <option value="" className="bg-[#1f1f24] text-white/80">
+                  <option value="" className={theme.isDark ? 'bg-[#1f1f24] text-white/80' : 'bg-white text-slate-500'}>
                     성별 선택
                   </option>
                   {GENDER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value} className="bg-[#1f1f24] text-white">
+                    <option key={option.value} value={option.value} className={theme.isDark ? 'bg-[#1f1f24] text-white' : 'bg-white text-slate-900'}>
                       {option.label}
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-white/55">
+                <span className={`pointer-events-none absolute inset-y-0 right-3 flex items-center ${theme.textMutedClass}`}>
                   <SelectChevron />
                 </span>
               </div>
             </label>
           </div>
 
-          <label className="mt-4 flex items-start gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-3 py-2.5">
+          <label className={`mt-4 flex items-start gap-2 rounded-xl px-3 py-2.5 ${theme.surfaceSoftClass}`}>
             <input
               type="checkbox"
               checked={agreedToTerms}
@@ -250,14 +261,14 @@ export default function CompleteSignupPage() {
               }}
               className="mt-0.5 h-4 w-4 accent-[#ff9f0a]"
             />
-            <span className="text-xs leading-relaxed text-white/72">
-              <Link href="/terms" className="underline underline-offset-2 transition hover:text-white">
+            <span className={`text-xs leading-relaxed ${theme.textSecondaryClass}`}>
+              <Link href="/terms" className={`underline underline-offset-2 transition ${theme.isDark ? 'hover:text-white' : 'hover:text-slate-900'}`}>
                 이용약관
               </Link>
               {' '}
               및
               {' '}
-              <Link href="/privacy" className="underline underline-offset-2 transition hover:text-white">
+              <Link href="/privacy" className={`underline underline-offset-2 transition ${theme.isDark ? 'hover:text-white' : 'hover:text-slate-900'}`}>
                 개인정보처리방침
               </Link>
               {' '}

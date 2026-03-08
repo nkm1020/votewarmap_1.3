@@ -6,6 +6,7 @@ import { normalizePersonaTag } from '@/lib/server/persona-metrics';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import type { VoteTopic } from '@/lib/vote/types';
 import { internalServerError } from '@/lib/server/api-response';
+import { sortTopicsByCountryTieBreak } from '@/lib/vote/topic-ordering';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,6 @@ type VoteTopicRow = {
   id: string;
   title: string;
   status: string;
-  country_code: string;
 };
 
 type VoteOptionRow = {
@@ -58,6 +58,15 @@ function hasRequiredOptions(topic: VoteTopic): boolean {
   return hasA && hasB;
 }
 
+function buildTopicRowsQuery(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+) {
+  return supabase
+    .from('vote_topics')
+    .select('id, title, status')
+    .order('title', { ascending: true });
+}
+
 export async function GET(request: Request) {
   try {
     const parsed = querySchema.safeParse(
@@ -87,20 +96,96 @@ export async function GET(request: Request) {
       .map((row) => String(row.topic_id ?? '').trim())
       .filter(Boolean);
 
+    const loadFallbackTopic = async () => {
+      let fallbackQuery = buildTopicRowsQuery(supabase);
+      if (status.toUpperCase() !== 'ALL') {
+        fallbackQuery = fallbackQuery.eq('status', status);
+      }
+
+      const { data: fallbackTopicRows, error: fallbackTopicsError } = await fallbackQuery;
+      if (fallbackTopicsError) {
+        return {
+          response: internalServerError('app/api/votes/featured/route.ts', fallbackTopicsError.message),
+          topic: null,
+        };
+      }
+
+      const sortedFallbackTopicRows = sortTopicsByCountryTieBreak(
+        (fallbackTopicRows ?? []) as VoteTopicRow[],
+        countryCode,
+      );
+      const fallbackIds = sortedFallbackTopicRows.map((row) => row.id);
+      if (fallbackIds.length === 0) {
+        return { response: null, topic: null };
+      }
+
+      const { data: fallbackOptionRows, error: fallbackOptionsError } = await supabase
+        .from('vote_options')
+        .select('topic_id, option_key, option_label, position, persona_tag')
+        .in('topic_id', fallbackIds)
+        .order('position', { ascending: true });
+
+      if (fallbackOptionsError) {
+        return {
+          response: internalServerError('app/api/votes/featured/route.ts', fallbackOptionsError.message),
+          topic: null,
+        };
+      }
+
+      const fallbackOptionsByTopic = new Map<string, VoteTopic['options']>();
+      ((fallbackOptionRows ?? []) as VoteOptionRow[]).forEach((row) => {
+        if (row.position !== 1 && row.position !== 2) {
+          return;
+        }
+
+        const options = fallbackOptionsByTopic.get(row.topic_id) ?? [];
+        options.push({
+          key: row.option_key,
+          label: row.option_label,
+          position: row.position,
+          personaTag: normalizePersonaTag(row.persona_tag),
+        });
+        fallbackOptionsByTopic.set(row.topic_id, options);
+      });
+
+      for (const topicRow of sortedFallbackTopicRows) {
+        const topic: VoteTopic = {
+          id: topicRow.id,
+          title: topicRow.title,
+          status: topicRow.status,
+          options: fallbackOptionsByTopic.get(topicRow.id) ?? [],
+        };
+
+        if (!hasRequiredOptions(topic)) {
+          continue;
+        }
+
+        return {
+          response: NextResponse.json({
+            topic,
+            metrics: {
+              totalVotes: 0,
+              realtimeVotes: 0,
+              score: 0,
+              lastVoteAt: null,
+            },
+          }),
+          topic,
+        };
+      }
+
+      return { response: null, topic: null };
+    };
+
     if (candidateTopicIds.length === 0) {
+      const fallback = await loadFallbackTopic();
+      if (fallback.response) {
+        return fallback.response;
+      }
       return NextResponse.json({ topic: null });
     }
 
-    let topicRowsQuery = supabase
-      .from('vote_topics')
-      .select('id, title, status, country_code')
-      .in('id', candidateTopicIds);
-
-    if (countryCode === 'KR') {
-      topicRowsQuery = topicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
-    } else {
-      topicRowsQuery = topicRowsQuery.eq('country_code', countryCode);
-    }
+    const topicRowsQuery = buildTopicRowsQuery(supabase).in('id', candidateTopicIds);
 
     const { data: topicRows, error: topicsError } = await topicRowsQuery;
 
@@ -154,7 +239,6 @@ export async function GET(request: Request) {
         id: topicRow.id,
         title: topicRow.title,
         status: topicRow.status,
-        countryCode: topicRow.country_code,
         options: optionsByTopic.get(topicId) ?? [],
       };
       if (!hasRequiredOptions(topic)) {
@@ -175,6 +259,11 @@ export async function GET(request: Request) {
           lastVoteAt,
         },
       });
+    }
+
+    const fallback = await loadFallbackTopic();
+    if (fallback.response) {
+      return fallback.response;
     }
 
     return NextResponse.json({ topic: null });

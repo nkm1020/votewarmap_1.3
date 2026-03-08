@@ -23,6 +23,7 @@ type SchoolRow = {
 type VoteInsertRow = {
   topic_id: string;
   option_key: string;
+  country_code: string;
   user_id: null;
   guest_token: string;
   school_id: string | null;
@@ -291,6 +292,7 @@ async function main() {
         rows.push({
           topic_id: topic.id,
           option_key: optionKey,
+          country_code: 'KR',
           user_id: null,
           guest_token: makeGuestToken(runId, topic.id, seq),
           school_id: school.id,

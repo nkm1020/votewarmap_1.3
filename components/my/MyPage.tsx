@@ -20,8 +20,10 @@ import { AccountMenuButton } from '@/components/ui/account-menu-button';
 import { SiteLegalFooter } from '@/components/common/SiteLegalFooter';
 import { DesktopTopHeader } from '@/components/ui/desktop-top-header';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { ADSENSE_SLOTS } from '@/lib/adsense';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { getMyPageThemeVars } from '@/lib/theme/pageTheme';
 import { AVATAR_PRESETS } from '@/lib/vote/constants';
 import { resolveVoteRegionInputFromCurrentLocation } from '@/lib/vote/location-region';
 import type { SchoolSearchItem } from '@/lib/vote/types';
@@ -183,31 +185,9 @@ const KOREA_COUNTRY_CODE = 'KR';
 const KR_GPS_COMING_SOON_MESSAGE = '국내 사용자의 GPS 위치 기능은 출시 예정입니다. 학교를 메인 활동 지역으로 선택해 주세요.';
 const APP_BG = 'bg-[var(--my-bg)]';
 const CARD_BG = 'bg-[var(--my-surface-strong)]';
-const TEXT_PRIMARY = 'text-white';
-const TEXT_SECONDARY = 'text-[#8E8E93]';
+const TEXT_PRIMARY = 'text-[color:var(--my-text-main)]';
+const TEXT_SECONDARY = 'text-[color:var(--my-text-muted)]';
 const ACCENT_COLOR = '#FF5C00';
-
-const PAGE_THEME_VARS = {
-  '--my-bg': '#070d16',
-  '--my-bg-shell': '#0a1220',
-  '--my-surface': 'rgba(12,18,28,0.78)',
-  '--my-surface-strong': 'rgba(12,18,28,0.86)',
-  '--my-surface-soft': 'rgba(255,255,255,0.04)',
-  '--my-border': 'rgba(255,255,255,0.14)',
-  '--my-border-soft': 'rgba(255,255,255,0.1)',
-  '--my-text-main': 'rgba(255,255,255,0.96)',
-  '--my-text-muted': 'rgba(255,255,255,0.68)',
-  '--my-text-subtle': 'rgba(255,255,255,0.54)',
-  '--my-accent': '#ff9f0a',
-  '--my-accent-strong': '#ff6b00',
-  '--my-accent-soft': 'rgba(255,107,0,0.18)',
-  '--my-focus': 'rgba(255,159,10,0.52)',
-  '--my-chart-region': '#9d6bff',
-  '--my-chart-nation': '#4f8dff',
-  '--my-chart-vote': '#ff9f0a',
-  '--my-chart-game': '#57c8ff',
-  '--my-chart-grid': 'rgba(255,255,255,0.12)',
-} as CSSProperties;
 
 const MAIN_VIEW_STYLE = {
   fontFamily: '"Pretendard","Pretendard Variable",var(--font-geist-sans),sans-serif',
@@ -288,7 +268,7 @@ function getPersonaDominantLabel(summary: PersonaPowerSummary): string {
 
 function getPersonaDominantToneClass(summary: PersonaPowerSummary): string {
   if (summary.mappedVotes <= 0 || summary.dominant === 'none') {
-    return 'text-white/60';
+    return 'text-[color:var(--my-text-muted)]';
   }
   if (summary.dominant === 'golden_balance') {
     return 'text-[#ffd26f]';
@@ -446,7 +426,7 @@ function MatchRateGauge({ value, label }: { value: number; label: string }) {
   return (
     <div className="relative mx-auto mb-2 mt-4 aspect-[2/1] w-full max-w-[220px]" role="img" aria-label={`${label} ${safeValue}%`}>
       <svg className="h-full w-full overflow-visible" viewBox="0 0 200 100">
-        <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#2C2C2E" strokeWidth="18" strokeLinecap="round" />
+        <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="var(--my-surface)" strokeWidth="18" strokeLinecap="round" />
         <motion.path
           d="M 20 100 A 80 80 0 0 1 180 100"
           fill="none"
@@ -461,9 +441,9 @@ function MatchRateGauge({ value, label }: { value: number; label: string }) {
         />
       </svg>
       <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center text-center">
-        <span className="text-[36px] font-black leading-none tracking-tighter text-white">
+        <span className="text-[36px] font-black leading-none tracking-tighter text-[color:var(--my-text-main)]">
           {safeValue}
-          <span className="ml-1 text-[18px] font-bold text-white/50">%</span>
+          <span className="ml-1 text-[18px] font-bold text-[color:var(--my-text-subtle)]">%</span>
         </span>
         <span className="mt-1.5 text-[12px] font-semibold text-[#FF5C00]">{label}</span>
       </div>
@@ -471,7 +451,15 @@ function MatchRateGauge({ value, label }: { value: number; label: string }) {
   );
 }
 
-function WaffleChart({ value, colorClass }: { value: number; colorClass: string }) {
+function WaffleChart({
+  value,
+  activeColor,
+  activeShadow,
+}: {
+  value: number;
+  activeColor: string;
+  activeShadow?: string;
+}) {
   const reducedMotion = useReducedMotion();
   const safeValue = Math.max(0, Math.min(100, Math.round(value)));
 
@@ -485,7 +473,11 @@ function WaffleChart({ value, colorClass }: { value: number; colorClass: string 
             initial={reducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: reducedMotion ? 0 : 0.2, delay: reducedMotion || !isActive ? 0 : index * 0.005 }}
-            className={`aspect-square rounded-[3px] transition-colors duration-500 ${isActive ? colorClass : 'bg-[#2C2C2E]'}`}
+            className="aspect-square rounded-[3px] transition-colors duration-500"
+            style={{
+              backgroundColor: isActive ? activeColor : 'var(--my-chart-grid)',
+              boxShadow: isActive && activeShadow ? activeShadow : undefined,
+            }}
           />
         );
       })}
@@ -511,15 +503,15 @@ function PersonaPowerCard({ title, subtitle, summary }: PersonaPowerCardProps) {
     <section className={`${CARD_BG} rounded-[28px] p-5 md:p-6`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-[16px] font-bold text-white">{title}</h3>
-          <p className="mt-1 text-[12px] text-white/58">{subtitle}</p>
+          <h3 className="truncate text-[16px] font-bold text-[color:var(--my-text-main)]">{title}</h3>
+          <p className="mt-1 text-[12px] text-[color:var(--my-text-muted)]">{subtitle}</p>
         </div>
-        <span className="shrink-0 rounded-full border border-white/12 bg-white/6 px-2.5 py-1 text-[11px] font-semibold text-white/72">
+        <span className="shrink-0 rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--my-text-muted)]">
           {hasData ? `${formatNumber(summary.mappedVotes)}표 기반` : '표본 없음'}
         </span>
       </div>
 
-      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-[#2C2C2E]">
+      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-[var(--my-surface)]">
         <motion.div
           className="h-full bg-[#ff9f0a]"
           initial={{ width: 0 }}
@@ -534,7 +526,7 @@ function PersonaPowerCard({ title, subtitle, summary }: PersonaPowerCardProps) {
         />
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-[12px] font-semibold text-white/74">
+      <div className="mt-2 flex items-center justify-between text-[12px] font-semibold text-[color:var(--my-text-muted)]">
         <span>에겐 {egenPercent}%</span>
         <span>테토 {tetoPercent}%</span>
       </div>
@@ -594,9 +586,9 @@ function MainDashboard({
       <header className="mb-8 pl-1 lg:mb-10 lg:flex lg:items-end lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight lg:text-[40px]">마이페이지</h1>
-          <p className="mt-2 hidden text-sm text-white/58 lg:block">활동 기록, 일치율, 프로필 설정을 한 번에 관리할 수 있어요.</p>
+          <p className="mt-2 hidden text-sm text-[color:var(--my-text-muted)] lg:block">활동 기록, 일치율, 프로필 설정을 한 번에 관리할 수 있어요.</p>
         </div>
-        <p className="hidden rounded-full border border-white/12 bg-white/5 px-4 py-2 text-xs font-semibold text-white/66 lg:inline-flex">
+        <p className="hidden rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-4 py-2 text-xs font-semibold text-[color:var(--my-text-muted)] lg:inline-flex">
           가입일 {formatKoreanDateTime(dashboard.profile.joinedAt)}
         </p>
       </header>
@@ -607,7 +599,7 @@ function MainDashboard({
             <section className={`${CARD_BG} rounded-[32px] p-6 shadow-[0_12px_28px_rgba(0,0,0,0.26)] lg:sticky lg:top-6`}>
               <div className="flex flex-col items-center">
                 <div className="relative mb-4">
-                  <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#1C1C1E] text-[40px] shadow-lg">
+                  <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[var(--my-bg-shell)] text-[40px] shadow-lg">
                     {dashboard.profile.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={dashboard.profile.avatarUrl} alt="프로필" className="h-full w-full rounded-full object-cover" />
@@ -615,7 +607,7 @@ function MainDashboard({
                       getAvatarEmoji(dashboard.profile.avatarPreset)
                     )}
                   </div>
-                  <div className="absolute -bottom-2 -right-2 rounded-full border-2 border-black bg-[#FF5C00] px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                  <div className="absolute -bottom-2 -right-2 rounded-full border-2 border-[var(--my-bg)] bg-[#FF5C00] px-3 py-1 text-[11px] font-bold text-white shadow-md">
                     {tierLabel(dashboard.level.tier)}
                   </div>
                 </div>
@@ -632,17 +624,17 @@ function MainDashboard({
                 <button
                   type="button"
                   onClick={onEditProfile}
-                  className="mt-3.5 rounded-full bg-[#2C2C2E] px-4 py-1.5 text-[13px] font-medium text-white transition-colors active:scale-95 hover:bg-[#3A3A3C]"
+                  className="mt-3.5 rounded-full bg-[var(--my-surface)] px-4 py-1.5 text-[13px] font-medium text-[color:var(--my-text-main)] transition-colors active:scale-95 hover:bg-[var(--my-surface-soft)]"
                 >
                   프로필 편집
                 </button>
 
                 <div className="mt-6 w-full">
-                  <div className="mb-1.5 flex justify-between text-[11px] font-semibold text-[#8E8E93]">
+                  <div className="mb-1.5 flex justify-between text-[11px] font-semibold text-[color:var(--my-text-muted)]">
                     <span>{formatNumber(dashboard.level.xp)} XP</span>
                     <span>{formatNumber(dashboard.level.nextXp)} XP</span>
                   </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#2C2C2E]">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--my-surface)]">
                     <motion.div
                       className="h-full rounded-full bg-[#FF5C00]"
                       initial={{ width: 0 }}
@@ -650,7 +642,7 @@ function MainDashboard({
                       transition={{ duration: reducedMotion ? 0 : 1, delay: reducedMotion ? 0 : 0.3 }}
                     />
                   </div>
-                  <p className="mt-2 text-center text-[11px] text-[#8E8E93]">다음 티어까지 {formatNumber(remainXp)} XP</p>
+                  <p className="mt-2 text-center text-[11px] text-[color:var(--my-text-muted)]">다음 티어까지 {formatNumber(remainXp)} XP</p>
                 </div>
               </div>
             </section>
@@ -664,12 +656,12 @@ function MainDashboard({
                     <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>총 투표수</p>
                     <p className="text-xl font-bold lg:text-2xl">{formatNumber(dashboard.stats.totalVotes)}</p>
                   </div>
-                  <div className="h-8 w-px bg-[#2C2C2E]" />
+                  <div className="h-8 w-px bg-[var(--my-border-soft)]" />
                   <div className="flex-1 text-center">
                     <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>게임점수</p>
                     <p className="text-xl font-bold lg:text-2xl">{formatNumber(dashboard.stats.totalGameScore)}</p>
                   </div>
-                  <div className="h-8 w-px bg-[#2C2C2E]" />
+                  <div className="h-8 w-px bg-[var(--my-border-soft)]" />
                   <div className="flex-1 text-center">
                     <p className={`mb-1 text-[11px] font-medium ${TEXT_SECONDARY}`}>지역 순위</p>
                     <p className="text-xl font-bold text-[#FF5C00] lg:text-2xl">{dashboard.stats.gameRankRegionBattle}위</p>
@@ -705,12 +697,12 @@ function MainDashboard({
                 {dashboard.profile.school ? (
                   <div className="mb-3">
                     {schoolEligible ? (
-                      <div className="inline-flex rounded-full border border-white/12 bg-white/5 p-1">
+                      <div className="inline-flex rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] p-1">
                         <button
                           type="button"
                           onClick={() => setActiveMatchTab('school')}
                           className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-                            activeMatchTab === 'school' ? 'bg-[#FF5C00] text-white' : 'text-white/72 hover:text-white'
+                            activeMatchTab === 'school' ? 'bg-[#FF5C00] text-white' : 'text-[color:var(--my-text-muted)] hover:text-[color:var(--my-text-main)]'
                           }`}
                         >
                           학교
@@ -719,14 +711,14 @@ function MainDashboard({
                           type="button"
                           onClick={() => setActiveMatchTab('region')}
                           className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-                            activeMatchTab === 'region' ? 'bg-[#FF5C00] text-white' : 'text-white/72 hover:text-white'
+                            activeMatchTab === 'region' ? 'bg-[#FF5C00] text-white' : 'text-[color:var(--my-text-muted)] hover:text-[color:var(--my-text-main)]'
                           }`}
                         >
                           지역
                         </button>
                       </div>
                     ) : (
-                      <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-[#ffcc99]">
+                      <p className="rounded-xl border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] px-3 py-2 text-xs text-[#ffcc99]">
                         학교 표본(비교 가능 주제) {schoolMinimumSample}개 미만으로 학교 그래프는 표시되지 않습니다. (현재 {schoolSampleTopics}개)
                       </p>
                     )}
@@ -735,25 +727,25 @@ function MainDashboard({
 
                 <MatchRateGauge value={activeMatchRate} label={`${activeTargetLabel} 일치율`} />
 
-                <div className="my-8 h-px w-full bg-[#2C2C2E]" />
+                <div className="my-8 h-px w-full bg-[var(--my-border-soft)]" />
 
                 <div className="space-y-7 lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0">
                   <div>
-                    <h4 className="mb-2 text-center text-[13px] font-bold text-white/90">전국 평균</h4>
+                    <h4 className="mb-2 text-center text-[13px] font-bold text-[color:var(--my-text-main)]">전국 평균</h4>
                     <div className="mb-2 flex items-end justify-between">
-                      <span className="text-xs font-medium text-[#8E8E93]">100명 기준</span>
-                      <span className="text-xs font-bold text-[#8E8E93]">{Math.round(nationwideMatchRate)}명</span>
+                      <span className="text-xs font-medium text-[color:var(--my-text-muted)]">100명 기준</span>
+                      <span className="text-xs font-bold text-[color:var(--my-text-muted)]">{Math.round(nationwideMatchRate)}명</span>
                     </div>
-                    <WaffleChart value={nationwideMatchRate} colorClass="bg-white/20" />
+                    <WaffleChart value={nationwideMatchRate} activeColor="var(--my-chart-neutral)" />
                   </div>
 
                   <div>
-                    <h4 className="mb-2 text-center text-[13px] font-bold text-white/90">{activeTargetLabel}</h4>
+                    <h4 className="mb-2 text-center text-[13px] font-bold text-[color:var(--my-text-main)]">{activeTargetLabel}</h4>
                     <div className="mb-2 flex items-end justify-between">
                       <span className="text-xs font-medium text-[#FF5C00]">{effectiveMatchTab === 'school' ? schoolLabel ?? '내 학교' : regionLabel}</span>
                       <span className="text-xs font-bold text-[#FF5C00]">{Math.round(activeMatchRate)}명</span>
                     </div>
-                    <WaffleChart value={activeMatchRate} colorClass="bg-[#FF5C00] shadow-[0_0_10px_rgba(255,92,0,0.4)]" />
+                    <WaffleChart value={activeMatchRate} activeColor="var(--my-chart-vote)" activeShadow="0 0 10px rgba(255,92,0,0.22)" />
                   </div>
                 </div>
               </section>
@@ -763,42 +755,42 @@ function MainDashboard({
 
         <MainAnimatedSection delay={0.4}>
           <section>
-            <h3 className="mb-2 ml-4 text-[13px] font-semibold uppercase tracking-wider text-[#8E8E93]">설정 및 기록</h3>
+            <h3 className="mb-2 ml-4 text-[13px] font-semibold uppercase tracking-wider text-[color:var(--my-text-muted)]">설정 및 기록</h3>
             <div className={`${CARD_BG} overflow-hidden rounded-3xl`}>
               <button
                 type="button"
                 onClick={onOpenSupport}
-                className="flex w-full cursor-pointer items-center justify-between border-b border-[#2C2C2E] p-4 px-5 text-left transition-colors hover:bg-white/5"
+                className="flex w-full cursor-pointer items-center justify-between border-b border-[var(--my-border-soft)] p-4 px-5 text-left transition-colors hover:bg-[var(--my-surface-soft)]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">💛</div>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--my-surface)] text-sm">💛</div>
                   <span className="text-[15px] font-medium">후원하기</span>
                 </div>
-                <span className="text-lg text-[#8E8E93]">›</span>
+                <span className="text-lg text-[color:var(--my-text-muted)]">›</span>
               </button>
 
               <button
                 type="button"
                 onClick={onOpenHistory}
-                className="flex w-full cursor-pointer items-center justify-between border-b border-[#2C2C2E] p-4 px-5 text-left transition-colors hover:bg-white/5"
+                className="flex w-full cursor-pointer items-center justify-between border-b border-[var(--my-border-soft)] p-4 px-5 text-left transition-colors hover:bg-[var(--my-surface-soft)]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">📜</div>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--my-surface)] text-sm">📜</div>
                   <span className="text-[15px] font-medium">투표 히스토리</span>
                 </div>
-                <span className="text-lg text-[#8E8E93]">›</span>
+                <span className="text-lg text-[color:var(--my-text-muted)]">›</span>
               </button>
 
-              <div className="flex items-center justify-between border-b border-[#2C2C2E] p-4 px-5">
+              <div className="flex items-center justify-between border-b border-[var(--my-border-soft)] p-4 px-5">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2C2C2E] text-sm">👁️</div>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--my-surface)] text-sm">👁️</div>
                   <span className="text-[15px] font-medium">리더보드 이름 공개</span>
                 </div>
                 <button
                   type="button"
                   onClick={onToggleLeaderboardName}
                   aria-pressed={privacyShowLeaderboardName}
-                  className={`relative h-7 w-12 rounded-full transition-colors ${privacyShowLeaderboardName ? 'bg-[#FF5C00]' : 'bg-[#2C2C2E]'}`}
+                  className={`relative h-7 w-12 rounded-full transition-colors ${privacyShowLeaderboardName ? 'bg-[#FF5C00]' : 'bg-[var(--my-surface)]'}`}
                 >
                   <motion.div
                     className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm"
@@ -811,7 +803,7 @@ function MainDashboard({
               <button
                 type="button"
                 onClick={() => void onSignOut()}
-                className="flex w-full cursor-pointer items-center justify-between p-4 px-5 text-left text-[#FF3B30] transition-colors hover:bg-white/5"
+                className="flex w-full cursor-pointer items-center justify-between p-4 px-5 text-left text-[#FF3B30] transition-colors hover:bg-[var(--my-surface-soft)]"
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF3B30]/10 text-sm">👋</div>
@@ -848,12 +840,12 @@ function HistoryView({ dashboard, history, onBack, onOpenTopicResultMap, reduced
           type="button"
           onClick={onBack}
           aria-label="MY로 돌아가기"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-[color:var(--my-text-main)] transition hover:bg-[var(--my-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
         >
           <ChevronLeft size={24} />
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">History</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--my-text-muted)]">History</p>
         </div>
         <div className="h-11 w-11" aria-hidden />
       </motion.header>
@@ -884,19 +876,19 @@ function HistoryView({ dashboard, history, onBack, onOpenTopicResultMap, reduced
                 type="button"
                 onClick={() => onOpenTopicResultMap(vote.topicId)}
                 aria-label={`${vote.topicTitle} 결과 지도 보기`}
-                className="flex w-full items-center gap-3 overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-4 text-left shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition hover:bg-white/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+                className="flex w-full items-center gap-3 overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] px-4 py-4 text-left shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition hover:bg-[var(--my-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
               >
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/7 text-xl text-white/68">∿</div>
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--my-surface-soft)] text-xl text-[color:var(--my-text-muted)]">∿</div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[19px] font-bold text-[color:var(--my-text-main)]">{vote.topicTitle}</p>
                   <p className="mt-1 text-[13px] text-[color:var(--my-text-muted)]">
                     {regionLabel} • {formatKoreanDateTime(vote.votedAt)}
                   </p>
-                  <span className="mt-2 inline-flex max-w-full rounded-full border border-[color:var(--my-border)] bg-white/8 px-3 py-1 text-[12px] font-semibold text-white/90 sm:hidden">
+                  <span className="mt-2 inline-flex max-w-full rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-3 py-1 text-[12px] font-semibold text-[color:var(--my-text-main)] sm:hidden">
                     <span className="truncate">{vote.optionLabel}</span>
                   </span>
                 </div>
-                <span className="hidden max-w-[42%] rounded-full border border-[color:var(--my-border)] bg-white/8 px-4 py-2 text-[14px] font-semibold text-white/90 sm:inline-flex">
+                <span className="hidden max-w-[42%] rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-4 py-2 text-[14px] font-semibold text-[color:var(--my-text-main)] sm:inline-flex">
                   <span className="truncate">{vote.optionLabel}</span>
                 </span>
               </motion.button>
@@ -1015,7 +1007,7 @@ function EditProfileView({
     return accumulator;
   }, []);
   return (
-    <div className="mx-auto w-full max-w-[min(100%,1400px)] pb-16 font-sans text-white selection:bg-[color:var(--my-accent-soft)] selection:text-[color:var(--my-accent)] lg:pb-12">
+    <div className="mx-auto w-full max-w-[min(100%,1400px)] pb-16 font-sans text-[color:var(--my-text-main)] selection:bg-[color:var(--my-accent-soft)] selection:text-[color:var(--my-accent)] lg:pb-12">
       <motion.header
         {...getMotionProps(reducedMotion, 0)}
         className="mb-4 flex items-center justify-between gap-3"
@@ -1024,12 +1016,12 @@ function EditProfileView({
           type="button"
           onClick={onBack}
           aria-label="MY로 돌아가기"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface)] text-[color:var(--my-text-main)] transition hover:bg-[var(--my-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)]"
         >
           <ChevronLeft size={24} />
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">Profile Edit</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--my-text-muted)]">Profile Edit</p>
         </div>
         <div className="h-11 w-11" aria-hidden />
       </motion.header>
@@ -1045,9 +1037,9 @@ function EditProfileView({
 
           <section>
             <h2 className={`mb-2 ml-4 text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>Account</h2>
-            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] shadow-2xl shadow-black/20`}>
               <div className={`flex items-center justify-between gap-3 border-b ${BORDER_COLOR} p-5`}>
-                <label htmlFor="my-nickname-input" className="w-24 shrink-0 text-[16px] font-medium text-white/90">
+                <label htmlFor="my-nickname-input" className="w-24 shrink-0 text-[16px] font-medium text-[color:var(--my-text-main)]">
                   닉네임
                 </label>
                 <input
@@ -1056,14 +1048,14 @@ function EditProfileView({
                   onChange={(event) => onNicknameChange(event.target.value)}
                   maxLength={20}
                   autoComplete="nickname"
-                  className="w-full bg-transparent text-right text-[16px] font-semibold text-white outline-none placeholder:text-[color:var(--my-text-subtle)] transition focus:text-[color:var(--my-accent)]"
+                  className="w-full bg-transparent text-right text-[16px] font-semibold text-[color:var(--my-text-main)] outline-none placeholder:text-[color:var(--my-text-subtle)] transition focus:text-[color:var(--my-accent)]"
                   placeholder="닉네임 입력"
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-3 bg-white/[0.01] p-5">
+              <div className="flex items-center justify-between gap-3 bg-[var(--my-surface-soft)]/30 p-5">
                 <div className="min-w-0">
-                  <p className="text-[16px] font-medium text-white/90">사용자명</p>
+                  <p className="text-[16px] font-medium text-[color:var(--my-text-main)]">사용자명</p>
                   <p className={`mt-1 text-[13px] ${TEXT_MUTED}`}>변경할 수 없는 고유 ID입니다.</p>
                 </div>
                 <span className="shrink-0 font-mono text-[16px] text-[color:var(--my-text-subtle)]">{usernameInput}</span>
@@ -1075,19 +1067,19 @@ function EditProfileView({
         <div className="space-y-8 lg:col-span-7">
           <section>
             <h2 className={`mb-2 ml-4 text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>Main Region</h2>
-            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
-              <div className={`border-b ${BORDER_COLOR} bg-white/[0.01] p-5`}>
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] shadow-2xl shadow-black/20`}>
+              <div className={`border-b ${BORDER_COLOR} bg-[var(--my-surface-soft)]/30 p-5`}>
                 <p className={`text-[14px] leading-relaxed ${TEXT_MUTED}`}>
                   {isKrUser ? (
                     <>
-                      국내 사용자는 GPS 기능이 출시 예정이라 등록된 <span className="font-semibold text-white/80">학교</span>를
+                      국내 사용자는 GPS 기능이 출시 예정이라 등록된 <span className="font-semibold text-[color:var(--my-text-main)]">학교</span>를
                       메인으로 설정할 수 있습니다.
                     </>
                   ) : (
                     <>
                       현재 활동 기준으로 사용할 지역을 선택해주세요.
                       <br />
-                      <span className="font-semibold text-white/80">내 위치(GPS)</span> 또는 등록된 <span className="font-semibold text-white/80">학교</span> 중 하나를 메인으로 설정할 수 있습니다.
+                      <span className="font-semibold text-[color:var(--my-text-main)]">내 위치(GPS)</span> 또는 등록된 <span className="font-semibold text-[color:var(--my-text-main)]">학교</span> 중 하나를 메인으로 설정할 수 있습니다.
                     </>
                   )}
                 </p>
@@ -1098,7 +1090,7 @@ function EditProfileView({
                 onClick={() => onSelectMainRegionSource('gps')}
                 disabled={isKrUser}
                 className={`group flex w-full items-center justify-between border-b ${BORDER_COLOR} p-5 text-left transition ${
-                  isKrUser ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/5'
+                  isKrUser ? 'cursor-not-allowed opacity-60' : 'hover:bg-[var(--my-surface-soft)]'
                 }`}
               >
                 <div className="flex items-center gap-4">
@@ -1106,16 +1098,16 @@ function EditProfileView({
                     className={`flex h-12 w-12 items-center justify-center rounded-full text-[20px] transition-all duration-300 ${
                       isGpsSelected && !isKrUser
                         ? 'bg-[color:var(--my-accent-soft)] text-[color:var(--my-accent)] shadow-[0_0_15px_rgba(255,92,0,0.25)]'
-                        : 'bg-white/10 opacity-70 grayscale group-hover:opacity-100'
+                        : 'bg-[var(--my-surface-soft)] opacity-70 grayscale group-hover:opacity-100'
                     }`}
                   >
                     📍
                   </div>
                   <div>
-                    <p className={`flex items-center gap-2 text-[17px] font-semibold ${isGpsSelected ? 'text-white' : 'text-white/76'}`}>
+                    <p className={`flex items-center gap-2 text-[17px] font-semibold ${isGpsSelected ? 'text-[color:var(--my-text-main)]' : 'text-[color:var(--my-text-muted)]'}`}>
                       현재 위치 (GPS)
                       {isKrUser ? (
-                        <span className="rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white/80">
+                        <span className="rounded-full border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--my-text-main)]">
                           출시예정
                         </span>
                       ) : null}
@@ -1142,14 +1134,14 @@ function EditProfileView({
               </button>
 
               {schoolSlotsForRegion.length === 0 ? (
-                <div className="p-5 text-[13px] text-white/60">등록된 학교가 없습니다. 아래 학교 관리에서 먼저 등록해 주세요.</div>
+                <div className="p-5 text-[13px] text-[color:var(--my-text-muted)]">등록된 학교가 없습니다. 아래 학교 관리에서 먼저 등록해 주세요.</div>
               ) : (
                 schoolSlotsForRegion.map((item, index) => (
                   <button
                     key={`region-slot-${item.slot}`}
                     type="button"
                     onClick={() => onSelectMainRegionSource(item.slot)}
-                    className={`group flex w-full items-center justify-between p-5 text-left transition hover:bg-white/5 ${
+                    className={`group flex w-full items-center justify-between p-5 text-left transition hover:bg-[var(--my-surface-soft)] ${
                       index !== schoolSlotsForRegion.length - 1 ? `border-b ${BORDER_COLOR}` : ''
                     }`}
                   >
@@ -1158,13 +1150,13 @@ function EditProfileView({
                         className={`flex h-12 w-12 items-center justify-center rounded-full text-[20px] transition-all duration-300 ${
                           mainRegionSource === item.slot
                             ? 'bg-[color:var(--my-accent-soft)] text-[color:var(--my-accent)] shadow-[0_0_15px_rgba(255,92,0,0.25)]'
-                            : 'bg-white/10 opacity-70 grayscale group-hover:opacity-100'
+                            : 'bg-[var(--my-surface-soft)] opacity-70 grayscale group-hover:opacity-100'
                         }`}
                       >
                         🏫
                       </div>
                       <div>
-                        <p className={`text-[17px] font-semibold ${mainRegionSource === item.slot ? 'text-white' : 'text-white/76'}`}>
+                        <p className={`text-[17px] font-semibold ${mainRegionSource === item.slot ? 'text-[color:var(--my-text-main)]' : 'text-[color:var(--my-text-muted)]'}`}>
                           {item.label}
                         </p>
                         <p className={`mt-0.5 text-[14px] ${TEXT_MUTED}`}>{item.schoolLabel}</p>
@@ -1196,15 +1188,15 @@ function EditProfileView({
             <div className="mb-2 ml-4 flex items-end justify-between pr-2">
               <h2 className={`text-[12px] font-semibold uppercase tracking-[0.16em] ${TEXT_MUTED}`}>School Management</h2>
               <span className={`text-[13px] ${TEXT_MUTED}`}>
-                수정 <b className="text-white">{dashboard.profile.schoolEdit.used}</b>/{dashboard.profile.schoolEdit.limit}회 · 남은{' '}
-                <b className="text-white">{dashboard.profile.schoolEdit.remaining}</b>회
+                수정 <b className="text-[color:var(--my-text-main)]">{dashboard.profile.schoolEdit.used}</b>/{dashboard.profile.schoolEdit.limit}회 · 남은{' '}
+                <b className="text-[color:var(--my-text-main)]">{dashboard.profile.schoolEdit.remaining}</b>회
               </span>
             </div>
 
-            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-white/[0.03] shadow-2xl shadow-black/50`}>
+            <div className={`${GROUP_BG} overflow-hidden rounded-[24px] border border-[color:var(--my-border-soft)] shadow-2xl shadow-black/20`}>
               <div className={`border-b ${BORDER_COLOR} p-5`}>
-                <label className="mb-3 block text-[15px] font-medium text-white/90">학교 추가 및 변경</label>
-                <div className="flex rounded-[14px] border border-[color:var(--my-border-soft)] bg-white/5 p-1">
+                <label className="mb-3 block text-[15px] font-medium text-[color:var(--my-text-main)]">학교 추가 및 변경</label>
+                <div className="flex rounded-[14px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] p-1">
                   {SCHOOL_SLOT_META.map((item) => {
                     const isActive = selectedSchoolSlot === item.slot;
                     const hasSchool = Boolean(
@@ -1218,13 +1210,13 @@ function EditProfileView({
                         type="button"
                         onClick={() => onSelectSchoolSlot(item.slot)}
                         className={`relative flex-1 rounded-xl py-2.5 text-[14px] font-bold transition-all duration-200 ${
-                          isActive ? 'bg-white/14 text-white shadow-md' : 'text-[color:var(--my-text-subtle)] hover:bg-white/8 hover:text-white'
+                          isActive ? 'bg-[var(--my-surface)] text-[color:var(--my-text-main)] shadow-md' : 'text-[color:var(--my-text-subtle)] hover:bg-[var(--my-surface-soft)] hover:text-[color:var(--my-text-main)]'
                         }`}
                       >
                         {item.label}
                         <span
                           aria-hidden
-                          className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${hasSchool ? 'bg-[color:var(--my-accent)]' : 'bg-white/25'}`}
+                          className={`ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${hasSchool ? 'bg-[color:var(--my-accent)]' : 'bg-[color:var(--my-border)]'}`}
                         />
                       </button>
                     );
@@ -1232,8 +1224,8 @@ function EditProfileView({
                 </div>
               </div>
 
-              <div className="bg-white/[0.01] p-5">
-                <div className="rounded-[14px] border border-[color:var(--my-border-soft)] bg-white/5 px-4 shadow-inner transition-all focus-within:border-[color:var(--my-accent)]/60 focus-within:ring-1 focus-within:ring-[color:var(--my-focus)]">
+              <div className="bg-[var(--my-surface-soft)]/30 p-5">
+                <div className="rounded-[14px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] px-4 shadow-inner transition-all focus-within:border-[color:var(--my-accent)]/60 focus-within:ring-1 focus-within:ring-[color:var(--my-focus)]">
                   <label htmlFor="my-school-search-input" className="sr-only">
                     학교 검색
                   </label>
@@ -1249,11 +1241,11 @@ function EditProfileView({
                       onChange={(event) => onSchoolQueryChange(event.target.value)}
                       placeholder={`${getSchoolSlotLabel(selectedSchoolSlot)} 이름을 검색하여 등록하세요`}
                       autoComplete="off"
-                      className="w-full bg-transparent px-3 py-4 text-[16px] text-white outline-none placeholder:text-[color:var(--my-text-subtle)]"
+                      className="w-full bg-transparent px-3 py-4 text-[16px] text-[color:var(--my-text-main)] outline-none placeholder:text-[color:var(--my-text-subtle)]"
                     />
                     {schoolQuery ? (
-                      <button type="button" onClick={onClearSchoolCandidate} className="p-2 -mr-2 text-[color:var(--my-text-subtle)] transition-colors hover:text-white">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-[11px] font-bold">✕</span>
+                      <button type="button" onClick={onClearSchoolCandidate} className="p-2 -mr-2 text-[color:var(--my-text-subtle)] transition-colors hover:text-[color:var(--my-text-main)]">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--my-surface)] text-[11px] font-bold">✕</span>
                       </button>
                     ) : null}
                   </div>
@@ -1265,9 +1257,9 @@ function EditProfileView({
                     className="mt-2 max-h-52 overflow-y-auto rounded-[14px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface)] p-1.5"
                   >
                     {isSchoolSearching ? (
-                      <p className="px-2 py-2 text-xs text-white/70">학교 검색 중...</p>
+                      <p className="px-2 py-2 text-xs text-[color:var(--my-text-muted)]">학교 검색 중...</p>
                     ) : schoolResults.length === 0 ? (
-                      <p className="px-2 py-2 text-xs text-white/60">검색 결과가 없습니다.</p>
+                      <p className="px-2 py-2 text-xs text-[color:var(--my-text-subtle)]">검색 결과가 없습니다.</p>
                     ) : (
                       schoolResults.map((school, index) => (
                         <button
@@ -1276,12 +1268,12 @@ function EditProfileView({
                           type="button"
                           onMouseEnter={() => onSchoolResultHover(index)}
                           onClick={() => onSelectSchoolCandidate(school)}
-                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/88 transition last:mb-0 ${
-                            index === highlightedSchoolIndex ? 'bg-white/12' : 'hover:bg-white/10'
+                          className={`mb-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-[color:var(--my-text-main)] transition last:mb-0 ${
+                            index === highlightedSchoolIndex ? 'bg-[var(--my-surface-soft-strong)]' : 'hover:bg-[var(--my-surface-soft)]'
                           }`}
                         >
                           <p className="font-semibold">{school.schoolName}</p>
-                          <p className="mt-0.5 text-[11px] text-white/60">
+                          <p className="mt-0.5 text-[11px] text-[color:var(--my-text-subtle)]">
                             {school.sigunguName ?? school.sidoName ?? '-'} · {getSchoolLevelLabel(school.schoolLevel)}
                             {school.campusType ? ` · ${school.campusType}` : ''}
                           </p>
@@ -1291,9 +1283,9 @@ function EditProfileView({
                   </div>
                 ) : null}
 
-                <div className="mt-4 rounded-[12px] border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                <div className="mt-4 rounded-[12px] border border-[color:var(--my-border-soft)] bg-[var(--my-surface-soft)] px-3 py-2.5">
                   <p className={`text-[11px] ${TEXT_MUTED}`}>{getSchoolSlotLabel(selectedSchoolSlot)} 현재/선택 학교</p>
-                  <p className="mt-1 truncate text-[14px] font-semibold text-white/88">{selectedSlotSchoolLabel}</p>
+                  <p className="mt-1 truncate text-[14px] font-semibold text-[color:var(--my-text-main)]">{selectedSlotSchoolLabel}</p>
                 </div>
 
                 {selectedSchoolCandidate ? (
@@ -1394,7 +1386,7 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
         className="pointer-events-auto"
         style={{ touchAction: 'pan-y' }}
       >
-        <nav className="rounded-t-[24px] border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-2 pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl" aria-label="하단 탭 메뉴">
+        <nav className="rounded-t-[24px] border-t border-[color:var(--my-border)] bg-[var(--my-surface)] pb-2 pt-2 shadow-[var(--app-dock-shadow)] backdrop-blur-2xl" aria-label="하단 탭 메뉴">
           <div className="mx-auto grid max-w-[430px] grid-cols-4 gap-2 px-3">
             {[
               { id: 'home' as const, label: '홈' },
@@ -1408,7 +1400,9 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
                 onClick={() => onTabClick(tab.id)}
                 aria-current={tab.id === 'my' ? 'page' : undefined}
                 className={`inline-flex h-11 items-center justify-center rounded-2xl text-[14px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--my-focus)] ${
-                  tab.id === 'my' ? 'bg-white/14 text-[#ff9f0a]' : 'text-white/62 hover:text-white'
+                  tab.id === 'my'
+                    ? 'bg-[var(--my-surface-soft-strong)] text-[#ff9f0a]'
+                    : 'text-[color:var(--my-text-muted)] hover:text-[color:var(--my-text-main)]'
                 }`}
               >
                 {tab.label}
@@ -1417,9 +1411,9 @@ function BottomDock({ bottomDockRef, onTabClick, onWheel, onTouchStart, onTouchM
           </div>
         </nav>
 
-        <section className="border-t border-white/14 bg-[rgba(12,18,28,0.82)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(0,0,0,0.32)] backdrop-blur-2xl" aria-label="스폰서 배너">
+        <section className="border-t border-[color:var(--my-border)] bg-[var(--my-surface)] pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2 shadow-[var(--app-dock-shadow)] backdrop-blur-2xl" aria-label="스폰서 배너">
           <div className="mx-auto max-w-[430px] px-3">
-            <section className="rounded-xl border border-white/14 bg-[rgba(255,255,255,0.06)] px-3 py-2">
+            <section className="rounded-xl border border-[color:var(--my-border)] bg-[var(--my-surface-soft)] px-3 py-2">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-6 shrink-0 items-center rounded-md border border-[#ff9f0a66] bg-[#ff9f0a22] px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#ffcc8a]">
                   광고
@@ -1445,6 +1439,7 @@ export default function MyPage() {
   const pathname = usePathname();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const { isLoading: isAuthLoading, isAuthenticated, signOut } = useAuth();
+  const { resolvedTheme } = useTheme();
   const reducedMotion = useReducedMotion();
 
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
@@ -1458,6 +1453,7 @@ export default function MyPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const pageThemeVars = useMemo(() => getMyPageThemeVars(resolvedTheme === 'dark'), [resolvedTheme]);
 
   const [nicknameInput, setNicknameInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
@@ -2211,7 +2207,7 @@ export default function MyPage() {
 
   if (isAuthLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--my-bg)] text-white" style={PAGE_THEME_VARS}>
+      <main className="flex min-h-screen items-center justify-center bg-[var(--my-bg)] text-[color:var(--my-text-main)]" style={pageThemeVars}>
         <p className="text-sm text-[color:var(--my-text-muted)]">MY 정보를 준비 중...</p>
       </main>
     );
@@ -2219,15 +2215,15 @@ export default function MyPage() {
 
   if (!isAuthenticated) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--my-bg)] text-white" style={PAGE_THEME_VARS}>
+      <main className="flex min-h-screen items-center justify-center bg-[var(--my-bg)] text-[color:var(--my-text-main)]" style={pageThemeVars}>
         <p className="text-sm text-[color:var(--my-text-muted)]">로그인 페이지로 이동 중...</p>
       </main>
     );
   }
 
   return (
-    <div className="bg-[var(--my-bg)] text-white" style={PAGE_THEME_VARS}>
-      <main className="relative h-screen w-full overflow-hidden bg-[var(--my-bg)] text-white">
+    <div className="bg-[var(--my-bg)] text-[color:var(--my-text-main)]" style={pageThemeVars}>
+      <main className="relative h-screen w-full overflow-hidden bg-[var(--my-bg)] text-[color:var(--my-text-main)]">
         <div
           className="mx-auto flex h-full w-full max-w-[min(100vw-2.5rem,1760px)] flex-col overflow-y-auto px-4 pb-[var(--my-mobile-dock-padding)] pt-[calc(0.5rem+env(safe-area-inset-top))] md:pb-8 md:pt-0 lg:px-10 lg:pt-0"
           style={{ '--my-mobile-dock-padding': mobileBottomDockPadding } as CSSProperties}
@@ -2244,9 +2240,9 @@ export default function MyPage() {
 
           {isLoading ? (
             <section className="mt-3 space-y-3 md:mx-auto md:w-full md:max-w-[min(100%,1400px)]" aria-label="로딩 상태">
-              <div className="h-28 animate-pulse rounded-[22px] bg-white/10" />
-              <div className="h-36 animate-pulse rounded-[22px] bg-white/10" />
-              <div className="h-40 animate-pulse rounded-[22px] bg-white/10" />
+              <div className="h-28 animate-pulse rounded-[22px] bg-[var(--my-surface-soft)]" />
+              <div className="h-36 animate-pulse rounded-[22px] bg-[var(--my-surface-soft)]" />
+              <div className="h-40 animate-pulse rounded-[22px] bg-[var(--my-surface-soft)]" />
             </section>
           ) : dashboard && history ? (
             <>

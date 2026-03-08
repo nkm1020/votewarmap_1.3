@@ -53,18 +53,12 @@ export async function GET(request: Request) {
     const regionColumn = level === 'sigungu' ? 'sigungu_code' : 'sido_code';
     const supabase = getSupabaseServiceRoleClient();
 
-    let scopedTopicRowsQuery = supabase
+    const topicRowsQuery = supabase
       .from('vote_topics')
       .select('id, title, status')
       .eq('status', 'LIVE');
 
-    if (countryCode === 'KR') {
-      scopedTopicRowsQuery = scopedTopicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
-    } else {
-      scopedTopicRowsQuery = scopedTopicRowsQuery.eq('country_code', countryCode);
-    }
-
-    const { data: scopedTopicRows, error: scopedTopicError } = await scopedTopicRowsQuery;
+    const { data: scopedTopicRows, error: scopedTopicError } = await topicRowsQuery;
 
     if (scopedTopicError) {
       return internalServerError('app/api/votes/top-topics-by-region/route.ts', scopedTopicError.message);
@@ -90,6 +84,7 @@ export async function GET(request: Request) {
     const { data: voteRows, error: voteError } = await supabase
       .from('votes')
       .select('topic_id, created_at')
+      .eq('country_code', countryCode)
       .eq(regionColumn, regionCode)
       .in('topic_id', scopedTopicIds);
 
@@ -117,6 +112,7 @@ export async function GET(request: Request) {
       const { data: guestVoteRows, error: guestVoteError } = await supabase
         .from('guest_votes_temp')
         .select('topic_id, voted_at')
+        .eq('country_code', countryCode)
         .eq(regionColumn, regionCode)
         .in('session_id', activeSessionIds)
         .in('topic_id', scopedTopicIds);

@@ -5,6 +5,27 @@
   color-scheme: light;
   --background: #f3f5f9;
   --foreground: #152033;
+  --app-page-bg: #edf2f8;
+  --app-page-bg-soft: #f6f8fc;
+  --app-surface: rgba(255, 255, 255, 0.84);
+  --app-surface-strong: rgba(255, 255, 255, 0.92);
+  --app-surface-elevated: rgba(255, 255, 255, 0.96);
+  --app-surface-soft: rgba(15, 23, 42, 0.04);
+  --app-surface-soft-strong: rgba(15, 23, 42, 0.08);
+  --app-border: rgba(15, 23, 42, 0.12);
+  --app-border-strong: rgba(15, 23, 42, 0.16);
+  --app-text-primary: #0f172a;
+  --app-text-secondary: rgba(15, 23, 42, 0.74);
+  --app-text-muted: rgba(15, 23, 42, 0.6);
+  --app-text-subtle: rgba(15, 23, 42, 0.48);
+  --app-overlay: rgba(15, 23, 42, 0.26);
+  --app-dock-bg: rgba(255, 255, 255, 0.92);
+  --app-dock-inner: rgba(15, 23, 42, 0.04);
+  --app-document-bg: rgba(255, 255, 255, 0.94);
+  --app-tooltip-bg: rgba(255, 255, 255, 0.96);
+  --app-card-shadow: 0 16px 34px rgba(148, 163, 184, 0.2);
+  --app-modal-shadow: 0 24px 48px rgba(148, 163, 184, 0.24);
+  --app-dock-shadow: 0 -8px 24px rgba(148, 163, 184, 0.18);
   --header-bg: rgba(255, 255, 255, 0.84);
   --header-border: rgba(21, 32, 51, 0.12);
   --header-text: rgba(21, 32, 51, 0.92);
@@ -31,10 +52,42 @@
   --font-mono: var(--font-geist-mono);
 }
 
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 :root[data-theme='dark'] {
   color-scheme: dark;
   --background: #0a0a0a;
   --foreground: #ededed;
+  --app-page-bg: #070d16;
+  --app-page-bg-soft: #0a1220;
+  --app-surface: rgba(12, 18, 28, 0.78);
+  --app-surface-strong: rgba(12, 18, 28, 0.86);
+  --app-surface-elevated: rgba(22, 22, 26, 0.95);
+  --app-surface-soft: rgba(255, 255, 255, 0.05);
+  --app-surface-soft-strong: rgba(255, 255, 255, 0.1);
+  --app-border: rgba(255, 255, 255, 0.12);
+  --app-border-strong: rgba(255, 255, 255, 0.16);
+  --app-text-primary: rgba(255, 255, 255, 0.96);
+  --app-text-secondary: rgba(255, 255, 255, 0.72);
+  --app-text-muted: rgba(255, 255, 255, 0.6);
+  --app-text-subtle: rgba(255, 255, 255, 0.5);
+  --app-overlay: rgba(4, 8, 14, 0.72);
+  --app-dock-bg: rgba(12, 18, 28, 0.82);
+  --app-dock-inner: rgba(255, 255, 255, 0.06);
+  --app-document-bg: rgba(12, 18, 28, 0.86);
+  --app-tooltip-bg: rgba(16, 20, 30, 0.94);
+  --app-card-shadow: 0 16px 34px rgba(0, 0, 0, 0.34);
+  --app-modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  --app-dock-shadow: 0 -8px 24px rgba(0, 0, 0, 0.32);
   --header-bg: rgba(12, 18, 28, 0.72);
   --header-border: rgba(255, 255, 255, 0.12);
   --header-text: rgba(255, 255, 255, 0.94);
@@ -59,6 +112,27 @@
     color-scheme: dark;
     --background: #0a0a0a;
     --foreground: #ededed;
+    --app-page-bg: #070d16;
+    --app-page-bg-soft: #0a1220;
+    --app-surface: rgba(12, 18, 28, 0.78);
+    --app-surface-strong: rgba(12, 18, 28, 0.86);
+    --app-surface-elevated: rgba(22, 22, 26, 0.95);
+    --app-surface-soft: rgba(255, 255, 255, 0.05);
+    --app-surface-soft-strong: rgba(255, 255, 255, 0.1);
+    --app-border: rgba(255, 255, 255, 0.12);
+    --app-border-strong: rgba(255, 255, 255, 0.16);
+    --app-text-primary: rgba(255, 255, 255, 0.96);
+    --app-text-secondary: rgba(255, 255, 255, 0.72);
+    --app-text-muted: rgba(255, 255, 255, 0.6);
+    --app-text-subtle: rgba(255, 255, 255, 0.5);
+    --app-overlay: rgba(4, 8, 14, 0.72);
+    --app-dock-bg: rgba(12, 18, 28, 0.82);
+    --app-dock-inner: rgba(255, 255, 255, 0.06);
+    --app-document-bg: rgba(12, 18, 28, 0.86);
+    --app-tooltip-bg: rgba(16, 20, 30, 0.94);
+    --app-card-shadow: 0 16px 34px rgba(0, 0, 0, 0.34);
+    --app-modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+    --app-dock-shadow: 0 -8px 24px rgba(0, 0, 0, 0.32);
     --header-bg: rgba(12, 18, 28, 0.72);
     --header-border: rgba(255, 255, 255, 0.12);
     --header-text: rgba(255, 255, 255, 0.94);
@@ -84,4 +158,55 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), sans-serif;
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.vwm-theme-shell {
+  background: var(--app-page-bg);
+  color: var(--app-text-primary);
+}
+
+.vwm-theme-surface {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+  box-shadow: var(--app-card-shadow);
+}
+
+.vwm-theme-surface-strong {
+  background: var(--app-surface-strong);
+  border-color: var(--app-border);
+  box-shadow: var(--app-card-shadow);
+}
+
+.vwm-theme-surface-elevated {
+  background: var(--app-surface-elevated);
+  border-color: var(--app-border-strong);
+  box-shadow: var(--app-modal-shadow);
+}
+
+.vwm-theme-document {
+  background: var(--app-document-bg);
+  border-color: var(--app-border);
+  box-shadow: var(--app-card-shadow);
+  color: var(--app-text-primary);
+}
+
+.vwm-theme-input {
+  background: var(--app-surface-soft);
+  border-color: var(--app-border);
+  color: var(--app-text-primary);
+}
+
+.vwm-theme-dock {
+  background: var(--app-dock-bg);
+  border-color: var(--app-border);
+  box-shadow: var(--app-dock-shadow);
+}
+
+.vwm-theme-dock-inner {
+  background: var(--app-dock-inner);
+  border-color: var(--app-border);
+}
+
+.vwm-theme-backdrop {
+  background: var(--app-overlay);
 }

@@ -4,6 +4,8 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getPageThemeTokens } from '@/lib/theme/pageTheme';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 type ConfirmResponse = {
@@ -39,6 +41,8 @@ function formatDateTime(value: string | null): string {
 
 function SupportSuccessPageContent() {
   const { isLoading, isAuthenticated } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
   const router = useRouter();
   const searchParams = useSearchParams();
   const hasRequestedRef = useRef(false);
@@ -128,30 +132,30 @@ function SupportSuccessPageContent() {
   const effectiveError = invalidPayloadError ?? error;
 
   return (
-    <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
-      <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.86)] p-6 shadow-2xl">
+    <main className={`${theme.shellClass} min-h-screen px-4 py-10 sm:px-6 lg:px-10`}>
+      <section className={`${theme.elevatedClass} mx-auto w-full max-w-xl rounded-2xl border p-6 shadow-[var(--app-modal-shadow)]`}>
         {effectivePhase === 'confirming' ? (
           <>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#ff9f0a]">Payment</p>
-            <h1 className="mt-2 text-2xl font-bold">결제 승인 처리 중...</h1>
-            <p className="mt-3 text-sm text-white/70">잠시만 기다려 주세요. 후원 내역을 확인하고 있습니다.</p>
+            <h1 className={`mt-2 text-2xl font-bold ${theme.textPrimaryClass}`}>결제 승인 처리 중...</h1>
+            <p className={`mt-3 text-sm ${theme.textSecondaryClass}`}>잠시만 기다려 주세요. 후원 내역을 확인하고 있습니다.</p>
           </>
         ) : null}
 
         {effectivePhase === 'success' ? (
           <>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8af5a0]">Completed</p>
-            <h1 className="mt-2 text-2xl font-bold">후원이 완료되었습니다</h1>
-            <p className="mt-3 text-sm text-white/70">덕분에 VoteWarMap 운영에 큰 힘이 됩니다.</p>
+            <h1 className={`mt-2 text-2xl font-bold ${theme.textPrimaryClass}`}>후원이 완료되었습니다</h1>
+            <p className={`mt-3 text-sm ${theme.textSecondaryClass}`}>덕분에 VoteWarMap 운영에 큰 힘이 됩니다.</p>
 
-            <div className="mt-5 space-y-2 rounded-xl border border-white/12 bg-white/5 p-4 text-sm">
-              <p>
+            <div className={`${theme.surfaceSoftClass} mt-5 space-y-2 rounded-xl border ${theme.borderSoftClass} p-4 text-sm`}>
+              <p className={theme.textPrimaryClass}>
                 주문 상태: <span className="font-semibold text-[#a7f3b5]">{orderStatus}</span>
               </p>
-              <p>
+              <p className={theme.textPrimaryClass}>
                 후원자 배지: {entitlement?.hasSupporterBadge ? '지급 완료' : '미지급'}
                 {entitlement?.grantedAt ? (
-                  <span className="ml-1 text-white/65">({formatDateTime(entitlement.grantedAt)})</span>
+                  <span className={`ml-1 ${theme.textMutedClass}`}>({formatDateTime(entitlement.grantedAt)})</span>
                 ) : null}
               </p>
             </div>
@@ -161,7 +165,7 @@ function SupportSuccessPageContent() {
         {effectivePhase === 'failed' ? (
           <>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#ff8f8f]">Failed</p>
-            <h1 className="mt-2 text-2xl font-bold">결제 승인에 실패했습니다</h1>
+            <h1 className={`mt-2 text-2xl font-bold ${theme.textPrimaryClass}`}>결제 승인에 실패했습니다</h1>
             <p className="mt-3 rounded-xl border border-[#ff7a7a]/45 bg-[#ff7a7a]/12 px-3 py-2 text-sm text-[#ffc3c3]">
               {effectiveError ?? '결제를 완료하지 못했습니다. 다시 시도해 주세요.'}
             </p>
@@ -177,7 +181,7 @@ function SupportSuccessPageContent() {
           </Link>
           <Link
             href="/my"
-            className="inline-flex h-10 items-center rounded-lg border border-white/20 bg-white/5 px-4 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+            className={`${theme.surfaceSoftClass} inline-flex h-10 items-center rounded-lg border ${theme.borderClass} px-4 text-sm font-semibold ${theme.textPrimaryClass} transition hover:bg-[color:var(--app-surface-soft-strong)]`}
           >
             MY로 이동
           </Link>
@@ -188,10 +192,13 @@ function SupportSuccessPageContent() {
 }
 
 function SupportSuccessPageFallback() {
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
+
   return (
-    <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
-      <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.86)] p-6 shadow-2xl">
-        <p className="text-sm text-white/75">결제 승인 정보를 확인하는 중입니다...</p>
+    <main className={`${theme.shellClass} min-h-screen px-4 py-10 sm:px-6 lg:px-10`}>
+      <section className={`${theme.elevatedClass} mx-auto w-full max-w-xl rounded-2xl border p-6 shadow-[var(--app-modal-shadow)]`}>
+        <p className={`text-sm ${theme.textSecondaryClass}`}>결제 승인 정보를 확인하는 중입니다...</p>
       </section>
     </main>
   );

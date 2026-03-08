@@ -3,6 +3,8 @@
 import { ChevronLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTheme } from '@/contexts/ThemeContext';
+import { getPageThemeTokens } from '@/lib/theme/pageTheme';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -148,7 +150,7 @@ async function loadTossPaymentsFactory(): Promise<TossPaymentsFactory> {
 function SupportBadge({ hasBadge, grantedAt }: { hasBadge: boolean; grantedAt: string | null }) {
   if (!hasBadge) {
     return (
-      <p className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white/80">
+      <p className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface-soft)] px-4 py-3 text-sm text-[color:var(--app-text-secondary)]">
         아직 후원자 배지가 없습니다. 첫 후원 완료 시 즉시 배지가 지급됩니다.
       </p>
     );
@@ -165,6 +167,8 @@ function SupportBadge({ hasBadge, grantedAt }: { hasBadge: boolean; grantedAt: s
 export default function MySupportPage() {
   const router = useRouter();
   const { isLoading, isAuthenticated, user } = useAuth();
+  const { resolvedTheme } = useTheme();
+  const theme = getPageThemeTokens(resolvedTheme === 'dark');
   const [productsState, setProductsState] = useState<PaymentsProductsResponse | null>(null);
   const [meState, setMeState] = useState<PaymentsMeResponse | null>(null);
   const [isFetching, setIsFetching] = useState(true);
@@ -311,7 +315,7 @@ export default function MySupportPage() {
   );
 
   return (
-    <main className="min-h-screen bg-[#070d16] px-4 py-10 text-white sm:px-6 lg:px-10">
+    <main className={`${theme.shellClass} min-h-screen px-4 py-10 sm:px-6 lg:px-10`}>
       <section className="mx-auto w-full max-w-[min(100%,1400px)] space-y-6">
         <header className="mb-4 flex items-center justify-between gap-3">
           <button
@@ -320,23 +324,23 @@ export default function MySupportPage() {
               router.push('/my');
             }}
             aria-label="MY로 돌아가기"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/14 bg-[rgba(12,18,28,0.78)] text-white/90 transition hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,159,10,0.52)]"
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-full border ${theme.borderClass} bg-[color:var(--app-surface)] ${theme.textPrimaryClass} transition hover:bg-[color:var(--app-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,159,10,0.52)]`}
           >
             <ChevronLeft size={24} />
           </button>
           <div className="min-w-0 flex-1 text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/56">Support</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${theme.textMutedClass}`}>Support</p>
           </div>
           <div className="h-11 w-11" aria-hidden />
         </header>
 
         <section className="mb-6">
-          <h1 className="text-[33px] font-bold leading-[1.2] tracking-tight text-white md:text-[40px]">
+          <h1 className={`text-[33px] font-bold leading-[1.2] tracking-tight ${theme.textPrimaryClass} md:text-[40px]`}>
             VoteWarMap
             <br />
             후원하기
           </h1>
-          <p className="mt-2 text-sm text-white/68">1회 후원 결제로 서비스 운영에 힘을 보태주세요.</p>
+          <p className={`mt-2 text-sm ${theme.textSecondaryClass}`}>1회 후원 결제로 서비스 운영에 힘을 보태주세요.</p>
         </section>
 
         {error ? (
@@ -345,12 +349,12 @@ export default function MySupportPage() {
 
         {meState ? <SupportBadge hasBadge={meState.hasSupporterBadge} grantedAt={meState.badgeGrantedAt} /> : null}
 
-        <section className="rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.86)] p-4 sm:p-6">
-          <h2 className="text-lg font-bold">후원 티어</h2>
-          <p className="mt-1 text-sm text-white/70">KRW 카드 결제와 USD PayPal 결제를 지원합니다.</p>
+        <section className={`${theme.surfaceStrongClass} rounded-2xl border p-4 sm:p-6`}>
+          <h2 className={`text-lg font-bold ${theme.textPrimaryClass}`}>후원 티어</h2>
+          <p className={`mt-1 text-sm ${theme.textSecondaryClass}`}>KRW 카드 결제와 USD PayPal 결제를 지원합니다.</p>
 
           {isFetching ? (
-            <p className="mt-5 text-sm text-white/65">후원 상품을 불러오는 중...</p>
+            <p className={`mt-5 text-sm ${theme.textMutedClass}`}>후원 상품을 불러오는 중...</p>
           ) : (
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {sortedProducts.map((product) => {
@@ -359,13 +363,13 @@ export default function MySupportPage() {
                 return (
                   <article
                     key={product.id}
-                    className="rounded-xl border border-white/12 bg-white/5 p-4 shadow-[0_10px_22px_rgba(0,0,0,0.18)]"
+                    className={`${theme.surfaceClass} rounded-xl border p-4 shadow-[var(--app-card-shadow)]`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-[16px] font-bold">{product.title}</h3>
+                      <h3 className={`text-[16px] font-bold ${theme.textPrimaryClass}`}>{product.title}</h3>
                     </div>
-                    <p className="mt-2 text-xl font-extrabold">{formatAmount(product.currency, product.amount)}</p>
-                    <p className="mt-1 text-xs text-white/70">
+                    <p className={`mt-2 text-xl font-extrabold ${theme.textPrimaryClass}`}>{formatAmount(product.currency, product.amount)}</p>
+                    <p className={`mt-1 text-xs ${theme.textSecondaryClass}`}>
                       {product.currency} · {product.paymentMethod === 'CARD' ? '카드' : 'PayPal'}
                     </p>
 
@@ -387,24 +391,24 @@ export default function MySupportPage() {
         </section>
 
         {meState ? (
-          <section className="rounded-2xl border border-white/12 bg-[rgba(12,18,28,0.78)] p-4 sm:p-6">
-            <h2 className="text-lg font-bold">최근 후원 내역</h2>
+          <section className={`${theme.surfaceClass} rounded-2xl border p-4 sm:p-6`}>
+            <h2 className={`text-lg font-bold ${theme.textPrimaryClass}`}>최근 후원 내역</h2>
             {meState.orders.length === 0 ? (
-              <p className="mt-2 text-sm text-white/70">아직 후원 결제 내역이 없습니다.</p>
+              <p className={`mt-2 text-sm ${theme.textSecondaryClass}`}>아직 후원 결제 내역이 없습니다.</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {meState.orders.slice(0, 8).map((order) => (
                   <li
                     key={order.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-sm"
+                    className={`${theme.surfaceSoftClass} flex flex-wrap items-center justify-between gap-2 rounded-lg border ${theme.borderSoftClass} px-3 py-2 text-sm`}
                   >
                     <div>
-                      <p className="font-semibold">{order.title}</p>
-                      <p className="text-[12px] text-white/65">{formatDateTime(order.createdAt)}</p>
+                      <p className={`font-semibold ${theme.textPrimaryClass}`}>{order.title}</p>
+                      <p className={`text-[12px] ${theme.textMutedClass}`}>{formatDateTime(order.createdAt)}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">{formatAmount(order.currency, order.amount)}</p>
-                      <p className="text-[12px] text-white/65">{order.status}</p>
+                      <p className={`font-semibold ${theme.textPrimaryClass}`}>{formatAmount(order.currency, order.amount)}</p>
+                      <p className={`text-[12px] ${theme.textMutedClass}`}>{order.status}</p>
                     </div>
                   </li>
                 ))}

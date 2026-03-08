@@ -4,6 +4,7 @@ import { resolveSupportedCountry } from '@/lib/map/countryMapRegistry';
 import { resolveCountryCodeFromRequest } from '@/lib/server/country-policy';
 import { getSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import { internalServerError } from '@/lib/server/api-response';
+import { sortTopicsByCountryTieBreak } from '@/lib/vote/topic-ordering';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -59,12 +60,25 @@ function normalizeTimestamp(value: string | null): string | null {
   return Number.isFinite(Date.parse(value)) ? value : null;
 }
 
-function parseTimeMs(value: string | null): number {
-  if (!value) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function buildTopicRowsQuery(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+) {
+  return supabase
+    .from('vote_topics')
+    .select('id, title, status')
+    .order('title', { ascending: true });
+}
+
+function buildFallbackItems(topicRows: VoteTopicRow[], countryCode: string): ScoreboardItem[] {
+  return sortTopicsByCountryTieBreak(topicRows, countryCode).map((topic) => ({
+      topicId: topic.id,
+      title: topic.title,
+      status: topic.status,
+      totalVotes: 0,
+      realtimeVotes: 0,
+      score: 0,
+      lastVoteAt: null,
+    }));
 }
 
 export async function GET(request: Request) {
@@ -97,19 +111,22 @@ export async function GET(request: Request) {
       .filter(Boolean);
 
     if (topicIds.length === 0) {
-      return NextResponse.json({ items: [] as ScoreboardItem[] });
+      let fallbackQuery = buildTopicRowsQuery(supabase);
+      if (status.toUpperCase() !== 'ALL') {
+        fallbackQuery = fallbackQuery.eq('status', status);
+      }
+
+      const { data: fallbackTopicRows, error: fallbackTopicsError } = await fallbackQuery;
+      if (fallbackTopicsError) {
+        return internalServerError('app/api/votes/scoreboard/route.ts', fallbackTopicsError.message);
+      }
+
+      return NextResponse.json({
+        items: buildFallbackItems((fallbackTopicRows ?? []) as VoteTopicRow[], countryCode),
+      });
     }
 
-    let topicRowsQuery = supabase
-      .from('vote_topics')
-      .select('id, title, status')
-      .in('id', topicIds);
-
-    if (countryCode === 'KR') {
-      topicRowsQuery = topicRowsQuery.or('country_code.eq.KR,country_code.ilike.kr,country_code.is.null');
-    } else {
-      topicRowsQuery = topicRowsQuery.eq('country_code', countryCode);
-    }
+    const topicRowsQuery = buildTopicRowsQuery(supabase).in('id', topicIds);
 
     const { data: topicRows, error: topicsError } = await topicRowsQuery;
     if (topicsError) {
@@ -144,20 +161,23 @@ export async function GET(request: Request) {
         } satisfies ScoreboardItem;
       })
       .filter((item): item is ScoreboardItem => Boolean(item))
-      .filter((item) => item.totalVotes >= minTotalVotes)
-      .sort((a, b) => {
-        if (b.totalVotes !== a.totalVotes) {
-          return b.totalVotes - a.totalVotes;
-        }
-        if (b.score !== a.score) {
-          return b.score - a.score;
-        }
-        const lastVoteDiff = parseTimeMs(b.lastVoteAt) - parseTimeMs(a.lastVoteAt);
-        if (lastVoteDiff !== 0) {
-          return lastVoteDiff;
-        }
-        return a.topicId.localeCompare(b.topicId, 'ko');
+      .filter((item) => item.totalVotes >= minTotalVotes);
+
+    if (items.length === 0) {
+      let fallbackQuery = buildTopicRowsQuery(supabase);
+      if (status.toUpperCase() !== 'ALL') {
+        fallbackQuery = fallbackQuery.eq('status', status);
+      }
+
+      const { data: fallbackTopicRows, error: fallbackTopicsError } = await fallbackQuery;
+      if (fallbackTopicsError) {
+        return internalServerError('app/api/votes/scoreboard/route.ts', fallbackTopicsError.message);
+      }
+
+      return NextResponse.json({
+        items: buildFallbackItems((fallbackTopicRows ?? []) as VoteTopicRow[], countryCode),
       });
+    }
 
     return NextResponse.json({ items });
   } catch (error) {
